@@ -152,8 +152,6 @@ Deno.serve(async (req) => {
       const tedResponse = await fetchTedNotices(query, limit);
 
       const rawNotices = getTedResults(tedResponse);
-      console.log("TED response keys:", Object.keys(tedResponse || {}));
-      console.log("TED first notice:", JSON.stringify(rawNotices[0], null, 2));
       const notices = rawNotices;
       summary.fetched = rawNotices.length;
 
@@ -273,8 +271,6 @@ async function fetchTedNotices(query: string, limit: number) {
       checkQuerySyntax: false,
       paginationMode: "ITERATION",
     };
-
-    console.log("FINAL TED REQUEST BODY", JSON.stringify(tedRequestBody));
 
     const response = await fetch(TED_SEARCH_URL, {
       method: "POST",
