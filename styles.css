@@ -2483,12 +2483,23 @@ body.modal-open {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 18px;
+  align-items: stretch;
   margin: 30px 10;
 }
 
 .pricing-card {
+  display: flex;
+  flex-direction: column;
   padding: 26px;
   position: relative;
+}
+
+.pricing-card .check-list {
+  margin-bottom: 24px;
+}
+
+.pricing-cta {
+  margin-top: auto;
 }
 
 .pricing-card.highlighted {
@@ -2987,6 +2998,10 @@ body.modal-open {
 
   .feature-grid, .stats-grid, .pricing-grid {
     grid-template-columns: 1fr;
+  }
+
+  .pricing-card.highlighted {
+    transform: none;
   }
 
   .filters {

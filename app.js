@@ -5563,7 +5563,7 @@ function pricingCard(name, price, items, highlighted = false) {
       <ul class="check-list">
         ${items.map((i) => `<li>${i}</li>`).join("")}
       </ul>
-      <button class="btn ${highlighted ? "btn-primary" : "btn-secondary"}" data-action="go" data-href="/onboarding">Create demo profile</button>
+      <button class="btn pricing-cta ${highlighted ? "btn-primary" : "btn-secondary"}" data-action="go" data-href="/onboarding">Create demo profile</button>
     </div>
   `;
 }
