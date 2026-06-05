@@ -3296,7 +3296,7 @@ function renderLegalPage({ eyebrow, title, intro, sections }) {
         <p class="eyebrow">${escapeHtml(eyebrow)}</p>
         <h1>${escapeHtml(title)}</h1>
         <p>${escapeHtml(intro)}</p>
-        <span>Last updated: [LAST UPDATED DATE]</span>
+        <span>Last updated: June 4, 2026</span>
       </div>
       <div class="legal-layout">
         ${sections.map((section) => `
