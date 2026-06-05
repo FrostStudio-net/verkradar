@@ -1894,6 +1894,7 @@ button:disabled,
   padding: 44px;
   text-align: center;
   color: var(--muted);
+  margin-top: 58px;
 }
 
 .dashboard-empty-state {
