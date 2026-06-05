@@ -35,6 +35,8 @@ const defaultProfile = {
   includeLowConfidence: false
 };
 
+const PROFILE_LOAD_TIMEOUT_MS = 12000;
+
 function getEmptyProfile() {
   return {
     companyName: "",
@@ -84,6 +86,9 @@ let state = {
   profileSaveError: null,
   profile: null,
   profileDraft: null,
+  profileDraftDirty: false,
+  profileLoading: false,
+  profileLoadError: null,
   companyId: null,
   opportunities: [],
   storedMatches: [],
@@ -104,6 +109,9 @@ let state = {
   },
   importStatus: null,
   importLoading: false,
+  connectorImportStatus: null,
+  connectorImportLoading: false,
+  connectorTestingSourceId: null,
   importedTedOpportunities: [],
   importedTedOpportunitiesLoading: false,
   importedTedOpportunitiesLoaded: false,
@@ -126,7 +134,8 @@ let state = {
     country: "all",
     search: "",
     tedOnly: false,
-    manualOnly: false
+    manualOnly: false,
+    showDemoTest: true
   },
   matchStatus: null,
   matchingLoading: false,
@@ -161,6 +170,7 @@ function clearLocalProfileState() {
   localStorage.removeItem("verkradar_ignored_opportunities");
   state.profile = null;
   state.profileDraft = null;
+  state.profileDraftDirty = false;
   state.currentUser = null;
   state.companyId = null;
   state.storedMatches = [];
@@ -193,8 +203,16 @@ function clearLocalProfileState() {
   state.lastMatchedAt = null;
 }
 
+let suppressNextHashChange = false;
+
 window.addEventListener("hashchange", () => {
   const nextRoute = location.hash.replace("#", "") || "/";
+
+  if (suppressNextHashChange && nextRoute === state.route) {
+    suppressNextHashChange = false;
+    return;
+  }
+  suppressNextHashChange = false;
 
   if (["/login", "/signup"].includes(nextRoute) && nextRoute !== state.route) {
     state.authMessage = null;
@@ -293,6 +311,7 @@ document.addEventListener("click", (event) => {
     if (action.dataset.profileField) {
       initializeProfileDraft();
       state.profileDraft[action.dataset.profileField] = value;
+      markProfileDraftDirty();
     } else {
       state.filters[key] = value;
     }
@@ -326,6 +345,7 @@ document.addEventListener("click", (event) => {
   }
 
   if (name === "go") {
+    event.preventDefault();
     state.isMobileMenuOpen = false;
     state.profileMenuOpen = false;
     document.body.classList.remove("mobile-menu-active");
@@ -347,10 +367,13 @@ document.addEventListener("click", (event) => {
     render();
   }
   if (name === "import-ted") importTedNotices();
+  if (name === "import-source-connectors") importSourceConnectors();
+  if (name === "test-source-connector") importSourceConnectors(id);
   if (name === "refresh-admin-status") refreshAdminOperationsData();
   if (name === "hide-imported-opportunity") updateOpportunityStatus(id, "hidden");
   if (name === "mark-imported-relevant") updateOpportunityStatus(id, "open");
   if (name === "run-matching") runMatchingForCurrentCompany();
+  if (name === "retry-settings-profile") retrySettingsProfileLoad();
   if (name === "show-all-matches") {
     state.filters.label = "all";
     render();
@@ -361,6 +384,7 @@ document.addEventListener("click", (event) => {
     if (!state.profileDraft.locations.includes("All Iceland")) {
       state.profileDraft.locations = [...state.profileDraft.locations, "All Iceland"];
     }
+    markProfileDraftDirty();
     navigate("/settings");
   }
   if (name === "delete-opportunity") deleteOpportunity(id);
@@ -455,6 +479,7 @@ document.addEventListener("keydown", (event) => {
     if (profileField) {
       initializeProfileDraft();
       state.profileDraft[profileField] = option.value;
+      markProfileDraftDirty();
     } else {
       state.filters[activeKey] = option.value;
     }
@@ -485,6 +510,7 @@ document.addEventListener("input", (event) => {
     } else {
       state.profileDraft[key] = field.value;
     }
+    markProfileDraftDirty();
     return;
   }
 
@@ -522,6 +548,7 @@ document.addEventListener("change", (event) => {
     initializeProfileDraft();
     state.profileDraft.locations = Array.from(document.querySelectorAll("[data-profile-location]:checked"))
       .map((input) => input.value);
+    markProfileDraftDirty();
     return;
   }
 
@@ -530,6 +557,7 @@ document.addEventListener("change", (event) => {
   initializeProfileDraft();
   const key = field.dataset.profileField;
   state.profileDraft[key] = field.type === "checkbox" ? field.checked : field.value;
+  markProfileDraftDirty();
 });
 
 document.addEventListener("submit", async (event) => {
@@ -572,11 +600,14 @@ document.addEventListener("submit", async (event) => {
 
     const shouldRedirect = state.route !== "/settings";
     try {
+      console.debug("[settings] save start", { dirty: state.profileDraftDirty });
       await saveCompanyProfile(profile);
+      await loadProfileFromSupabase({ overwriteDraft: true });
+      if (state.profileLoadError) {
+        throw new Error(`Profile saved, but the saved profile could not be reloaded. ${state.profileLoadError}`);
+      }
       state.profileSaveMessage = "Refreshing matches...";
       state.profileSaveError = null;
-      state.profile = profile;
-      state.profileDraft = { ...profile };
       render();
       const matchedCount = await runMatchingForCurrentCompany();
       if (state.matchStatus?.type === "error") {
@@ -597,6 +628,7 @@ document.addEventListener("submit", async (event) => {
       if (shouldRedirect) {
         setTimeout(() => navigate("/dashboard"), 800);
       }
+      console.debug("[settings] save complete", { companyId: state.companyId, dirty: state.profileDraftDirty });
     } catch (error) {
       console.error("Failed to save company profile:", error);
       state.profileSaveError = formatSupabaseError(error);
@@ -608,6 +640,20 @@ document.addEventListener("submit", async (event) => {
     }
   }
 });
+
+window.addEventListener("focus", handleAppFocusReturn);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") handleAppFocusReturn();
+});
+
+function handleAppFocusReturn() {
+  if (state.route !== "/settings") return;
+  if (state.profileDraftDirty) {
+    state.profileLoading = false;
+    state.profileLoaded = true;
+    render();
+  }
+}
 
 function openMobileMenu() {
   updateMobileMenuOffset();
@@ -672,12 +718,17 @@ function updateMobileMenuOffset() {
 }
 
 function navigate(route) {
+  route = route || "/";
   const authRoutes = ["/login", "/signup"];
 
   if (authRoutes.includes(route) && route !== state.route) {
     state.authMessage = null;
     state.authSubmitting = false;
   }
+
+  state.isMobileMenuOpen = false;
+  state.profileMenuOpen = false;
+  document.body.classList.remove("mobile-menu-active");
 
   if (state.route === route) {
     render();
@@ -686,7 +737,12 @@ function navigate(route) {
     return;
   }
 
+  state.route = route;
+  suppressNextHashChange = true;
   location.hash = route;
+  render();
+  scrollToPageTop();
+  afterRouteRender();
 }
 
 function getPostAuthRoute() {
@@ -757,7 +813,7 @@ async function loadOpportunities() {
 
     const { data, error } = await supabaseClient
       .from("opportunities")
-      .select("*, sources(name)")
+      .select("*, sources(name, source_type)")
       .eq("status", "open")
       .order("deadline", { ascending: true });
 
@@ -768,7 +824,7 @@ async function loadOpportunities() {
       state.storedMatches = [];
       state.opportunityLoadError = "Using demo data. Supabase has no opportunities yet.";
     } else {
-      state.opportunities = data.map(mapSupabaseOpportunity).filter(isDashboardVisibleOpportunity);
+      state.opportunities = data.map(mapSupabaseOpportunity);
       state.opportunityLoadError = null;
       if (state.companyId) await loadStoredMatchesForCurrentCompany();
     }
@@ -891,6 +947,19 @@ async function loadSourceCoverageForAdmin() {
           inserted_count,
           updated_count,
           active_opportunities_count
+        ),
+        source_connectors (
+          connector_type,
+          endpoint_url,
+          enabled,
+          include_keywords,
+          exclude_keywords,
+          require_any_keyword,
+          status,
+          last_checked_at,
+          last_success_at,
+          last_error,
+          notes
         )
       `)
       .order("name", { ascending: true });
@@ -898,7 +967,8 @@ async function loadSourceCoverageForAdmin() {
     if (error) throw error;
     state.sourceCoverage = (data || []).map((source) => ({
       ...source,
-      source_status: Array.isArray(source.source_status) ? source.source_status[0] : source.source_status
+      source_status: Array.isArray(source.source_status) ? source.source_status[0] : source.source_status,
+      source_connectors: Array.isArray(source.source_connectors) ? source.source_connectors[0] : source.source_connectors
     }));
     state.sourceCoverageLoaded = true;
   } catch (error) {
@@ -925,6 +995,13 @@ async function refreshAdminOperationsData() {
 }
 
 function mapSupabaseOpportunity(row) {
+  const rawPayload = row.raw_payload && typeof row.raw_payload === "object" ? row.raw_payload : {};
+  const qualityStatus = normalizeOpportunityQualityStatus(rawPayload.quality_status || rawPayload.qualityStatus, {
+    source: row.sources?.name || "",
+    sourceType: row.sources?.source_type || "",
+    title: row.title || "",
+    description: row.description || ""
+  });
   return {
     id: row.id,
     externalId: row.external_id || "",
@@ -932,6 +1009,7 @@ function mapSupabaseOpportunity(row) {
     title: row.title,
     buyer: row.buyer || "Unknown buyer",
     source: row.sources?.name || "Supabase",
+    sourceType: row.sources?.source_type || "",
     category: row.category || "Other",
     type: row.type || "tender",
     description: row.description || "",
@@ -946,7 +1024,9 @@ function mapSupabaseOpportunity(row) {
     requirements: Array.isArray(row.requirements) ? row.requirements : [],
     keywords: Array.isArray(row.keywords) ? row.keywords : [],
     difficulty: row.difficulty || "medium",
-    status: row.status || "open"
+    status: row.status || "open",
+    qualityStatus,
+    rawPayload
   };
 }
 
@@ -966,9 +1046,114 @@ function isDashboardVisibleOpportunity(opp) {
   if (!opp || opp.status !== "open") return false;
   if (!opp.url || opp.url === "#") return false;
   if (daysUntilDeadline(opp.deadline) < 0) return false;
+  if (isDemoTestOpportunity(opp)) return false;
   if (!isTedOpportunity(opp)) return true;
   const country = getOpportunityCountryCode(opp);
   return ["IS", "NO", "DK", "SE", "FI"].includes(country);
+}
+
+function isDemoTestOpportunity(opp) {
+  const source = normalizeLocationText(opp?.source || "");
+  const title = normalizeLocationText(opp?.title || "");
+  const externalId = normalizeLocationText(opp?.externalId || "");
+  const sourceType = normalizeLocationText(opp?.sourceType || "");
+  const haystack = `${source} ${title} ${externalId} ${sourceType}`;
+
+  if (source === "manual test") return true;
+  if (source.includes("manual test")) return true;
+  if (/\b(demo|test|sample|mock|fake)\b/.test(haystack)) return true;
+  if (title.includes("manual test")) return true;
+  if (title.includes("municipal websites example")) return true;
+  if (externalId.includes("demo") || externalId.includes("test")) return true;
+  return false;
+}
+
+function normalizeOpportunityQualityStatus(status, opp = {}) {
+  const value = String(status || "").toLowerCase();
+  if (value === "confirmed_tender" || value === "early_signal" || value === "needs_review") return value;
+  if (value === "likely_opportunity" || value === "verified") return "confirmed_tender";
+
+  const text = getOpportunityQualityText(opp);
+  if (containsConfirmedTenderIntent(text)) return "confirmed_tender";
+  if (containsEarlySignalIntent(text)) return "early_signal";
+  if (containsObviousNewsIntent(text)) return "needs_review";
+  if (isTedOpportunity(opp)) return "confirmed_tender";
+  return "confirmed_tender";
+}
+
+function getOpportunityQualityText(opp) {
+  return normalizeLocationText([
+    opp?.title,
+    opp?.description,
+    opp?.category,
+    opp?.source,
+    ...(Array.isArray(opp?.keywords) ? opp.keywords : [])
+  ].filter(Boolean).join(" "));
+}
+
+function containsAnyNormalizedPhrase(text, phrases) {
+  const normalized = normalizeLocationText(text);
+  return phrases.some((phrase) => normalized.includes(normalizeLocationText(phrase)));
+}
+
+function containsConfirmedTenderIntent(text) {
+  return containsAnyNormalizedPhrase(text, [
+    "útboð",
+    "utbod",
+    "senn í útboð",
+    "senn i utbod",
+    "tilboð",
+    "tilboðum",
+    "tilbod",
+    "tilbodum",
+    "óskað eftir tilboðum",
+    "oskad eftir tilbodum",
+    "verðfyrirspurn",
+    "verdfyrirspurn",
+    "innkaup",
+    "rammasamningur",
+    "útboðsauglýsing"
+  ]);
+}
+
+function containsEarlySignalIntent(text) {
+  return containsAnyNormalizedPhrase(text, [
+    "áætlaðar framkvæmdir",
+    "aaetladar framkvaemdir",
+    "fyrirhugaðar framkvæmdir",
+    "fyrirhugadar framkvaemdir",
+    "framkvæmdir hefjast",
+    "framkvaemdir hefjast",
+    "malbikunarframkvæmdir",
+    "malbikunarframkvaemdir",
+    "vegaframkvæmdir",
+    "vegaframkvaemdir",
+    "framkvæmdir við",
+    "framkvaemdir vid",
+    "senn"
+  ]);
+}
+
+function containsObviousNewsIntent(text) {
+  return containsAnyNormalizedPhrase(text, [
+    "lokun",
+    "lokanir",
+    "umferð",
+    "umferd",
+    "dagskrá",
+    "dagskra",
+    "skráning",
+    "skraning",
+    "myndband",
+    "ráðstefna",
+    "radstefna",
+    "kynnt",
+    "styrkur",
+    "frétt",
+    "frett",
+    "viðburður",
+    "vidburdur"
+  ]);
 }
 
 function getOpportunityCountryCode(opp) {
@@ -1038,6 +1223,13 @@ function getTedImportEndpoint() {
   return null;
 }
 
+function getSourceConnectorImportEndpoint() {
+  if (window.VERKRADAR_SOURCE_CONNECTOR_IMPORT_URL) return window.VERKRADAR_SOURCE_CONNECTOR_IMPORT_URL;
+  if (window.VERKRADAR_SUPABASE_URL) return `${window.VERKRADAR_SUPABASE_URL}/functions/v1/import-source-connectors`;
+  if (SUPABASE_URL) return `${SUPABASE_URL}/functions/v1/import-source-connectors`;
+  return null;
+}
+
 async function importTedNotices() {
   if (!state.isAdmin) {
     state.importStatus = { errors: ["You do not have access to import TED notices."] };
@@ -1086,6 +1278,49 @@ async function importTedNotices() {
   }
 }
 
+async function importSourceConnectors(sourceId = "") {
+  if (!state.isAdmin) {
+    state.connectorImportStatus = { errors: ["You do not have access to run source imports."] };
+    render();
+    return;
+  }
+
+  const endpoint = getSourceConnectorImportEndpoint();
+  if (!endpoint) {
+    state.connectorImportStatus = {
+      errors: ["Source connector importer is not configured. Set window.VERKRADAR_SOURCE_CONNECTOR_IMPORT_URL or window.VERKRADAR_SUPABASE_URL for this environment."],
+    };
+    render();
+    return;
+  }
+
+  state.connectorImportLoading = !sourceId;
+  state.connectorTestingSourceId = sourceId || null;
+  state.connectorImportStatus = null;
+  render();
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: await getTedImportHeaders(),
+      body: JSON.stringify({ limit: 50, sourceId: sourceId || undefined }),
+    });
+    const payload = await response.json();
+    state.connectorImportStatus = response.ok ? payload : { ...payload, errors: payload.errors || [`Source import failed with status ${response.status}`] };
+    if (response.ok) {
+      await loadOpportunities();
+      await refreshAdminOperationsData();
+      showToast(sourceId ? "Source test completed" : "Automatic source imports completed", "success");
+    }
+  } catch (error) {
+    state.connectorImportStatus = { errors: [error instanceof Error ? error.message : String(error)] };
+  } finally {
+    state.connectorImportLoading = false;
+    state.connectorTestingSourceId = null;
+    render();
+  }
+}
+
 async function loadNewestImportedTedOpportunities() {
   if (!supabaseClient) {
     state.importedTedOpportunities = [];
@@ -1100,7 +1335,7 @@ async function loadNewestImportedTedOpportunities() {
     const { data: sources, error: sourceError } = await supabaseClient
       .from("sources")
       .select("id, name")
-      .in("name", ["EU TED", "Tenders Electronic Daily"]);
+      .in("name", ["TED Iceland/Nordic", "EU TED", "Tenders Electronic Daily"]);
 
     if (sourceError) throw sourceError;
 
@@ -1112,7 +1347,7 @@ async function loadNewestImportedTedOpportunities() {
 
     const { data, error } = await supabaseClient
       .from("opportunities")
-      .select("*, sources(name)")
+      .select("*, sources(name, source_type)")
       .in("source_id", sourceIds)
       .order("created_at", { ascending: false })
       .limit(10);
@@ -1172,9 +1407,10 @@ async function signUp(email, password) {
     state.user = data.session.user;
     state.currentUser = state.user;
     state.profileDraft = null;
+    state.profileDraftDirty = false;
     await checkAdminAccess(state.user);
     state.authMessage = { type: "success", text: "Account created." };
-    await loadCompanyProfile();
+    await loadProfileFromSupabase({ overwriteDraft: true });
     clearAuthForm();
     navigate(getPostAuthRoute());
   } catch (error) {
@@ -1202,8 +1438,9 @@ async function signIn(email, password) {
     state.user = data.user || await getCurrentUser();
     state.currentUser = state.user;
     state.profileDraft = null;
+    state.profileDraftDirty = false;
     await checkAdminAccess(state.user);
-    await loadCompanyProfile();
+    await loadProfileFromSupabase({ overwriteDraft: true });
     clearAuthForm();
     navigate(getPostAuthRoute());
   } catch (error) {
@@ -1313,10 +1550,54 @@ async function checkAdminStatus() {
   state.adminLoaded = true;
 }
 
-async function loadProfileFromSupabase() {
-  state.profileLoaded = false;
-  await loadCompanyProfile();
-  state.profileLoaded = true;
+async function loadProfileFromSupabase(options = {}) {
+  const { overwriteDraft = false, showGlobalLoading = false } = options;
+  const shouldShowGlobalLoading = showGlobalLoading || (!state.profile && !state.profileDraftDirty);
+  if (shouldShowGlobalLoading) state.profileLoaded = false;
+  state.profileLoading = true;
+  state.profileLoadError = null;
+
+  try {
+    console.debug("[settings] profile load start", { overwriteDraft, route: state.route, dirty: state.profileDraftDirty });
+    await withTimeout(
+      loadCompanyProfile({ overwriteDraft }),
+      PROFILE_LOAD_TIMEOUT_MS,
+      "Profile loading took too long. Please retry."
+    );
+  } catch (error) {
+    console.error("Failed to load profile from Supabase:", error);
+    state.profileLoadError = formatSupabaseError(error);
+  } finally {
+    console.debug("[settings] profile load end", { route: state.route, dirty: state.profileDraftDirty, hasDraft: Boolean(state.profileDraft), error: state.profileLoadError });
+    state.profileLoading = false;
+    state.profileLoaded = true;
+  }
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+}
+
+async function retrySettingsProfileLoad() {
+  if (state.isSavingProfile) return;
+  state.profileLoadError = null;
+  state.profileLoading = true;
+  render();
+  try {
+    await loadProfileFromSupabase({ overwriteDraft: true });
+  } catch (error) {
+    console.error("Settings profile retry failed:", error);
+    state.profileLoadError = formatSupabaseError(error);
+  } finally {
+    state.profileLoading = false;
+    state.profileLoaded = true;
+    render();
+    afterRouteRender();
+  }
 }
 
 function registerAuthListener() {
@@ -1330,8 +1611,19 @@ function registerAuthListener() {
     state.currentUser = state.user;
 
     if (state.user) {
-      await checkAdminStatus();
-      await loadProfileFromSupabase();
+      try {
+        await checkAdminStatus();
+        if (!(state.route === "/settings" && state.profileDraftDirty)) {
+          await loadProfileFromSupabase();
+        } else {
+          state.profileLoaded = true;
+        }
+      } catch (error) {
+        console.error("Auth profile refresh failed:", error);
+        state.profileLoadError = formatSupabaseError(error);
+        state.adminLoaded = true;
+        state.profileLoaded = true;
+      }
       if (redirectAuthenticatedPublicRoute()) return;
       render();
       afterRouteRender();
@@ -1341,6 +1633,9 @@ function registerAuthListener() {
     state.isAdmin = false;
     state.profile = null;
     state.profileDraft = null;
+    state.profileDraftDirty = false;
+    state.profileLoading = false;
+    state.profileLoadError = null;
     state.companyId = null;
     state.storedMatches = [];
     state.reports = [];
@@ -1371,10 +1666,13 @@ async function bootApp() {
 
     if (state.currentUser) {
       await checkAdminStatus();
-      await loadProfileFromSupabase();
+      await loadProfileFromSupabase({ overwriteDraft: true, showGlobalLoading: true });
     } else {
       state.profile = null;
       state.profileDraft = null;
+      state.profileDraftDirty = false;
+      state.profileLoading = false;
+      state.profileLoadError = null;
       state.companyId = null;
       state.isAdmin = false;
       state.adminLoaded = true;
@@ -1396,9 +1694,11 @@ async function bootApp() {
   }
 }
 
-async function loadCompanyProfile() {
+async function loadCompanyProfile(options = {}) {
+  const { overwriteDraft = false } = options;
   if (!supabaseClient || !state.user) {
     state.profile = null;
+    if (overwriteDraft || !state.profileDraftDirty) state.profileDraft = null;
     render();
     return;
   }
@@ -1419,9 +1719,23 @@ async function loadCompanyProfile() {
       state.reportsLoadError = null;
       state.selectedReportId = null;
       state.profile = null;
+      if (overwriteDraft || !state.profileDraftDirty) state.profileDraft = null;
+      state.profileLoadError = null;
       render();
       afterRouteRender();
       return;
+    }
+
+    if (state.profileDraftDirty && state.companyId && state.companyId !== company.id && !overwriteDraft) {
+      console.debug("[settings] active company switch", { from: state.companyId, to: company.id, dirty: true });
+      const shouldSwitch = window.confirm("You have unsaved profile changes. Switch company profile and discard those edits?");
+      if (!shouldSwitch) {
+        state.profileLoadError = "Unsaved changes were kept. Save or reload before switching company profiles.";
+        render();
+        afterRouteRender();
+        return;
+      }
+      state.profileDraftDirty = false;
     }
 
     const [servicesResult, locationsResult, keywordsResult] = await Promise.all([
@@ -1441,26 +1755,34 @@ async function loadCompanyProfile() {
       state.selectedReportId = null;
     }
     state.companyId = company.id;
-    state.profile = mapSupabaseCompanyProfile(
+    const loadedProfile = mapSupabaseCompanyProfile(
       company,
       servicesResult.data || [],
       locationsResult.data || [],
       keywordsResult.data || []
     );
-    state.profileDraft = null;
+    state.profile = loadedProfile;
+    if (overwriteDraft || !state.profileDraftDirty) {
+      replaceProfileDraftFromProfile(loadedProfile);
+    }
+    state.profileLoadError = null;
     saveProfile(state.profile);
     await loadStoredMatchesForCurrentCompany();
     render();
     afterRouteRender();
   } catch (error) {
     console.error("Failed to load Supabase company profile:", error);
-    state.companyId = null;
-    state.storedMatches = [];
-    state.reports = [];
-    state.reportsLoaded = false;
-    state.reportsLoadError = null;
-    state.selectedReportId = null;
-    state.profile = null;
+    state.profileLoadError = formatSupabaseError(error);
+    if (!state.profileDraftDirty) {
+      state.companyId = null;
+      state.storedMatches = [];
+      state.reports = [];
+      state.reportsLoaded = false;
+      state.reportsLoadError = null;
+      state.selectedReportId = null;
+      state.profile = null;
+    }
+    if (!state.profileDraftDirty) state.profileDraft = null;
     render();
     afterRouteRender();
   }
@@ -1470,6 +1792,30 @@ async function saveCompanyProfile(profile) {
   if (!supabaseClient) {
     throw new Error("Supabase client is not configured.");
   }
+  const cleanProfile = {
+    ...profile,
+    companyName: String(profile.companyName || "").trim(),
+    contactEmail: String(profile.contactEmail || "").trim(),
+    website: String(profile.website || "").trim(),
+    industry: String(profile.industry || "").trim(),
+    services: cleanStringArray(profile.services),
+    locations: cleanStringArray(profile.locations),
+    includeKeywords: cleanStringArray(profile.includeKeywords),
+    excludeKeywords: cleanStringArray(profile.excludeKeywords),
+    baseLocation: String(profile.baseLocation || "").trim(),
+    serviceAreas: cleanStringArray(profile.serviceAreas),
+    willingToTravel: Boolean(profile.willingToTravel),
+    nationalProjects: Boolean(profile.nationalProjects),
+    remoteProjects: Boolean(profile.remoteProjects),
+    minimumProjectValueForTravel: nullableNumber(profile.minimumProjectValueForTravel),
+    minProjectValue: nullableNumber(profile.minProjectValue),
+    maxProjectValue: nullableNumber(profile.maxProjectValue),
+    allowUnknownValue: Boolean(profile.allowUnknownValue),
+    reportFrequency: profile.reportFrequency || "weekly",
+    reportDay: profile.reportDay || "monday",
+    deadlineReminders: Boolean(profile.deadlineReminders),
+    includeLowConfidence: Boolean(profile.includeLowConfidence)
+  };
   const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
   if (userError) throw userError;
   if (!user) {
@@ -1481,23 +1827,23 @@ async function saveCompanyProfile(profile) {
     .from("companies")
     .upsert({
       owner_id: user.id,
-      company_name: profile.companyName,
-      contact_email: profile.contactEmail || user.email,
-      website: profile.website || null,
-      industry: profile.industry,
-      base_location: profile.baseLocation || null,
-      service_areas: Array.isArray(profile.serviceAreas) ? profile.serviceAreas : [],
-      willing_to_travel: Boolean(profile.willingToTravel),
-      national_projects: Boolean(profile.nationalProjects),
-      remote_projects: Boolean(profile.remoteProjects),
-      minimum_project_value_for_travel: profile.minimumProjectValueForTravel ? Number(profile.minimumProjectValueForTravel) : null,
-      min_project_value: profile.minProjectValue ? Number(profile.minProjectValue) : null,
-      max_project_value: profile.maxProjectValue ? Number(profile.maxProjectValue) : null,
-      allow_unknown_value: Boolean(profile.allowUnknownValue),
-      report_frequency: profile.reportFrequency || "weekly",
-      report_day: profile.reportDay || "monday",
-      deadline_reminders: Boolean(profile.deadlineReminders),
-      include_low_confidence: Boolean(profile.includeLowConfidence)
+      company_name: cleanProfile.companyName,
+      contact_email: cleanProfile.contactEmail || user.email,
+      website: cleanProfile.website || null,
+      industry: cleanProfile.industry,
+      base_location: cleanProfile.baseLocation || null,
+      service_areas: cleanProfile.serviceAreas,
+      willing_to_travel: cleanProfile.willingToTravel,
+      national_projects: cleanProfile.nationalProjects,
+      remote_projects: cleanProfile.remoteProjects,
+      minimum_project_value_for_travel: cleanProfile.minimumProjectValueForTravel,
+      min_project_value: cleanProfile.minProjectValue,
+      max_project_value: cleanProfile.maxProjectValue,
+      allow_unknown_value: cleanProfile.allowUnknownValue,
+      report_frequency: cleanProfile.reportFrequency,
+      report_day: cleanProfile.reportDay,
+      deadline_reminders: cleanProfile.deadlineReminders,
+      include_low_confidence: cleanProfile.includeLowConfidence
     }, { onConflict: "owner_id" })
     .select()
     .single();
@@ -1522,25 +1868,23 @@ async function saveCompanyProfile(profile) {
   const deleteError = deleteResults.find((result) => result.error)?.error;
   if (deleteError) throw deleteError;
 
-  const serviceRows = (profile.services || [])
-    .filter(Boolean)
+  const serviceRows = cleanProfile.services
     .map((service) => ({
       company_id: company.id,
       service
     }));
-  const locationRows = (profile.locations || [])
-    .filter(Boolean)
+  const locationRows = cleanProfile.locations
     .map((location) => ({
       company_id: company.id,
       location
     }));
   const keywordRows = [
-    ...(profile.includeKeywords || []).filter(Boolean).map((keyword) => ({
+    ...cleanProfile.includeKeywords.map((keyword) => ({
       company_id: company.id,
       keyword,
       type: "include"
     })),
-    ...(profile.excludeKeywords || []).filter(Boolean).map((keyword) => ({
+    ...cleanProfile.excludeKeywords.map((keyword) => ({
       company_id: company.id,
       keyword,
       type: "exclude"
@@ -1560,15 +1904,8 @@ async function saveCompanyProfile(profile) {
     if (error) throw error;
   }
 
-  state.profile = profile;
-  saveProfile(profile);
-  state.profileDraft = {
-    ...profile,
-    services: [...(profile.services || [])],
-    includeKeywords: [...(profile.includeKeywords || [])],
-    excludeKeywords: [...(profile.excludeKeywords || [])],
-    locations: [...(profile.locations || [])]
-  };
+  state.profile = cleanProfile;
+  saveProfile(cleanProfile);
 }
 
 function mapSupabaseCompanyProfile(company, services, locations, keywords) {
@@ -1577,12 +1914,12 @@ function mapSupabaseCompanyProfile(company, services, locations, keywords) {
     contactEmail: company.contact_email || "",
     website: company.website || "",
     industry: company.industry || "",
-    services: services.map((row) => row.service).filter(Boolean),
-    includeKeywords: keywords.filter((row) => row.type === "include").map((row) => row.keyword).filter(Boolean),
-    excludeKeywords: keywords.filter((row) => row.type === "exclude").map((row) => row.keyword).filter(Boolean),
-    locations: locations.map((row) => row.location).filter(Boolean),
+    services: cleanStringArray(services.map((row) => row.service)),
+    includeKeywords: cleanStringArray(keywords.filter((row) => row.type === "include").map((row) => row.keyword)),
+    excludeKeywords: cleanStringArray(keywords.filter((row) => row.type === "exclude").map((row) => row.keyword)),
+    locations: cleanStringArray(locations.map((row) => row.location)),
     baseLocation: company.base_location || "",
-    serviceAreas: Array.isArray(company.service_areas) ? company.service_areas : [],
+    serviceAreas: cleanStringArray(company.service_areas),
     willingToTravel: Boolean(company.willing_to_travel),
     nationalProjects: Boolean(company.national_projects),
     remoteProjects: Boolean(company.remote_projects),
@@ -1606,7 +1943,7 @@ async function loadStoredMatchesForCurrentCompany() {
   try {
     const { data, error } = await supabaseClient
       .from("opportunity_matches")
-      .select("*, opportunities(*, sources(name))")
+      .select("*, opportunities(*, sources(name, source_type))")
       .eq("company_id", state.companyId)
       .order("match_score", { ascending: false });
 
@@ -1683,7 +2020,7 @@ async function saveCurrentReport() {
     return;
   }
 
-  const matches = getMatchedOpportunities().filter((opp) => opp.matchScore >= 50).slice(0, 5);
+  const matches = getReportMatches();
   if (!matches.length) {
     state.reportMessage = { type: "error", text: "No useful matches above the report threshold yet." };
     render();
@@ -1764,7 +2101,7 @@ async function runMatchingForCurrentCompany() {
       supabaseClient.from("company_services").select("service").eq("company_id", company.id),
       supabaseClient.from("company_locations").select("location").eq("company_id", company.id),
       supabaseClient.from("company_keywords").select("keyword, type").eq("company_id", company.id),
-      supabaseClient.from("opportunities").select("*, sources(name)").eq("status", "open")
+      supabaseClient.from("opportunities").select("*, sources(name, source_type)").eq("status", "open")
     ]);
 
     if (servicesResult.error) throw servicesResult.error;
@@ -1778,6 +2115,7 @@ async function runMatchingForCurrentCompany() {
       locationsResult.data || [],
       keywordsResult.data || []
     );
+    const wasDraftDirty = state.profileDraftDirty;
     const matched = (opportunitiesResult.data || [])
       .map(mapSupabaseOpportunity)
       .filter(isDashboardVisibleOpportunity)
@@ -1810,8 +2148,11 @@ async function runMatchingForCurrentCompany() {
 
     state.profile = profile;
     saveProfile(profile);
-    const plural = rows.length === 1 ? "opportunity" : "opportunities";
-    state.matchStatus = { type: "success", text: `Matching complete — ${rows.length} relevant ${plural} found.` };
+    if (!wasDraftDirty) {
+      replaceProfileDraftFromProfile(profile);
+    }
+    const plural = rows.length === 1 ? "match" : "matches";
+    state.matchStatus = { type: "success", text: `Matching complete — ${rows.length} stored ${plural} found.` };
     await loadOpportunities();
     await loadStoredMatchesForCurrentCompany();
     return rows.length;
@@ -2117,35 +2458,50 @@ function splitInput(value) {
     .filter(Boolean);
 }
 
+function cleanStringArray(value) {
+  const values = Array.isArray(value) ? value : splitInput(value);
+  return Array.from(new Set(
+    values
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+  ));
+}
+
+function arrayFieldText(value) {
+  return cleanStringArray(value).join(", ");
+}
+
+function nullableNumber(value) {
+  if (value == null || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 const PROFILE_SUGGESTIONS = {
   services: {
     Electrical: [
-      "Electrical maintenance",
-      "Fire alarm systems",
-      "EV charger installation",
-      "Security camera installation",
-      "Data cabling",
-      "Lighting installation",
-      "Emergency lighting",
-      "Panel upgrades",
-      "Building automation",
-      "Inspection and testing",
-      "Access control systems",
-      "Power distribution"
+      "raflagnir",
+      "rafvirki",
+      "brunakerfi",
+      "öryggiskerfi",
+      "lýsing",
+      "viðhald",
+      "þjónusta",
+      "hleðslustöðvar",
+      "töflusmíði",
+      "rafmagnseftirlit"
     ],
     "IT / Web / Software": [
-      "Website redesign",
-      "Web development",
-      "CMS setup",
-      "Accessibility",
-      "Content migration",
-      "Hosting",
-      "Maintenance",
-      "Integrations",
-      "Booking systems",
-      "Dashboard development",
-      "Automation",
-      "API integrations"
+      "vefsíðugerð",
+      "vefhönnun",
+      "hugbúnaðarþróun",
+      "kerfisþróun",
+      "vefverslun",
+      "aðgengi",
+      "CMS",
+      "gagnagrunnar",
+      "viðhald",
+      "ráðgjöf"
     ],
     Cleaning: [
       "Office cleaning",
@@ -2167,15 +2523,17 @@ const PROFILE_SUGGESTIONS = {
       "Framework transport services"
     ],
     Construction: [
-      "Renovation",
-      "Building maintenance",
-      "Carpentry",
-      "Concrete work",
-      "Painting",
-      "Roofing",
-      "Flooring",
-      "Project management",
-      "Public building repairs"
+      "jarðvinna",
+      "gatnagerð",
+      "vegagerð",
+      "malbikun",
+      "brúargerð",
+      "lagnavinna",
+      "framkvæmdir",
+      "viðhald",
+      "steypa",
+      "húsbyggingar",
+      "þakvinna"
     ]
   },
   includeKeywords: {
@@ -2211,6 +2569,7 @@ function toggleProfileSuggestion(field, value) {
   state.profileDraft[field] = exists
     ? currentValues.filter((item) => normalizeSuggestionValue(item) !== normalized)
     : [...currentValues, value];
+  markProfileDraftDirty();
   render();
 }
 
@@ -2245,47 +2604,67 @@ function initializeProfileDraft() {
   if (state.profileDraft) return;
 
   if (state.profile) {
-    state.profileDraft = {
-      ...state.profile,
-      services: [...(state.profile.services || [])],
-      includeKeywords: [...(state.profile.includeKeywords || [])],
-      excludeKeywords: [...(state.profile.excludeKeywords || [])],
-      locations: [...(state.profile.locations || [])],
-      serviceAreas: [...(state.profile.serviceAreas || [])]
-    };
+    state.profileDraft = cloneProfileForDraft(state.profile);
     return;
   }
 
   state.profileDraft = getEmptyProfile();
 }
 
+function cloneProfileForDraft(profile) {
+  return {
+    ...profile,
+    services: cleanStringArray(profile.services),
+    includeKeywords: cleanStringArray(profile.includeKeywords),
+    excludeKeywords: cleanStringArray(profile.excludeKeywords),
+    locations: cleanStringArray(profile.locations),
+    serviceAreas: cleanStringArray(profile.serviceAreas)
+  };
+}
+
+function markProfileDraftDirty() {
+  state.profileDraftDirty = true;
+  state.profileSaved = false;
+  state.profileSaveMessage = null;
+  state.profileSaveError = null;
+}
+
+function replaceProfileDraftFromProfile(profile) {
+  state.profileDraft = cloneProfileForDraft(profile || getEmptyProfile());
+  state.profileDraftDirty = false;
+}
+
 function updateProfileDraftFromForm(formElement) {
   initializeProfileDraft();
   const form = new FormData(formElement);
-  state.profileDraft = {
-    ...state.profileDraft,
-    companyName: String(form.get("companyName") || "").trim(),
-    contactEmail: String(form.get("contactEmail") || "").trim(),
-    website: String(form.get("website") || "").trim(),
-    industry: String(form.get("industry") || ""),
-    services: splitInput(form.get("services")),
-    includeKeywords: splitInput(form.get("includeKeywords")),
-    excludeKeywords: splitInput(form.get("excludeKeywords")),
-    locations: form.getAll("locations"),
-    baseLocation: String(form.get("baseLocation") || ""),
-    serviceAreas: splitInput(form.get("serviceAreas")),
-    willingToTravel: form.get("willingToTravel") === "on",
-    nationalProjects: form.get("nationalProjects") === "on",
-    remoteProjects: form.get("remoteProjects") === "on",
-    minimumProjectValueForTravel: String(form.get("minimumProjectValueForTravel") || ""),
-    minProjectValue: String(form.get("minProjectValue") || ""),
-    maxProjectValue: String(form.get("maxProjectValue") || ""),
-    allowUnknownValue: form.get("allowUnknownValue") === "on",
-    reportFrequency: String(form.get("reportFrequency") || "weekly"),
-    reportDay: String(form.get("reportDay") || "monday"),
-    deadlineReminders: form.get("deadlineReminders") === "on",
-    includeLowConfidence: form.get("includeLowConfidence") === "on"
-  };
+  const nextDraft = { ...state.profileDraft };
+  if (hasFormControl(formElement, "companyName")) nextDraft.companyName = String(form.get("companyName") || "").trim();
+  if (hasFormControl(formElement, "contactEmail")) nextDraft.contactEmail = String(form.get("contactEmail") || "").trim();
+  if (hasFormControl(formElement, "website")) nextDraft.website = String(form.get("website") || "").trim();
+  if (hasFormControl(formElement, "industry")) nextDraft.industry = String(form.get("industry") || "");
+  if (hasFormControl(formElement, "services")) nextDraft.services = splitInput(form.get("services"));
+  if (hasFormControl(formElement, "includeKeywords")) nextDraft.includeKeywords = splitInput(form.get("includeKeywords"));
+  if (hasFormControl(formElement, "excludeKeywords")) nextDraft.excludeKeywords = splitInput(form.get("excludeKeywords"));
+  if (hasFormControl(formElement, "locations")) nextDraft.locations = form.getAll("locations");
+  if (hasFormControl(formElement, "baseLocation")) nextDraft.baseLocation = String(form.get("baseLocation") || "");
+  if (hasFormControl(formElement, "serviceAreas")) nextDraft.serviceAreas = splitInput(form.get("serviceAreas"));
+  if (hasFormControl(formElement, "willingToTravel")) nextDraft.willingToTravel = form.get("willingToTravel") === "on";
+  if (hasFormControl(formElement, "nationalProjects")) nextDraft.nationalProjects = form.get("nationalProjects") === "on";
+  if (hasFormControl(formElement, "remoteProjects")) nextDraft.remoteProjects = form.get("remoteProjects") === "on";
+  if (hasFormControl(formElement, "minimumProjectValueForTravel")) nextDraft.minimumProjectValueForTravel = String(form.get("minimumProjectValueForTravel") || "");
+  if (hasFormControl(formElement, "minProjectValue")) nextDraft.minProjectValue = String(form.get("minProjectValue") || "");
+  if (hasFormControl(formElement, "maxProjectValue")) nextDraft.maxProjectValue = String(form.get("maxProjectValue") || "");
+  if (hasFormControl(formElement, "allowUnknownValue")) nextDraft.allowUnknownValue = form.get("allowUnknownValue") === "on";
+  if (hasFormControl(formElement, "reportFrequency")) nextDraft.reportFrequency = String(form.get("reportFrequency") || "weekly");
+  if (hasFormControl(formElement, "reportDay")) nextDraft.reportDay = String(form.get("reportDay") || "monday");
+  if (hasFormControl(formElement, "deadlineReminders")) nextDraft.deadlineReminders = form.get("deadlineReminders") === "on";
+  if (hasFormControl(formElement, "includeLowConfidence")) nextDraft.includeLowConfidence = form.get("includeLowConfidence") === "on";
+  state.profileDraft = nextDraft;
+  markProfileDraftDirty();
+}
+
+function hasFormControl(formElement, name) {
+  return Boolean(formElement.querySelector(`[name="${CSS.escape(name)}"]`));
 }
 
 function normalizeProfileDraftForSave() {
@@ -2296,14 +2675,18 @@ function normalizeProfileDraftForSave() {
     contactEmail: String(state.profileDraft.contactEmail || "").trim(),
     website: String(state.profileDraft.website || "").trim(),
     industry: String(state.profileDraft.industry || ""),
+    services: cleanStringArray(state.profileDraft.services),
+    includeKeywords: cleanStringArray(state.profileDraft.includeKeywords),
+    excludeKeywords: cleanStringArray(state.profileDraft.excludeKeywords),
+    locations: cleanStringArray(state.profileDraft.locations),
     baseLocation: String(state.profileDraft.baseLocation || ""),
-    serviceAreas: Array.isArray(state.profileDraft.serviceAreas) ? state.profileDraft.serviceAreas : splitInput(state.profileDraft.serviceAreas),
+    serviceAreas: cleanStringArray(state.profileDraft.serviceAreas),
     willingToTravel: Boolean(state.profileDraft.willingToTravel),
     nationalProjects: Boolean(state.profileDraft.nationalProjects),
     remoteProjects: Boolean(state.profileDraft.remoteProjects),
-    minimumProjectValueForTravel: Number(state.profileDraft.minimumProjectValueForTravel) || null,
-    minProjectValue: Number(state.profileDraft.minProjectValue) || null,
-    maxProjectValue: Number(state.profileDraft.maxProjectValue) || null
+    minimumProjectValueForTravel: nullableNumber(state.profileDraft.minimumProjectValueForTravel),
+    minProjectValue: nullableNumber(state.profileDraft.minProjectValue),
+    maxProjectValue: nullableNumber(state.profileDraft.maxProjectValue)
   };
 }
 
@@ -2506,11 +2889,12 @@ function calculateMatch(profile, opp) {
   }
 
   const days = daysUntilDeadline(opp.deadline);
-  if (days >= 0 && days <= 30) {
+  if (!opp.deadline) {
+    risks.push("Deadline could not be extracted from source feed");
+  } else if (days >= 0 && days <= 30) {
     score += 8;
     reasons.push("Deadline is coming up soon");
-  }
-  if (days < 0) {
+  } else if (days < 0) {
     score -= 50;
     risks.push("Deadline has passed");
   }
@@ -2572,23 +2956,73 @@ function getMatchedOpportunities() {
 
 function getFilteredMatches() {
   const matches = getMatchedOpportunities();
-  return matches.filter((opp) => {
+  const baseMatches = matches.filter((opp) => {
     const search = state.filters.search.toLowerCase();
     if (search && !opportunityText(opp).includes(search)) return false;
-    if (!matchesSelectedLabelFilter(opp)) return false;
     if (state.filters.category !== "all" && opp.category !== state.filters.category) return false;
     if (state.filters.location !== "all" && opp.location !== state.filters.location) return false;
     if (state.filters.type !== "all" && opp.type !== state.filters.type) return false;
     if (state.filters.savedOnly && !state.saved.includes(opp.id)) return false;
     return true;
   });
+
+  if (state.filters.label === "recommended") {
+    const recommended = baseMatches.filter(isRecommendedDashboardMatch);
+    const fallback = baseMatches.filter(isFallbackDashboardMatch);
+    return sortDashboardMatches(recommended.length ? recommended : fallback);
+  }
+
+  return sortDashboardMatches(baseMatches.filter(matchesSelectedLabelFilter));
 }
 
 function matchesSelectedLabelFilter(opp) {
   const selected = state.filters.label;
   if (selected === "all") return true;
-  if (selected === "recommended") return opp.matchScore >= 50 && opp.matchLabel !== "Weak match";
+  if (selected === "recommended") return isRecommendedDashboardMatch(opp);
+  if (selected === "strong") return opp.matchLabel === "Strong match" || opp.matchScore >= 85;
+  if (selected === "possible") return ["Possible match", "Weak match"].includes(opp.matchLabel) || opp.matchScore < 65;
   return opp.matchLabel === selected;
+}
+
+function isRecommendedDashboardMatch(opp) {
+  if (!isRecommendedScore(opp)) return false;
+  if (normalizeOpportunityQualityStatus(opp.qualityStatus, opp) === "needs_review") return false;
+  if (containsObviousNewsIntent(getOpportunityQualityText(opp))) return false;
+  return true;
+}
+
+function isFallbackDashboardMatch(opp) {
+  if (!isRecommendedScore(opp)) return false;
+  if (containsObviousNewsIntent(getOpportunityQualityText(opp))) return false;
+  return true;
+}
+
+function isRecommendedScore(opp) {
+  return ["Strong match", "Good match", "Possible match"].includes(opp.matchLabel) || opp.matchScore >= 45;
+}
+
+function sortDashboardMatches(matches) {
+  return [...matches].sort((a, b) => {
+    const qualityDiff = getOpportunityQualityRank(a) - getOpportunityQualityRank(b);
+    if (qualityDiff) return qualityDiff;
+    return b.matchScore - a.matchScore || daysUntilDeadline(a.deadline) - daysUntilDeadline(b.deadline);
+  });
+}
+
+function getOpportunityQualityRank(opp) {
+  const status = normalizeOpportunityQualityStatus(opp.qualityStatus, opp);
+  if (status === "confirmed_tender") return 0;
+  if (status === "early_signal") return 1;
+  return 2;
+}
+
+function getDashboardFilterSummary(visibleCount, totalCount) {
+  const selected = state.filters.label;
+  if (selected === "all") return `${totalCount} matches found. Showing all ${visibleCount} stored matches.`;
+  if (selected === "strong") return `${totalCount} matches found. Showing ${visibleCount} strong matches.`;
+  if (selected === "recommended") return `${totalCount} matches found. Showing ${visibleCount} recommended or possible matches.`;
+  if (selected === "possible") return `${totalCount} matches found. Showing ${visibleCount} possible or weak matches.`;
+  return `${totalCount} matches found. Showing ${visibleCount} ${selected.toLowerCase()} opportunities.`;
 }
 
 function toggleSave(id) {
@@ -2643,10 +3077,38 @@ function syncDetailsFromState() {
 }
 
 function daysUntilDeadline(dateString) {
+  if (!dateString) return 999;
   const today = new Date();
   const d = new Date(dateString + "T00:00:00");
+  if (Number.isNaN(d.getTime())) return 999;
   const ms = d - new Date(today.getFullYear(), today.getMonth(), today.getDate());
   return Math.ceil(ms / (1000 * 60 * 60 * 24));
+}
+
+function getDeadlineDisplay(value) {
+  if (!value) {
+    return {
+      label: "Deadline missing — check source page",
+      className: "deadline danger"
+    };
+  }
+
+  const days = daysUntilDeadline(value);
+  if (days === 999) {
+    return {
+      label: "Deadline missing — check source page",
+      className: "deadline danger"
+    };
+  }
+
+  return {
+    label: `${days} days left`,
+    className: days <= 14 ? "deadline danger" : "deadline"
+  };
+}
+
+function formatOpportunityDeadline(value) {
+  return value ? formatShortDate(value) : "Deadline missing — check source page";
 }
 
 function formatISK(value) {
@@ -3380,6 +3842,31 @@ function renderImportStatus() {
   `;
 }
 
+function renderConnectorImportStatus() {
+  if (!state.connectorImportLoading && !state.connectorTestingSourceId && !state.connectorImportStatus) return "";
+
+  if (state.connectorImportLoading || state.connectorTestingSourceId) {
+    return `<section class="import-panel"><strong>Running automatic source imports...</strong><p>Fetching enabled RSS/WordPress connectors and refreshing matches when new rows are saved.</p></section>`;
+  }
+
+  const status = state.connectorImportStatus || {};
+  const errors = Array.isArray(status.errors) ? status.errors : [];
+
+  return `
+    <section class="import-panel">
+      <div class="import-stats">
+        <span><strong>${Number(status.fetched || 0)}</strong> fetched</span>
+        <span><strong>${Number(status.inserted || 0)}</strong> inserted</span>
+        <span><strong>${Number(status.updated || 0)}</strong> updated</span>
+        <span><strong>${Number(status.skipped || 0)}</strong> skipped</span>
+        <span><strong>${Number(status.matched || 0)}</strong> matches</span>
+        <span><strong>${Number(status.reports_generated || 0)}</strong> reports</span>
+      </div>
+      ${errors.length ? `<ul class="risk-list">${errors.map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul>` : `<p>Automatic source import completed.</p>`}
+    </section>
+  `;
+}
+
 function renderImportRunRow(run) {
   return `
     <div class="import-run-row">
@@ -3458,8 +3945,8 @@ function getLatestImportRun() {
 
 function getRunStatusClass(status) {
   const normalized = String(status || "").toLowerCase();
-  if (["success", "completed", "complete"].includes(normalized)) return "is-success";
-  if (["running", "started", "pending"].includes(normalized)) return "is-running";
+  if (["success", "completed", "complete", "connected"].includes(normalized)) return "is-success";
+  if (["running", "started", "pending", "planned"].includes(normalized)) return "is-running";
   if (["error", "failed", "failure"].includes(normalized)) return "is-error";
   return "";
 }
@@ -3542,6 +4029,9 @@ function renderAutomationActions() {
         <button class="btn btn-primary" type="button" data-action="import-ted" ${state.importLoading ? "disabled" : ""}>
           ${state.importLoading ? "Running TED import..." : "Run TED import now"}
         </button>
+        <button class="btn btn-secondary" type="button" data-action="import-source-connectors" ${state.connectorImportLoading ? "disabled" : ""}>
+          ${state.connectorImportLoading ? "Running source imports..." : "Run automatic source imports now"}
+        </button>
         <button class="btn btn-secondary" type="button" data-action="refresh-admin-status" ${(state.importRunsLoading || state.adminReportsLoading) ? "disabled" : ""}>
           ${(state.importRunsLoading || state.adminReportsLoading) ? "Refreshing..." : "Refresh status"}
         </button>
@@ -3556,6 +4046,7 @@ function renderAutomationActions() {
         </select>
       </label>
       ${renderImportStatus()}
+      ${renderConnectorImportStatus()}
     </section>
   `;
 }
@@ -3684,6 +4175,20 @@ function formatSourceType(type) {
   return labels[type] || type || "Unknown";
 }
 
+function formatConnectorType(type) {
+  const labels = {
+    ted_api: "TED API",
+    rss_feed: "RSS feed",
+    wordpress_rest: "WordPress REST",
+    official_api: "Official API",
+    page_monitor_allowed: "Allowed page monitor",
+    manual_fallback: "Manual fallback",
+    planned: "Planned",
+    permission_required: "Permission required"
+  };
+  return labels[type] || type || "Planned";
+}
+
 function renderSourceCoverageSection() {
   const rows = state.sourceCoverage || [];
   return `
@@ -3702,8 +4207,10 @@ function renderSourceCoverageSection() {
               <tr>
                 <th>Source</th>
                 <th>Type</th>
+                <th>Connector</th>
                 <th>Status</th>
                 <th>Last checked</th>
+                <th>Last success</th>
                 <th>Active opportunities</th>
                 <th>Last error</th>
                 <th>Action</th>
@@ -3721,19 +4228,35 @@ function renderSourceCoverageSection() {
 
 function renderSourceCoverageRow(source) {
   const status = source.source_status || {};
-  const statusClass = getRunStatusClass(status.status);
+  const connector = source.source_connectors || {};
+  const effectiveStatus = connector.status || status.status || (source.is_active ? "planned" : "inactive");
+  const statusClass = getRunStatusClass(effectiveStatus);
+  const canTestConnector = connector.enabled && ["rss_feed", "wordpress_rest"].includes(connector.connector_type);
+  const isTesting = state.connectorTestingSourceId === source.id;
   return `
     <tr>
       <td>
         <strong>${escapeHtml(source.name || "Unknown source")}</strong>
-        ${source.base_url ? `<br><a href="${escapeHtml(source.base_url)}" target="_blank" rel="noreferrer">${escapeHtml(source.base_url)}</a>` : ""}
+        ${connector.endpoint_url || source.base_url ? `<br><a href="${escapeHtml(connector.endpoint_url || source.base_url)}" target="_blank" rel="noreferrer">${escapeHtml(connector.endpoint_url || source.base_url)}</a>` : ""}
       </td>
       <td>${escapeHtml(formatSourceType(source.source_type))}</td>
-      <td><span class="status-pill ${statusClass}">${escapeHtml(status.status || (source.is_active ? "planned" : "inactive"))}</span></td>
-      <td>${escapeHtml(formatDateTime(status.last_checked_at))}</td>
+      <td>
+        <strong>${escapeHtml(formatConnectorType(connector.connector_type))}</strong>
+        <br><span>${connector.enabled ? "Enabled" : "Disabled"}</span>
+        ${connector.require_any_keyword === false ? `<br><span>Keyword match optional</span>` : `<br><span>Requires keyword match</span>`}
+        ${Array.isArray(connector.include_keywords) && connector.include_keywords.length ? `<br><span>Includes: ${escapeHtml(connector.include_keywords.slice(0, 5).join(", "))}${connector.include_keywords.length > 5 ? "..." : ""}</span>` : ""}
+        ${Array.isArray(connector.exclude_keywords) && connector.exclude_keywords.length ? `<br><span>Excludes: ${escapeHtml(connector.exclude_keywords.slice(0, 5).join(", "))}${connector.exclude_keywords.length > 5 ? "..." : ""}</span>` : ""}
+      </td>
+      <td><span class="status-pill ${statusClass}">${escapeHtml(effectiveStatus)}</span></td>
+      <td>${escapeHtml(formatDateTime(connector.last_checked_at || status.last_checked_at))}</td>
+      <td>${escapeHtml(formatDateTime(connector.last_success_at || status.last_success_at))}</td>
       <td>${Number(status.active_opportunities_count || 0)}</td>
-      <td>${status.last_error ? escapeHtml(status.last_error) : ""}</td>
-      <td><button class="btn btn-secondary btn-small" type="button" disabled>Test source</button></td>
+      <td>${connector.last_error ? escapeHtml(connector.last_error) : status.last_error ? escapeHtml(status.last_error) : ""}</td>
+      <td>
+        <button class="btn btn-secondary btn-small" type="button" data-action="test-source-connector" data-id="${escapeHtml(source.id)}" ${(!canTestConnector || isTesting || state.connectorImportLoading) ? "disabled" : ""}>
+          ${isTesting ? "Testing..." : "Test source"}
+        </button>
+      </td>
     </tr>
   `;
 }
@@ -3759,6 +4282,7 @@ function getFilteredAdminOpportunities() {
     const isTed = isTedOpportunity(opp);
     if (filters.tedOnly && !isTed) return false;
     if (filters.manualOnly && isTed) return false;
+    if (!filters.showDemoTest && isDemoTestOpportunity(opp)) return false;
     if (filters.source !== "all" && opp.source !== filters.source) return false;
     if (filters.status !== "all" && opp.status !== filters.status) return false;
     const country = getOpportunityCountryCode(opp) || opp.countryCode || "Unknown";
@@ -3798,6 +4322,7 @@ function renderAdminOpportunityFilters(opportunities) {
       </select>
       <label class="checkbox compact"><input type="checkbox" data-admin-filter="tedOnly" ${filters.tedOnly ? "checked" : ""}/><span>TED only</span></label>
       <label class="checkbox compact"><input type="checkbox" data-admin-filter="manualOnly" ${filters.manualOnly ? "checked" : ""}/><span>Manual only</span></label>
+      <label class="checkbox compact"><input type="checkbox" data-admin-filter="showDemoTest" ${filters.showDemoTest ? "checked" : ""}/><span>Show demo/test opportunities</span></label>
     </div>
     <p class="admin-filter-count">${opportunities.length} of ${(state.opportunities || []).length} opportunities shown.</p>
   `;
@@ -3933,12 +4458,6 @@ function renderOnboarding() {
   if (!state.user) return requireAuthPage();
 
   initializeProfileDraft();
-  const p = state.profileDraft;
-  const locationOptions = ["Reykjavík", "Capital Area", "Suðurnes", "South Iceland", "West Iceland", "North Iceland", "East Iceland", "Westfjords", "All Iceland", "Remote / Online"];
-  const industries = ["Construction", "Electrical", "Cleaning", "IT / Web / Software", "Architecture / Engineering", "Consulting", "Transport", "Equipment / Machinery", "Landscaping", "Security", "Other"];
-  const selectedIndustry = p.industry || "";
-  const serviceSuggestions = getProfileSuggestions("services", selectedIndustry);
-  const keywordSuggestions = getProfileSuggestions("includeKeywords", selectedIndustry);
   return renderShell(`
     <section class="page-head">
       <p class="eyebrow">Onboarding</p>
@@ -3946,71 +4465,111 @@ function renderOnboarding() {
       <p>This is what the matching system uses to find relevant opportunities.</p>
     </section>
 
-    <form id="profile-form" class="form-card">
-      <div class="form-section">
-        <h2>1. Company basics</h2>
-        <div class="form-grid">
-          <label>Company name<input name="companyName" data-profile-field="companyName" value="${escapeHtml(p.companyName || "")}" required /></label>
-          <label>Contact email<input name="contactEmail" type="email" data-profile-field="contactEmail" value="${escapeHtml(p.contactEmail || "")}" required /></label>
-          <label>Website<input name="website" data-profile-field="website" value="${escapeHtml(p.website || "")}" /></label>
-          <label class="custom-select-field">Industry
-            <input id="industry-input" type="hidden" name="industry" value="${escapeHtml(selectedIndustry)}" required />
-            ${renderCustomDropdown({
-              key: "industry",
-              value: selectedIndustry,
-              options: industries.map((industry) => ({ value: industry, label: industry })),
-              profileField: "industry"
-            })}
-          </label>
-        </div>
-      </div>
+    ${renderProfileForm()}
+  `);
+}
 
-      <div class="form-section">
-        <h2>2. Services and keywords</h2>
-        <p class="form-section-hint">Start with the services you would actually want to bid on.</p>
-        <label>What services do you offer? Choose suggestions or type your own, separated by commas.
-          <textarea name="services" data-profile-field="services" data-profile-array="true" rows="3">${escapeHtml((p.services || []).join(", "))}</textarea>
+function renderProfileForm() {
+  initializeProfileDraft();
+  return `
+    <form id="profile-form" class="form-card settings-profile-form">
+      ${renderProfileBasicsSection()}
+      ${renderProfileServicesSection()}
+      ${renderProfileLocationsSection()}
+      ${renderProfileValueSection()}
+      ${renderProfileReportsSection()}
+      ${renderProfileFormActions()}
+    </form>
+  `;
+}
+
+function renderProfileBasicsSection() {
+  const p = state.profileDraft || getEmptyProfile();
+  const selectedIndustry = p.industry || "";
+  return `
+    <div class="form-section">
+      <h2>1. Company basics</h2>
+      <div class="form-grid">
+        <label>Company name<input name="companyName" data-profile-field="companyName" value="${escapeHtml(p.companyName || "")}" required /></label>
+        <label>Contact email<input name="contactEmail" type="email" data-profile-field="contactEmail" value="${escapeHtml(p.contactEmail || "")}" required /></label>
+        <label>Website<input name="website" data-profile-field="website" value="${escapeHtml(p.website || "")}" /></label>
+        <label class="custom-select-field">Industry
+          <input id="industry-input" type="hidden" name="industry" value="${escapeHtml(selectedIndustry)}" required />
+          ${renderCustomDropdown({
+            key: "industry",
+            value: selectedIndustry,
+            options: getFilterOptions("industry"),
+            profileField: "industry"
+          })}
         </label>
-        ${renderSuggestionChips({
-          field: "services",
-          title: selectedIndustry ? `Suggested services for ${selectedIndustry}` : "Select an industry to see service suggestions",
-          values: serviceSuggestions,
-          selectedValues: p.services || []
-        })}
-        <div class="form-grid">
-          <label>Extra words VerkRadar should look for in notices.
-            <input name="includeKeywords" data-profile-field="includeKeywords" data-profile-array="true" value="${escapeHtml((p.includeKeywords || []).join(", "))}" />
-          </label>
-          <label>Words that should lower or remove bad matches.
-            <input name="excludeKeywords" data-profile-field="excludeKeywords" data-profile-array="true" value="${escapeHtml((p.excludeKeywords || []).join(", "))}" />
-          </label>
-        </div>
-        ${renderSuggestionChips({
-          field: "includeKeywords",
-          title: selectedIndustry ? `Suggested keywords for ${selectedIndustry}` : "Select an industry to see keyword suggestions",
-          values: keywordSuggestions,
-          selectedValues: p.includeKeywords || []
-        })}
       </div>
+    </div>
+  `;
+}
 
-      <div class="form-section">
-        <h2>3. Locations</h2>
-        <div class="form-grid">
-          <label>Base location
-            <input name="baseLocation" data-profile-field="baseLocation" value="${escapeHtml(p.baseLocation || "")}" placeholder="Example: East Iceland" />
+function renderProfileServicesSection() {
+  const p = state.profileDraft || getEmptyProfile();
+  const selectedIndustry = p.industry || "";
+  const serviceSuggestions = getProfileSuggestions("services", selectedIndustry);
+  const keywordSuggestions = getProfileSuggestions("includeKeywords", selectedIndustry);
+  return `
+    <div class="form-section">
+      <h2>2. Services and keywords</h2>
+      <p class="form-section-hint">Start with the services you would actually want to bid on.</p>
+      <label>What services do you offer? Choose suggestions or type your own, separated by commas.
+        <textarea name="services" data-profile-field="services" data-profile-array="true" rows="3">${escapeHtml(arrayFieldText(p.services))}</textarea>
+      </label>
+      <p class="field-helper">Add the services your company actually sells. More specific services create better matches.</p>
+      ${renderSuggestionChips({
+        field: "services",
+        title: selectedIndustry ? `Suggested services for ${selectedIndustry}` : "Select an industry to see service suggestions",
+        values: serviceSuggestions,
+        selectedValues: p.services || []
+      })}
+      <div class="form-grid">
+        <label>Extra words VerkRadar should look for in notices.
+          <input name="includeKeywords" data-profile-field="includeKeywords" data-profile-array="true" value="${escapeHtml(arrayFieldText(p.includeKeywords))}" />
+          <span class="field-helper inline-helper">Use words that often appear in opportunities you want.</span>
+        </label>
+        <label>Words that should lower or remove bad matches.
+          <input name="excludeKeywords" data-profile-field="excludeKeywords" data-profile-array="true" value="${escapeHtml(arrayFieldText(p.excludeKeywords))}" />
+        </label>
+      </div>
+      ${renderSuggestionChips({
+        field: "includeKeywords",
+        title: selectedIndustry ? `Suggested keywords for ${selectedIndustry}` : "Select an industry to see keyword suggestions",
+        values: keywordSuggestions,
+        selectedValues: p.includeKeywords || []
+      })}
+    </div>
+  `;
+}
+
+function renderProfileLocationsSection() {
+  const p = state.profileDraft || getEmptyProfile();
+  const locationOptions = ["Reykjavík", "Capital Area", "Suðurnes", "South Iceland", "West Iceland", "North Iceland", "East Iceland", "Westfjords", "All Iceland", "Remote / Online"];
+  return `
+    <div class="form-section">
+      <h2>3. Locations</h2>
+      <p class="form-section-hint">Use All Iceland for national tenders. Use travel settings when you can bid outside your base area for the right project size.</p>
+      <div class="form-grid">
+        <label>Base location
+          <input name="baseLocation" data-profile-field="baseLocation" value="${escapeHtml(p.baseLocation || "")}" placeholder="Example: East Iceland" />
+        </label>
+        <label>Service areas, comma separated
+          <input name="serviceAreas" data-profile-field="serviceAreas" data-profile-array="true" value="${escapeHtml(arrayFieldText(p.serviceAreas))}" placeholder="Example: East Iceland, All Iceland" />
+        </label>
+      </div>
+      <div class="checkbox-grid">
+        ${locationOptions.map((loc) => `
+          <label class="checkbox">
+            <input type="checkbox" name="locations" value="${loc}" data-profile-location ${(p.locations || []).includes(loc) ? "checked" : ""} />
+            <span>${loc}</span>
           </label>
-          <label>Service areas, comma separated
-            <input name="serviceAreas" data-profile-field="serviceAreas" data-profile-array="true" value="${escapeHtml((p.serviceAreas || []).join(", "))}" placeholder="Example: East Iceland, All Iceland" />
-          </label>
-        </div>
-        <div class="checkbox-grid">
-          ${locationOptions.map((loc) => `
-            <label class="checkbox">
-              <input type="checkbox" name="locations" value="${loc}" data-profile-location ${(p.locations || []).includes(loc) ? "checked" : ""} />
-              <span>${loc}</span>
-            </label>
-          `).join("")}
-        </div>
+        `).join("")}
+      </div>
+      <div class="profile-travel-panel">
+        <h3>Travel and scope</h3>
         <div class="profile-travel-grid">
           <label class="checkbox inline"><input type="checkbox" name="willingToTravel" data-profile-field="willingToTravel" ${p.willingToTravel ? "checked" : ""} /><span>Willing to travel for the right project</span></label>
           <label class="checkbox inline"><input type="checkbox" name="nationalProjects" data-profile-field="nationalProjects" ${p.nationalProjects ? "checked" : ""} /><span>Include national / All Iceland opportunities</span></label>
@@ -4020,59 +4579,73 @@ function renderOnboarding() {
           </label>
         </div>
       </div>
+    </div>
+  `;
+}
 
-      <div class="form-section">
-        <h2>4. Project size</h2>
-        <div class="form-grid">
-          <label>Minimum value<input name="minProjectValue" type="number" data-profile-field="minProjectValue" data-profile-number="true" value="${p.minProjectValue || ""}" /></label>
-          <label>Maximum value<input name="maxProjectValue" type="number" data-profile-field="maxProjectValue" data-profile-number="true" value="${p.maxProjectValue || ""}" /></label>
-        </div>
-        <label class="checkbox inline">
-          <input type="checkbox" name="allowUnknownValue" data-profile-field="allowUnknownValue" ${p.allowUnknownValue ? "checked" : ""} />
-          <span>Show opportunities even if value is unknown</span>
+function renderProfileValueSection() {
+  const p = state.profileDraft || getEmptyProfile();
+  return `
+    <div class="form-section">
+      <h2>4. Project size</h2>
+      <div class="form-grid">
+        <label>Minimum value<input name="minProjectValue" type="number" data-profile-field="minProjectValue" data-profile-number="true" value="${p.minProjectValue || ""}" /></label>
+        <label>Maximum value<input name="maxProjectValue" type="number" data-profile-field="maxProjectValue" data-profile-number="true" value="${p.maxProjectValue || ""}" /></label>
+      </div>
+      <label class="checkbox inline">
+        <input type="checkbox" name="allowUnknownValue" data-profile-field="allowUnknownValue" ${p.allowUnknownValue ? "checked" : ""} />
+        <span>Show opportunities even if value is unknown</span>
+      </label>
+    </div>
+  `;
+}
+
+function renderProfileReportsSection() {
+  const p = state.profileDraft || getEmptyProfile();
+  return `
+    <div class="form-section">
+      <h2>5. Report preferences</h2>
+      <div class="form-grid">
+        <label>Frequency
+          <select name="reportFrequency" data-profile-field="reportFrequency">
+            <option ${p.reportFrequency === "weekly" ? "selected" : ""} value="weekly">Weekly</option>
+            <option ${p.reportFrequency === "daily" ? "selected" : ""} value="daily">Daily</option>
+          </select>
+        </label>
+        <label>Report day
+          <select name="reportDay" data-profile-field="reportDay">
+            ${["monday", "tuesday", "wednesday", "thursday", "friday"].map((x) => `<option ${p.reportDay === x ? "selected" : ""} value="${x}">${capitalize(x)}</option>`).join("")}
+          </select>
         </label>
       </div>
+      <label class="checkbox inline"><input type="checkbox" name="deadlineReminders" data-profile-field="deadlineReminders" ${p.deadlineReminders ? "checked" : ""} /><span>Deadline reminders</span></label>
+      <label class="checkbox inline"><input type="checkbox" name="includeLowConfidence" data-profile-field="includeLowConfidence" ${p.includeLowConfidence ? "checked" : ""} /><span>Include low-confidence matches</span></label>
+    </div>
+  `;
+}
 
-      <div class="form-section">
-        <h2>5. Report preferences</h2>
-        <div class="form-grid">
-          <label>Frequency
-            <select name="reportFrequency" data-profile-field="reportFrequency">
-              <option ${p.reportFrequency === "weekly" ? "selected" : ""} value="weekly">Weekly</option>
-              <option ${p.reportFrequency === "daily" ? "selected" : ""} value="daily">Daily</option>
-            </select>
-          </label>
-          <label>Report day
-            <select name="reportDay" data-profile-field="reportDay">
-              ${["monday", "tuesday", "wednesday", "thursday", "friday"].map((x) => `<option ${p.reportDay === x ? "selected" : ""} value="${x}">${capitalize(x)}</option>`).join("")}
-            </select>
-          </label>
-        </div>
-        <label class="checkbox inline"><input type="checkbox" name="deadlineReminders" data-profile-field="deadlineReminders" ${p.deadlineReminders ? "checked" : ""} /><span>Deadline reminders</span></label>
-        <label class="checkbox inline"><input type="checkbox" name="includeLowConfidence" data-profile-field="includeLowConfidence" ${p.includeLowConfidence ? "checked" : ""} /><span>Include low-confidence matches</span></label>
+function renderProfileFormActions() {
+  return `
+    <div class="form-actions">
+      <button
+        type="submit"
+        class="btn btn-primary btn-large"
+        ${state.isSavingProfile ? "disabled" : ""}
+      >
+        ${state.isSavingProfile ? "Saving..." : state.profileSaved ? "Saved" : "Save profile"}
+      </button>
+    </div>
+    ${state.profileSaveMessage ? `
+      <div class="form-message success">
+        ${escapeHtml(state.profileSaveMessage)}
       </div>
-
-      <div class="form-actions">
-        <button
-          type="submit"
-          class="btn btn-primary btn-large"
-          ${state.isSavingProfile ? "disabled" : ""}
-        >
-          ${state.isSavingProfile ? "Saving..." : state.profileSaved ? "Saved" : "Save profile"}
-        </button>
+    ` : ""}
+    ${state.profileSaveError ? `
+      <div class="form-message error">
+        ${escapeHtml(state.profileSaveError)}
       </div>
-      ${state.profileSaveMessage ? `
-        <div class="form-message success">
-          ${escapeHtml(state.profileSaveMessage)}
-        </div>
-      ` : ""}
-      ${state.profileSaveError ? `
-        <div class="form-message error">
-          ${escapeHtml(state.profileSaveError)}
-        </div>
-      ` : ""}
-    </form>
-  `);
+    ` : ""}
+  `;
 }
 
 function getFilterOptions(key) {
@@ -4094,9 +4667,11 @@ function getFilterOptions(key) {
 
   if (key === "label") {
     return [
+      { value: "strong", label: "Strong only" },
       { value: "recommended", label: "Recommended" },
       { value: "all", label: "All matches" },
-      ...["Strong match", "Good match", "Possible match", "Weak match"].map((value) => ({ value, label: value }))
+      { value: "possible", label: "Possible matches" },
+      ...["Good match", "Weak match"].map((value) => ({ value, label: value }))
     ];
   }
 
@@ -4230,6 +4805,7 @@ function renderDashboard() {
   const closingSoon = allMatches.filter((o) => daysUntilDeadline(o.deadline) <= 14 && daysUntilDeadline(o.deadline) >= 0).length;
   const savedCount = state.saved.length;
   const totalValue = allMatches.filter((o) => o.matchScore >= 65).reduce((sum, o) => sum + (o.estimatedValue || 0), 0);
+  const filterSummary = getDashboardFilterSummary(matches.length, allMatches.length);
   const matchRefreshText = state.lastMatchedAt
     ? `Last refreshed ${formatDateTime(state.lastMatchedAt)}.`
     : "Matches refresh automatically after profile saves.";
@@ -4277,8 +4853,12 @@ function renderDashboard() {
       <label class="checkbox compact"><input type="checkbox" data-filter="savedOnly" ${state.filters.savedOnly ? "checked" : ""}/><span>Saved only</span></label>
     </section>
 
+    <div class="note-panel dashboard-filter-summary">
+      ${escapeHtml(filterSummary)}
+    </div>
+
     <section class="opportunity-list">
-      ${matches.length ? matches.map(renderOpportunityCard).join("") : renderDashboardEmptyState(state.profile)}
+      ${matches.length ? matches.map(renderOpportunityCard).join("") : renderDashboardEmptyState(state.profile, state.filters.label)}
     </section>
   `);
 }
@@ -4318,14 +4898,44 @@ function getDashboardProfileSuggestions(profile) {
   return suggestions;
 }
 
-function renderDashboardEmptyState(profile) {
+function getDashboardEmptyCopy(filter) {
+  if (filter === "all") {
+    return {
+      eyebrow: "No matches",
+      title: "No stored matches yet.",
+      body: "Refresh matches or broaden your profile to create stored opportunity matches."
+    };
+  }
+  if (filter === "strong") {
+    return {
+      eyebrow: "No strong matches",
+      title: "No strong matches yet.",
+      body: "You may still have useful possible matches. Switch to Recommended or All matches to review them."
+    };
+  }
+  if (filter === "possible" || filter === "Possible match" || filter === "Weak match") {
+    return {
+      eyebrow: "No possible matches",
+      title: "No possible matches yet.",
+      body: "Try broadening your services, locations or keywords to find lower-confidence opportunities."
+    };
+  }
+  return {
+    eyebrow: "No recommended matches",
+    title: "No recommended matches yet.",
+    body: "Try broadening the profile or viewing all stored matches."
+  };
+}
+
+function renderDashboardEmptyState(profile, filter = state.filters.label) {
   const suggestions = getDashboardProfileSuggestions(profile);
+  const copy = getDashboardEmptyCopy(filter);
   return `
     <div class="dashboard-empty-state">
       <div>
-        <p class="eyebrow">No matches</p>
-        <h2>No strong matches found for this profile yet.</h2>
-        <p>Your profile may be narrow. Try enabling All Iceland or national projects, broadening the profile, or viewing possible matches.</p>
+        <p class="eyebrow">${escapeHtml(copy.eyebrow)}</p>
+        <h2>${escapeHtml(copy.title)}</h2>
+        <p>${escapeHtml(copy.body)}</p>
       </div>
       <ul>
         ${suggestions.map((suggestion) => `<li>${escapeHtml(suggestion)}</li>`).join("")}
@@ -4342,12 +4952,14 @@ function renderDashboardEmptyState(profile) {
 function renderOpportunityCard(opp) {
   const saved = state.saved.includes(opp.id);
   const days = daysUntilDeadline(opp.deadline);
+  const deadline = getDeadlineDisplay(opp.deadline);
   return `
     <article class="opportunity-card">
       <div class="opp-main">
         <div class="opp-top">
           <div class="opportunity-badges">
             <span class="source-pill source-badge">${escapeHtml(opp.source)}</span>
+            ${renderQualityBadge(opp)}
             ${isTedOpportunity(opp) ? `<span class="source-pill source-badge muted-badge">Original language</span>` : ""}
           </div>
           <span class="${badgeClass(opp.matchLabel)}">${opp.matchLabel} · ${opp.matchScore}</span>
@@ -4358,7 +4970,7 @@ function renderOpportunityCard(opp) {
           <span>${escapeHtml(opp.buyer)}</span>
           <span>${escapeHtml(opp.location)}</span>
           <span>${formatISK(opp.estimatedValue)}</span>
-          <span class="${days <= 14 ? "deadline danger" : "deadline"}">${days} days left</span>
+          <span class="${deadline.className}">${escapeHtml(deadline.label)}</span>
         </div>
         <div class="reason-row">
           ${opp.matchReasons.slice(0, 3).map((r) => `<span>${escapeHtml(r)}</span>`).join("")}
@@ -4377,14 +4989,38 @@ function isTedOpportunity(opp) {
   return /ted|tenders electronic daily/i.test(String(opp.source || ""));
 }
 
+function formatQualityStatus(status) {
+  const value = normalizeOpportunityQualityStatus(status);
+  const labels = {
+    confirmed_tender: "Confirmed tender",
+    early_signal: "Early signal",
+    needs_review: "Needs review"
+  };
+  return labels[value] || capitalize(value.replace(/_/g, " "));
+}
+
+function renderQualityBadge(opp) {
+  const status = normalizeOpportunityQualityStatus(opp.qualityStatus, opp);
+  return `<span class="source-pill source-badge quality-badge ${escapeHtml(status)}">${escapeHtml(formatQualityStatus(status))}</span>`;
+}
+
+function renderQualityWarning(opp) {
+  if (normalizeOpportunityQualityStatus(opp.qualityStatus, opp) !== "needs_review") return "";
+  return `<div class="note-panel quality-warning">Imported from broad feed — verify source page.</div>`;
+}
+
 function renderOpportunityModal(opp) {
   const saved = state.saved.includes(opp.id);
+  const deadline = getDeadlineDisplay(opp.deadline);
   return `
     <div class="modal-backdrop">
       <div class="modal" role="dialog" aria-modal="true">
         <div class="modal-header">
           <div>
-            <span class="${badgeClass(opp.matchLabel)}">${opp.matchLabel} · ${opp.matchScore}</span>
+            <div class="opportunity-badges">
+              <span class="${badgeClass(opp.matchLabel)}">${opp.matchLabel} · ${opp.matchScore}</span>
+              ${renderQualityBadge(opp)}
+            </div>
             <h2>${escapeHtml(opp.title)}</h2>
             <p>${escapeHtml(opp.buyer)} · ${escapeHtml(opp.location)} · ${formatISK(opp.estimatedValue)}</p>
           </div>
@@ -4394,6 +5030,7 @@ function renderOpportunityModal(opp) {
         <div class="modal-body">
           <div class="modal-grid">
             <section>
+              ${renderQualityWarning(opp)}
               <h3>Description</h3>
               <p>${escapeHtml(opp.description || "No description available.")}</p>
               <h3>Requirements</h3>
@@ -4409,9 +5046,10 @@ function renderOpportunityModal(opp) {
             <aside class="side-panel">
               <h3>Opportunity info</h3>
               <p><strong>Source:</strong> ${escapeHtml(opp.source)}</p>
+              <p><strong>Quality:</strong> ${escapeHtml(formatQualityStatus(opp.qualityStatus))}</p>
               <p><strong>Category:</strong> ${escapeHtml(opp.category)}</p>
               <p><strong>Type:</strong> ${escapeHtml(opp.type)}</p>
-              <p><strong>Deadline:</strong> ${escapeHtml(opp.deadline)} (${daysUntilDeadline(opp.deadline)} days left)</p>
+              <p><strong>Deadline:</strong> <span class="${deadline.className}">${escapeHtml(deadline.label)}</span></p>
               <p><strong>Published:</strong> ${escapeHtml(opp.publishedDate)}</p>
               <p><strong>CPV:</strong> ${escapeHtml(opp.cpvCode || "—")}</p>
 
@@ -4519,6 +5157,7 @@ function renderAdminOpportunityRow(opp) {
       <div>
         <h3>${escapeHtml(opp.title)}</h3>
         <p>${escapeHtml(opp.buyer)} · ${escapeHtml(opp.source)} · ${escapeHtml(opp.location)} · ${escapeHtml(opp.status)}</p>
+        <p>Quality: ${escapeHtml(formatQualityStatus(opp.qualityStatus))}</p>
       </div>
       <button
         class="btn btn-ghost"
@@ -4543,7 +5182,7 @@ function renderReport() {
   }
 
   const profile = state.profile;
-  const matches = getMatchedOpportunities().filter((opp) => opp.matchScore >= 50).slice(0, 5);
+  const matches = getReportMatches();
   const report = buildReportContent(profile, matches);
   const selectedReport = state.reports.find((item) => item.id === state.selectedReportId);
   const archiveStatus = state.reportArchiveLoading
@@ -4562,7 +5201,7 @@ function renderReport() {
       <div>
         <p class="eyebrow">Weekly report</p>
         <h1>Weekly Opportunity Report</h1>
-        <p>This is what the client receives by email.</p>
+        <p>${escapeHtml(profile.companyName || "Your company")} · ${escapeHtml(formatReportDateRange(report.periodStart, report.periodEnd))}</p>
       </div>
       <div class="dashboard-actions">
         <button class="btn btn-primary" data-action="save-report" ${state.reportSaveLoading ? "disabled" : ""}>
@@ -4578,16 +5217,11 @@ function renderReport() {
       </div>
     ` : ""}
 
-    <section class="report-preview" id="report-preview">
-      <div class="email-top">
-        <span>To: ${escapeHtml(profile.contactEmail || "client@example.com")}</span>
-        <span>Subject: Weekly Opportunity Report for ${escapeHtml(profile.companyName || "Your Company")}</span>
-      </div>
-      <div class="report-body">
-        ${report.htmlContent}
-      </div>
-      <textarea id="report-text" class="hidden-textarea">${escapeHtml(report.textContent)}</textarea>
-    </section>
+    ${renderReportPreview(report, {
+      id: "report-preview",
+      contactEmail: profile.contactEmail,
+      companyName: profile.companyName
+    })}
 
     <section class="report-archive">
       <div class="card-header">
@@ -4600,32 +5234,89 @@ function renderReport() {
       ${archiveContent}
     </section>
 
-    ${selectedReport ? `
-      <section class="report-preview archive-view">
-        <div class="email-top">
-          <span>${escapeHtml(selectedReport.title || "Saved report")}</span>
-          <span>${formatDateTime(selectedReport.created_at)}</span>
-        </div>
-        <div class="report-body">
-          ${selectedReport.html_content || `<pre>${escapeHtml(selectedReport.text_content || "")}</pre>`}
-          <button class="btn btn-secondary" data-action="close-archive-report">Close report</button>
-        </div>
-      </section>
-    ` : ""}
+    ${selectedReport ? renderSavedReportPreview(selectedReport, profile) : ""}
   `);
 }
 
 function renderReportArchiveRow(report) {
   const itemCount = Array.isArray(report.report_items) ? report.report_items.length : Number(report.itemCount || 0);
   return `
-    <div class="admin-row">
+    <div class="report-archive-row">
       <div>
         <h3>${escapeHtml(report.title || "Untitled report")}</h3>
-        <p>${formatDateTime(report.created_at)} · ${itemCount} opportunities · ${escapeHtml(report.status || "draft")}</p>
+        <p>${formatDateTime(report.created_at)} · ${itemCount} item${itemCount === 1 ? "" : "s"} · ${escapeHtml(report.status || "draft")}</p>
       </div>
       <button class="btn btn-secondary" data-action="view-report" data-id="${escapeHtml(report.id)}">View report</button>
     </div>
   `;
+}
+
+function renderReportPreview(report, options = {}) {
+  const id = options.id ? ` id="${escapeHtml(options.id)}"` : "";
+  return `
+    <section class="report-preview"${id}>
+      <div class="report-meta-bar">
+        <div>
+          <span>Generated by VerkRadar</span>
+          <strong>${escapeHtml(report.title || "Weekly Opportunity Report")}</strong>
+        </div>
+        <div>
+          <span>${escapeHtml(options.companyName || state.profile?.companyName || "Company")}</span>
+          <strong>${escapeHtml(formatReportDateRange(report.periodStart, report.periodEnd))}</strong>
+        </div>
+      </div>
+      <div class="report-body">
+        ${report.htmlContent}
+        ${options.closeButton ? `<button class="btn btn-secondary report-close-btn" data-action="close-archive-report">Close report</button>` : ""}
+      </div>
+      ${report.textContent && options.includeTextArea !== false ? `<textarea id="report-text" class="hidden-textarea">${escapeHtml(report.textContent)}</textarea>` : ""}
+    </section>
+  `;
+}
+
+function renderSavedReportPreview(savedReport, profile) {
+  const periodStart = savedReport.period_start || savedReport.created_at?.slice(0, 10) || new Date().toISOString().slice(0, 10);
+  const periodEnd = savedReport.period_end || savedReport.created_at?.slice(0, 10) || new Date().toISOString().slice(0, 10);
+  const htmlContent = normalizeSavedReportHtml(savedReport);
+  return renderReportPreview({
+    title: savedReport.title || "Saved report",
+    periodStart,
+    periodEnd,
+    htmlContent,
+    textContent: savedReport.text_content || ""
+  }, {
+    companyName: profile.companyName,
+    closeButton: true,
+    includeTextArea: false
+  });
+}
+
+function normalizeSavedReportHtml(savedReport) {
+  if (savedReport.html_content && savedReport.html_content.includes("report-cover")) {
+    return savedReport.html_content;
+  }
+
+  const periodStart = savedReport.period_start || savedReport.created_at?.slice(0, 10) || new Date().toISOString().slice(0, 10);
+  const periodEnd = savedReport.period_end || savedReport.created_at?.slice(0, 10) || new Date().toISOString().slice(0, 10);
+  const fallbackContent = savedReport.html_content || `<pre>${escapeHtml(savedReport.text_content || "No report content was saved.")}</pre>`;
+  return `
+    <div class="report-cover">
+      <div class="report-kicker">Generated by VerkRadar</div>
+      <p class="eyebrow">Saved weekly report</p>
+      <h2>${escapeHtml(savedReport.title || "Saved report")}</h2>
+      <p>${escapeHtml(formatReportDateRange(periodStart, periodEnd))}</p>
+      <p>${escapeHtml(savedReport.summary || "This older saved report is shown in a modern report container.")}</p>
+    </div>
+    <div class="report-legacy-content">
+      ${fallbackContent}
+    </div>
+  `;
+}
+
+function getReportMatches() {
+  return getMatchedOpportunities()
+    .filter((opp) => opp.matchScore >= 50 || state.saved.includes(opp.id))
+    .slice(0, 12);
 }
 
 function buildReportContent(profile, matches) {
@@ -4635,24 +5326,31 @@ function buildReportContent(profile, matches) {
   start.setDate(start.getDate() - 7);
   const periodStart = start.toISOString().slice(0, 10);
   const title = `Weekly Opportunity Report for ${profile.companyName}`;
-  const summary = `We found ${matches.length} relevant opportunities this week.`;
+  const sections = getReportSections(matches);
+  const summary = `${matches.length} stored matches reviewed for ${profile.companyName}.`;
   const textContent = generateWeeklyReport(profile, matches);
   const htmlContent = `
-    <h2>${escapeHtml(title)}</h2>
-    <p>Hello,</p>
-    <p>${escapeHtml(summary)} The strongest match is <strong>${escapeHtml(matches[0]?.title || "—")}</strong>.</p>
-    ${matches.map((opp, index) => `
-      <article class="report-item">
-        <h3>${index + 1}. ${escapeHtml(opp.title)}</h3>
-        <p><strong>Buyer:</strong> ${escapeHtml(opp.buyer)}</p>
-        <p><strong>Deadline:</strong> ${escapeHtml(opp.deadline)} · <strong>Match:</strong> ${opp.matchScore}/100 (${escapeHtml(opp.matchLabel)})</p>
-        <p><strong>Why this fits:</strong></p>
-        <ul>${opp.matchReasons.slice(0, 4).map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>
-        <p><strong>Things to check:</strong> ${escapeHtml(opp.risks[0] || "Check the official documents and qualification requirements.")}</p>
-        <p><strong>Recommended next step:</strong> Open the source documents and confirm mandatory requirements before deciding whether to apply.</p>
-      </article>
-    `).join("")}
-    <p>Best regards,<br />VerkRadar</p>
+    <div class="report-cover">
+      <div class="report-kicker">Generated by VerkRadar</div>
+      <p class="eyebrow">Weekly opportunity report</p>
+      <h2>${escapeHtml(title)}</h2>
+      <p>${escapeHtml(formatReportDateRange(periodStart, periodEnd))}</p>
+      <p>${escapeHtml(summary)} ${matches[0] ? `The highest-ranked item is ${escapeHtml(matches[0].title)}.` : "No report-ready matches were found for this period."}</p>
+    </div>
+
+    <div class="report-summary-grid">
+      ${renderReportSummaryCard("Confirmed tenders", sections.confirmed.length)}
+      ${renderReportSummaryCard("Early signals", sections.early.length)}
+      ${renderReportSummaryCard("Needs review", sections.review.length)}
+      ${renderReportSummaryCard("Saved opportunities", sections.saved.length)}
+    </div>
+
+    ${renderReportOpportunitySection("Confirmed tenders", "Clear procurement intent. Review source documents and decide whether to pursue.", sections.confirmed)}
+    ${renderReportOpportunitySection("Early signals", "Planned work or upcoming procurement signals. Useful for pipeline planning before a tender is published.", sections.early)}
+    ${renderReportOpportunitySection("Needs review", "Imported from broad feeds or lower-confidence matches. Verify source page before treating as a tender.", sections.review)}
+    ${renderReportOpportunitySection("Saved", "Opportunities your team has already marked for follow-up.", sections.saved)}
+
+    <p class="report-footer-note">VerkRadar helps prioritise public opportunity review. Always check the original source documents, deadlines, requirements and eligibility before acting.</p>
   `;
 
   return {
@@ -4665,33 +5363,138 @@ function buildReportContent(profile, matches) {
   };
 }
 
+function formatReportDateRange(start, end) {
+  return `${formatShortDate(start)} to ${formatShortDate(end)}`;
+}
+
+function getReportSections(matches) {
+  const confirmed = [];
+  const early = [];
+  const review = [];
+
+  matches.forEach((opp) => {
+    const quality = normalizeOpportunityQualityStatus(opp.qualityStatus, opp);
+    if (quality === "early_signal") early.push(opp);
+    else if (quality === "needs_review") review.push(opp);
+    else confirmed.push(opp);
+  });
+
+  return {
+    confirmed,
+    early,
+    review,
+    saved: matches.filter((opp) => state.saved.includes(opp.id))
+  };
+}
+
+function renderReportSummaryCard(label, value) {
+  return `
+    <div class="report-summary-card">
+      <span>${escapeHtml(label)}</span>
+      <strong>${value}</strong>
+    </div>
+  `;
+}
+
+function renderReportOpportunitySection(title, description, opportunities) {
+  return `
+    <section class="report-section">
+      <div class="report-section-head">
+        <h3>${escapeHtml(title)}</h3>
+        <p>${escapeHtml(description)}</p>
+      </div>
+      ${opportunities.length
+        ? opportunities.map(renderReportOpportunityItem).join("")
+        : `<div class="report-empty">No ${escapeHtml(title.toLowerCase())} in this report.</div>`}
+    </section>
+  `;
+}
+
+function renderReportOpportunityItem(opp) {
+  const deadline = getDeadlineDisplay(opp.deadline);
+  const valueKnown = Boolean(opp.estimatedValue);
+  const risks = getReportRisks(opp);
+  const deadlineText = opp.deadline ? deadline.label : "Not found";
+  const valueText = valueKnown ? formatISK(opp.estimatedValue) : "Not listed";
+  return `
+    <article class="report-item">
+      <div class="report-item-top">
+        ${renderReportQualityBadge(opp)}
+        <span class="${badgeClass(opp.matchLabel)}">${escapeHtml(opp.matchLabel)} · ${opp.matchScore}</span>
+      </div>
+      <h4>${escapeHtml(opp.title)}</h4>
+      <div class="report-facts">
+        <span><strong>Buyer</strong>${escapeHtml(opp.buyer)}</span>
+        <span><strong>Source</strong>${escapeHtml(opp.source)}</span>
+        <span><strong>Location</strong>${escapeHtml(opp.location)}</span>
+        <span><strong>Deadline</strong><em>${escapeHtml(deadlineText)}</em></span>
+        <span><strong>Value</strong><em>${escapeHtml(valueText)}</em></span>
+      </div>
+      <div class="report-detail-grid">
+        <div>
+          <h5>Why this matters</h5>
+          <ul>${(opp.matchReasons.length ? opp.matchReasons : ["Matched to your profile by service, location or keyword overlap."]).slice(0, 4).map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>
+        </div>
+        <div>
+          <h5>Risks / things to check</h5>
+          <ul>${risks.slice(0, 5).map((risk) => `<li>${escapeHtml(risk)}</li>`).join("")}</ul>
+        </div>
+      </div>
+      ${opp.url ? `<a class="report-source-link" href="${escapeHtml(opp.url)}" target="_blank" rel="noopener">Open source <span aria-hidden="true">↗</span></a>` : `<span class="report-source-link is-disabled">Source link missing</span>`}
+    </article>
+  `;
+}
+
+function renderReportQualityBadge(opp) {
+  const status = normalizeOpportunityQualityStatus(opp.qualityStatus, opp);
+  return `<span class="report-quality ${escapeHtml(status)}">${escapeHtml(formatQualityStatus(status))}</span>`;
+}
+
+function getReportRisks(opp) {
+  const risks = Array.isArray(opp.risks) && opp.risks.length
+    ? [...opp.risks]
+    : ["Open the source page and confirm mandatory requirements."];
+  if (!opp.deadline) risks.unshift("Deadline missing — check source page.");
+  if (!opp.estimatedValue) risks.push("Estimated value is not listed in the imported data.");
+  if (normalizeOpportunityQualityStatus(opp.qualityStatus, opp) === "needs_review") {
+    risks.push("Imported from broad feed — verify that this is a real tender or business opportunity.");
+  }
+  return [...new Set(risks.map((risk) => String(risk || "").trim()).filter(Boolean))];
+}
+
 function generateWeeklyReport(profile, matches) {
+  const sections = getReportSections(matches);
   return `Weekly Opportunity Report for ${profile.companyName}
+Date range: ${formatReportDateRange(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10), new Date().toISOString().slice(0, 10))}
 
-Hello,
+Summary:
+- Confirmed tenders: ${sections.confirmed.length}
+- Early signals: ${sections.early.length}
+- Needs review: ${sections.review.length}
+- Saved opportunities: ${sections.saved.length}
 
-We found ${matches.length} relevant opportunities this week.
-The strongest match is: ${matches[0]?.title || "No match"}.
-
-${matches.map((opp, i) => `${i + 1}. ${opp.title}
+${matches.length ? matches.map((opp, i) => `${i + 1}. ${opp.title}
+Quality: ${formatQualityStatus(opp.qualityStatus)}
 Buyer: ${opp.buyer}
-Deadline: ${opp.deadline}
+Source: ${opp.source}
+Location: ${opp.location}
+Deadline: ${formatOpportunityDeadline(opp.deadline)}
+Value: ${opp.estimatedValue ? formatISK(opp.estimatedValue) : "Not listed"}
 Match: ${opp.matchScore}/100 (${opp.matchLabel})
 Why this fits:
-${opp.matchReasons.map((r) => `- ${r}`).join("\n")}
+${(opp.matchReasons.length ? opp.matchReasons : ["Matched to your company profile."]).map((r) => `- ${r}`).join("\n")}
 Things to check:
-${(opp.risks.length ? opp.risks : ["Check the official documents and qualification requirements."]).map((r) => `- ${r}`).join("\n")}
+${getReportRisks(opp).map((r) => `- ${r}`).join("\n")}
 Recommended next step:
-Open the source documents and confirm mandatory requirements.
-`).join("\n")}
+${opp.url ? `Open source page: ${opp.url}` : "Find and verify the original source page before acting."}
+`).join("\n") : "No report-ready matches were found for this period."}
 
-Best regards,
 VerkRadar`;
 }
 
 async function copyReport() {
   const profile = state.profile || getEmptyProfile();
-  const text = generateWeeklyReport(profile, getMatchedOpportunities().slice(0, 5));
+  const text = generateWeeklyReport(profile, getReportMatches());
 
   try {
     await navigator.clipboard.writeText(text);
@@ -4735,23 +5538,48 @@ function pricingCard(name, price, items, highlighted = false) {
 function renderSettings() {
   if (!state.user) return requireAuthPage();
 
-  if (!state.profile) {
+  if (state.profileLoading && !state.profile && !state.profileDraft) {
+    return renderShell(`
+      <section class="empty-state">
+        <div class="loader-mark" aria-label="Loading company profile"></div>
+        <h1>Loading company profile…</h1>
+        <p>Checking your saved company profile.</p>
+        <button class="btn btn-secondary" type="button" data-action="retry-settings-profile">Retry</button>
+      </section>
+    `);
+  }
+
+  if (state.profileLoadError && !state.profile && !state.profileDraft) {
+    return renderShell(`
+      <section class="empty-state">
+        <h1>Could not load Settings</h1>
+        <p>${escapeHtml(state.profileLoadError)}</p>
+        <button class="btn btn-primary" type="button" data-action="retry-settings-profile">Retry</button>
+      </section>
+    `);
+  }
+
+  if (!state.profile && !state.profileDraft) {
     return requireProfilePage(
       "Create a profile first",
       "Settings are available after you create a company profile."
     );
   }
 
-  const formHtml = renderOnboarding()
-    .match(/<form[\s\S]*<\/form>/)[0];
-
   return renderShell(`
     <section class="page-head">
       <p class="eyebrow">Settings</p>
       <h1>Edit profile</h1>
       <p>Update your company profile and matching preferences.</p>
+      ${state.profileDraftDirty ? `<div class="form-message warning">Unsaved changes</div>` : ""}
+      ${state.profileLoadError ? `
+        <div class="form-message error">
+          ${escapeHtml(state.profileLoadError)}
+          <button class="btn btn-secondary" type="button" data-action="retry-settings-profile">Retry</button>
+        </div>
+      ` : ""}
     </section>
-    ${formHtml}
+    ${renderProfileForm()}
     <section class="danger-zone">
       <h2>Reset demo</h2>
       <p>This clears localStorage profile, saved and ignored opportunities.</p>
@@ -4772,7 +5600,7 @@ function renderOpportunitySummaryForCopy() {}
 function generateOpportunitySummary(opp) {
   return `${opp.title}
 Buyer: ${opp.buyer}
-Deadline: ${opp.deadline}
+Deadline: ${formatOpportunityDeadline(opp.deadline)}
 Match: ${opp.matchScore}/100 (${opp.matchLabel})
 Why this fits:
 ${opp.matchReasons.map((r) => `- ${r}`).join("\n")}

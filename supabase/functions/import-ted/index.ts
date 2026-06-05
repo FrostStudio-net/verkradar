@@ -36,6 +36,7 @@ type OpportunityInsert = {
 
 const TED_SEARCH_URL = "https://api.ted.europa.eu/v3/notices/search";
 const TED_BASE_URL = "https://ted.europa.eu";
+const TED_SOURCE_NAME = "TED Iceland/Nordic";
 const DEFAULT_LIMIT = 50;
 const MIN_MATCH_SCORE = 50;
 const IMPORT_MODES = ["iceland", "nordic", "eu-broad"] as const;
@@ -142,7 +143,7 @@ Deno.serve(async (req) => {
     const query = buildRecentQuery();
     const runId = await startImportRun(adminClient, {
       runType: isAutomation ? "ted-automation" : "ted-manual",
-      sourceName: "EU TED",
+      sourceName: TED_SOURCE_NAME,
       importMode,
       query,
     });
@@ -225,7 +226,7 @@ async function getOrCreateTedSource(supabase: ReturnType<typeof createClient>) {
   const { data: existing, error: selectError } = await supabase
     .from("sources")
     .select("id")
-    .eq("name", "EU TED")
+    .eq("name", TED_SOURCE_NAME)
     .maybeSingle();
 
   if (selectError) throw selectError;
@@ -234,11 +235,11 @@ async function getOrCreateTedSource(supabase: ReturnType<typeof createClient>) {
   const { data, error } = await supabase
     .from("sources")
     .insert({
-      name: "EU TED",
-      source_type: "api",
+      name: TED_SOURCE_NAME,
+      source_type: "eu_ted",
       base_url: TED_BASE_URL,
       is_active: true,
-      notes: "Created by TED API importer",
+      notes: "TED importer for Iceland/Nordic notices.",
     })
     .select("id")
     .single();
@@ -620,7 +621,7 @@ async function generateWeeklyReports(supabase: ReturnType<typeof createClient>) 
           category: String(opportunity.category || "Public procurement"),
           type: String(opportunity.type || "tender"),
           publishedDate: String(opportunity.published_date || ""),
-          source: String((opportunity.sources as Record<string, unknown> | undefined)?.name || "EU TED"),
+          source: String((opportunity.sources as Record<string, unknown> | undefined)?.name || TED_SOURCE_NAME),
           matchScore: Number(row.match_score || 0),
           matchLabel: getMatchLabel(Number(row.match_score || 0)),
           matchReasons: [],
