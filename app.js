@@ -1382,6 +1382,10 @@ async function getTedImportHeaders() {
   return headers;
 }
 
+function getAuthRedirectUrl() {
+  return `${window.location.origin}/#/onboarding`;
+}
+
 async function signUp(email, password) {
   state.authSubmitting = true;
   state.authMessage = null;
@@ -1391,7 +1395,10 @@ async function signUp(email, password) {
     if (!supabaseClient) throw new Error("Supabase client is not configured.");
     const { data, error } = await supabaseClient.auth.signUp({
       email: String(email || "").trim(),
-      password: String(password || "")
+      password: String(password || ""),
+      options: {
+        emailRedirectTo: getAuthRedirectUrl()
+      }
     });
     if (error) throw error;
     clearLocalProfileState();
