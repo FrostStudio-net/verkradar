@@ -1383,7 +1383,7 @@ async function getTedImportHeaders() {
 }
 
 function getAuthRedirectUrl() {
-  return `${window.location.origin}/#/onboarding`;
+  return window.location.origin;
 }
 
 async function signUp(email, password) {
