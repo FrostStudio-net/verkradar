@@ -1685,6 +1685,66 @@ select option:checked {
   border-bottom: 0;
 }
 
+.source-items-row td {
+  background: rgba(255,255,255,0.018);
+}
+
+.source-items-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--radius-sm);
+  background: rgba(0,0,0,0.18);
+}
+
+.source-items-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.source-items-header strong {
+  color: var(--text);
+}
+
+.source-items-header span {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.source-items-list {
+  display: grid;
+  gap: 8px;
+}
+
+.source-item {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.035);
+}
+
+.source-item strong,
+.source-item span {
+  display: block;
+}
+
+.source-item strong {
+  color: var(--text);
+}
+
+.source-item span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
 .ops-table .import-run-debug-row td {
   padding: 0 12px 12px;
   background: rgba(255,255,255,0.018);

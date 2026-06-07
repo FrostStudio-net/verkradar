@@ -128,6 +128,7 @@ let state = {
   sourceCoverageLoading: false,
   sourceCoverageLoaded: false,
   sourceCoverageError: null,
+  expandedSourceId: null,
   adminCompanies: [],
   adminCompaniesLoading: false,
   adminCompaniesLoaded: false,
@@ -417,6 +418,10 @@ document.addEventListener("click", (event) => {
   if (name === "import-ted") importTedNotices();
   if (name === "import-source-connectors") importSourceConnectors();
   if (name === "test-source-connector") importSourceConnectors(id);
+  if (name === "toggle-source-items") {
+    state.expandedSourceId = state.expandedSourceId === id ? null : id;
+    render();
+  }
   if (name === "refresh-admin-status") refreshAdminOperationsData();
   if (name === "hide-imported-opportunity") updateOpportunityStatus(id, "hidden");
   if (name === "mark-imported-relevant") updateOpportunityStatus(id, "open");
@@ -1029,11 +1034,39 @@ async function loadSourceCoverageForAdmin() {
       .order("name", { ascending: true });
 
     if (error) throw error;
-    state.sourceCoverage = (data || []).map((source) => ({
+    const sources = (data || []).map((source) => ({
       ...source,
       source_status: Array.isArray(source.source_status) ? source.source_status[0] : source.source_status,
       source_connectors: Array.isArray(source.source_connectors) ? source.source_connectors[0] : source.source_connectors
     }));
+    const sourceIds = sources.map((source) => source.id).filter(Boolean);
+    let opportunitiesBySource = {};
+
+    if (sourceIds.length) {
+      const { data: opportunityRows, error: opportunityError } = await supabaseClient
+        .from("opportunities")
+        .select("id, source_id, title, buyer, deadline, status, url, raw_payload, created_at, published_date")
+        .in("source_id", sourceIds)
+        .eq("status", "open")
+        .order("created_at", { ascending: false })
+        .limit(500);
+
+      if (opportunityError) throw opportunityError;
+      opportunitiesBySource = (opportunityRows || []).reduce((acc, opportunity) => {
+        if (!acc[opportunity.source_id]) acc[opportunity.source_id] = [];
+        acc[opportunity.source_id].push(opportunity);
+        return acc;
+      }, {});
+    }
+
+    state.sourceCoverage = sources.map((source) => {
+      const opportunities = opportunitiesBySource[source.id] || [];
+      return {
+        ...source,
+        opportunityStats: getSourceOpportunityStats(opportunities),
+        latestOpportunities: opportunities.slice(0, 8)
+      };
+    });
     state.sourceCoverageLoaded = true;
   } catch (error) {
     console.error("Failed to load source coverage:", error);
@@ -4495,6 +4528,23 @@ function formatConnectorType(type) {
   return labels[type] || type || "Planned";
 }
 
+function getSourceOpportunityStats(opportunities = []) {
+  return opportunities.reduce((stats, opportunity) => {
+    const rawPayload = opportunity.raw_payload && typeof opportunity.raw_payload === "object" ? opportunity.raw_payload : {};
+    const quality = normalizeOpportunityQualityStatus(rawPayload.quality_status || rawPayload.qualityStatus, opportunity);
+    stats.active += 1;
+    if (quality === "confirmed_tender") stats.confirmed += 1;
+    else if (quality === "early_signal") stats.early += 1;
+    else stats.needsReview += 1;
+    return stats;
+  }, {
+    active: 0,
+    confirmed: 0,
+    early: 0,
+    needsReview: 0
+  });
+}
+
 function renderSourceCoverageSection() {
   const rows = state.sourceCoverage || [];
   return `
@@ -4512,12 +4562,13 @@ function renderSourceCoverageSection() {
             <thead>
               <tr>
                 <th>Source</th>
-                <th>Type</th>
                 <th>Connector</th>
-                <th>Status</th>
-                <th>Last checked</th>
+                <th>Enabled</th>
                 <th>Last success</th>
-                <th>Active opportunities</th>
+                <th>Active</th>
+                <th>Confirmed</th>
+                <th>Early</th>
+                <th>Needs review</th>
                 <th>Last error</th>
                 <th>Action</th>
               </tr>
@@ -4539,29 +4590,75 @@ function renderSourceCoverageRow(source) {
   const statusClass = getRunStatusClass(effectiveStatus);
   const canTestConnector = connector.enabled && ["rss_feed", "wordpress_rest"].includes(connector.connector_type);
   const isTesting = state.connectorTestingSourceId === source.id;
+  const stats = source.opportunityStats || { active: Number(status.active_opportunities_count || 0), confirmed: 0, early: 0, needsReview: 0 };
+  const latest = source.latestOpportunities || [];
+  const isExpanded = state.expandedSourceId === source.id;
+  const lastError = connector.last_error || status.last_error || "";
   return `
     <tr>
       <td>
         <strong>${escapeHtml(source.name || "Unknown source")}</strong>
+        <br><span>${escapeHtml(formatSourceType(source.source_type))}</span>
         ${connector.endpoint_url || source.base_url ? `<br><a href="${escapeHtml(connector.endpoint_url || source.base_url)}" target="_blank" rel="noreferrer">${escapeHtml(connector.endpoint_url || source.base_url)}</a>` : ""}
       </td>
-      <td>${escapeHtml(formatSourceType(source.source_type))}</td>
       <td>
         <strong>${escapeHtml(formatConnectorType(connector.connector_type))}</strong>
-        <br><span>${connector.enabled ? "Enabled" : "Disabled"}</span>
         ${connector.require_any_keyword === false ? `<br><span>Keyword match optional</span>` : `<br><span>Requires keyword match</span>`}
         ${Array.isArray(connector.include_keywords) && connector.include_keywords.length ? `<br><span>Includes: ${escapeHtml(connector.include_keywords.slice(0, 5).join(", "))}${connector.include_keywords.length > 5 ? "..." : ""}</span>` : ""}
         ${Array.isArray(connector.exclude_keywords) && connector.exclude_keywords.length ? `<br><span>Excludes: ${escapeHtml(connector.exclude_keywords.slice(0, 5).join(", "))}${connector.exclude_keywords.length > 5 ? "..." : ""}</span>` : ""}
       </td>
-      <td><span class="status-pill ${statusClass}">${escapeHtml(effectiveStatus)}</span></td>
-      <td>${escapeHtml(formatDateTime(connector.last_checked_at || status.last_checked_at))}</td>
+      <td>
+        <span class="status-pill ${connector.enabled ? "is-success" : ""}">${connector.enabled ? "Enabled" : "Disabled"}</span>
+        <br><span class="status-pill ${statusClass}">${escapeHtml(effectiveStatus)}</span>
+      </td>
       <td>${escapeHtml(formatDateTime(connector.last_success_at || status.last_success_at))}</td>
-      <td>${Number(status.active_opportunities_count || 0)}</td>
-      <td>${connector.last_error ? escapeHtml(connector.last_error) : status.last_error ? escapeHtml(status.last_error) : ""}</td>
+      <td>${Number(stats.active || 0)}</td>
+      <td>${Number(stats.confirmed || 0)}</td>
+      <td>${Number(stats.early || 0)}</td>
+      <td>${Number(stats.needsReview || 0)}</td>
+      <td>${lastError ? escapeHtml(lastError) : ""}</td>
       <td>
         <button class="btn btn-secondary btn-small" type="button" data-action="test-source-connector" data-id="${escapeHtml(source.id)}" ${(!canTestConnector || isTesting || state.connectorImportLoading) ? "disabled" : ""}>
           ${isTesting ? "Testing..." : "Test source"}
         </button>
+        <button class="btn btn-ghost btn-small" type="button" data-action="toggle-source-items" data-id="${escapeHtml(source.id)}" ${!latest.length ? "disabled" : ""}>
+          ${isExpanded ? "Hide items" : "View latest items"}
+        </button>
+      </td>
+    </tr>
+    ${isExpanded ? renderSourceLatestItemsRow(source) : ""}
+  `;
+}
+
+function renderSourceLatestItemsRow(source) {
+  const latest = source.latestOpportunities || [];
+  return `
+    <tr class="source-items-row">
+      <td colspan="10">
+        <div class="source-items-panel">
+          <div class="source-items-header">
+            <strong>Latest active items</strong>
+            <span>${latest.length} shown</span>
+          </div>
+          ${latest.length ? `
+            <div class="source-items-list">
+              ${latest.map((opportunity) => {
+                const rawPayload = opportunity.raw_payload && typeof opportunity.raw_payload === "object" ? opportunity.raw_payload : {};
+                const quality = normalizeOpportunityQualityStatus(rawPayload.quality_status || rawPayload.qualityStatus, opportunity);
+                return `
+                  <div class="source-item">
+                    <div>
+                      <strong>${escapeHtml(opportunity.title || "Untitled opportunity")}</strong>
+                      <span>${escapeHtml(opportunity.buyer || source.name || "Unknown buyer")} · ${escapeHtml(formatOpportunityDeadline(opportunity.deadline))}</span>
+                    </div>
+                    <span class="quality-badge ${escapeHtml(quality)}">${escapeHtml(formatQualityStatus(quality))}</span>
+                    ${opportunity.url ? `<a class="btn btn-ghost btn-small" href="${escapeHtml(opportunity.url)}" target="_blank" rel="noreferrer">Open</a>` : ""}
+                  </div>
+                `;
+              }).join("")}
+            </div>
+          ` : `<div class="empty-card">No active items for this source.</div>`}
+        </div>
       </td>
     </tr>
   `;
