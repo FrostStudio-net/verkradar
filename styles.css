@@ -979,26 +979,41 @@ h3 {
 }
 
 .form-card {
-  padding: 28px;
+  padding: 34px;
   margin-bottom: 80px;
 }
 
+.settings-profile-form {
+  max-width: 1120px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
 .form-section {
-  padding: 24px 0;
+  padding: 34px 0;
   border-bottom: 1px solid var(--line);
+}
+
+.form-section:first-child {
+  padding-top: 6px;
 }
 
 .form-section:last-child {
   border-bottom: 0;
 }
 
+.form-section h2 {
+  margin: 0 0 18px;
+}
+
 .form-section-hint {
-  margin: -4px 0 16px;
+  margin: -8px 0 22px;
   color: var(--muted);
+  line-height: 1.55;
 }
 
 .field-helper {
-  margin: 8px 0 12px;
+  margin: 10px 0 18px;
   color: var(--muted);
   font-size: 0.9rem;
   line-height: 1.45;
@@ -1012,15 +1027,26 @@ h3 {
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 16px;
+  gap: 20px;
+  align-items: start;
+}
+
+.keyword-grid {
+  margin-top: 22px;
+}
+
+.profile-keyword-field {
+  grid-template-rows: minmax(40px, auto) auto auto;
+  height: 100%;
 }
 
 label {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   color: var(--muted);
   font-weight: 650;
   font-size: 14px;
+  line-height: 1.35;
 }
 
 .custom-select-field {
@@ -1075,8 +1101,8 @@ select:open {
 textarea { resize: vertical; }
 
 .suggestion-group {
-  margin: 14px 0 18px;
-  padding: 14px;
+  margin: 18px 0 22px;
+  padding: 18px;
   border: 1px solid rgba(255,255,255,0.08);
   border-radius: var(--radius);
   background: rgba(255,255,255,0.025);
@@ -1127,19 +1153,20 @@ textarea { resize: vertical; }
 .profile-travel-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 16px;
+  align-items: start;
 }
 
 .profile-travel-panel {
-  margin-top: 18px;
-  padding: 16px;
+  margin-top: 24px;
+  padding: 22px;
   border: 1px solid rgba(255,255,255,0.10);
-  border-radius: 14px;
+  border-radius: 18px;
   background: rgba(255,255,255,0.025);
 }
 
 .profile-travel-panel h3 {
-  margin: 0 0 12px;
+  margin: 0 0 18px;
   font-size: 1rem;
 }
 
@@ -1156,17 +1183,19 @@ select option:checked {
 .checkbox-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+  gap: 12px;
+  margin-top: 20px;
 }
 
 .checkbox {
   position: relative;
   display: inline-flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   color: var(--muted);
   cursor: pointer;
   user-select: none;
+  line-height: 1.35;
 }
 
 .checkbox input[type="checkbox"] {
@@ -1181,7 +1210,7 @@ select option:checked {
   display: grid;
   place-content: center;
   cursor: pointer;
-  margin: 0;
+  margin: 1px 0 0;
   padding: 0;
 }
 
@@ -3017,6 +3046,14 @@ body.modal-open {
     grid-template-columns: 1fr;
   }
 
+  .form-card {
+    padding: 24px;
+  }
+
+  .form-section {
+    padding: 28px 0;
+  }
+
   .profile-travel-grid {
     grid-template-columns: 1fr;
   }
@@ -3052,6 +3089,19 @@ body.modal-open {
 @media (max-width: 520px) {
   .checkbox-grid {
     grid-template-columns: 1fr;
+  }
+
+  .form-card {
+    padding: 20px;
+  }
+
+  .form-section h2 {
+    margin-bottom: 14px;
+  }
+
+  .profile-travel-panel,
+  .suggestion-group {
+    padding: 16px;
   }
 }
 

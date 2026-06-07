@@ -4527,13 +4527,14 @@ function renderProfileServicesSection() {
         values: serviceSuggestions,
         selectedValues: p.services || []
       })}
-      <div class="form-grid">
-        <label>Extra words VerkRadar should look for in notices.
+      <div class="form-grid keyword-grid">
+        <label class="profile-keyword-field">Extra words VerkRadar should look for in notices.
           <input name="includeKeywords" data-profile-field="includeKeywords" data-profile-array="true" value="${escapeHtml(arrayFieldText(p.includeKeywords))}" />
           <span class="field-helper inline-helper">Use words that often appear in opportunities you want.</span>
         </label>
-        <label>Words that should lower or remove bad matches.
+        <label class="profile-keyword-field">Words that should lower or remove bad matches.
           <input name="excludeKeywords" data-profile-field="excludeKeywords" data-profile-array="true" value="${escapeHtml(arrayFieldText(p.excludeKeywords))}" />
+          <span class="field-helper inline-helper">Words that should lower or remove bad matches.</span>
         </label>
       </div>
       ${renderSuggestionChips({
