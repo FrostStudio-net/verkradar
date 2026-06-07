@@ -1496,6 +1496,10 @@ select option:checked {
   gap: 10px;
 }
 
+.admin-overview-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .ops-metrics div {
   padding: 12px;
   border: 1px solid rgba(255,255,255,0.08);
@@ -1589,6 +1593,105 @@ select option:checked {
   gap: 10px;
   margin: 18px 0 8px;
   align-items: center;
+}
+
+.admin-company-filters {
+  grid-template-columns: minmax(260px, 1.5fr) repeat(3, minmax(150px, 1fr));
+}
+
+.admin-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 18px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255,255,255,0.025);
+}
+
+.admin-tabs button {
+  width: auto;
+  min-height: 42px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.admin-tabs button:hover,
+.admin-tabs button.is-active {
+  background: rgba(215,255,63,0.10);
+  border-color: rgba(215,255,63,0.30);
+  color: var(--text);
+}
+
+.admin-companies-table {
+  min-width: 1120px;
+}
+
+.admin-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.btn-small {
+  min-height: 36px;
+  padding: 0 11px;
+  font-size: 0.82rem;
+}
+
+.admin-company-modal {
+  max-width: 1120px;
+}
+
+.admin-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.admin-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 18px;
+}
+
+.admin-tag-list span {
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.05);
+  color: var(--text);
+  padding: 7px 10px;
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.admin-detail-list {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  margin: 0 0 18px;
+  padding: 0;
+}
+
+.admin-detail-list li {
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.035);
+  padding: 10px;
+}
+
+.admin-detail-list span {
+  color: var(--muted);
+  font-size: 0.86rem;
 }
 
 .admin-filters input,
@@ -3000,8 +3103,19 @@ body.modal-open {
   }
 
   .ops-metrics,
-  .admin-filters {
+  .admin-filters,
+  .admin-overview-metrics,
+  .admin-detail-grid {
     grid-template-columns: 1fr;
+  }
+
+  .admin-tabs {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .admin-tabs button {
+    width: 100%;
   }
 
   .imported-opportunity-row {

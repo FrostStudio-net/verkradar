@@ -128,6 +128,18 @@ let state = {
   sourceCoverageLoading: false,
   sourceCoverageLoaded: false,
   sourceCoverageError: null,
+  adminCompanies: [],
+  adminCompaniesLoading: false,
+  adminCompaniesLoaded: false,
+  adminCompaniesError: null,
+  selectedAdminCompanyId: null,
+  adminActiveTab: "overview",
+  adminCompanyFilters: {
+    search: "",
+    industry: "all",
+    profileStatus: "all",
+    plan: "all"
+  },
   adminOpportunityFilters: {
     source: "all",
     status: "all",
@@ -200,6 +212,11 @@ function clearLocalProfileState() {
   state.sourceCoverageLoading = false;
   state.sourceCoverageLoaded = false;
   state.sourceCoverageError = null;
+  state.adminCompanies = [];
+  state.adminCompaniesLoading = false;
+  state.adminCompaniesLoaded = false;
+  state.adminCompaniesError = null;
+  state.selectedAdminCompanyId = null;
   state.lastMatchedAt = null;
 }
 
@@ -240,6 +257,11 @@ document.addEventListener("click", (event) => {
 
   if (event.target.classList?.contains("modal-backdrop")) {
     event.preventDefault();
+    if (state.selectedAdminCompanyId) {
+      state.selectedAdminCompanyId = null;
+      render();
+      return;
+    }
     closeDetails();
     return;
   }
@@ -258,6 +280,11 @@ document.addEventListener("click", (event) => {
   if (name === "close-modal") {
     event.preventDefault();
     event.stopPropagation();
+    if (state.selectedAdminCompanyId) {
+      state.selectedAdminCompanyId = null;
+      render();
+      return;
+    }
     closeDetails();
     return;
   }
@@ -366,6 +393,27 @@ document.addEventListener("click", (event) => {
     state.selectedReportId = null;
     render();
   }
+  if (name === "admin-tab") {
+    state.adminActiveTab = action.dataset.tab || "overview";
+    state.selectedAdminCompanyId = null;
+    render();
+  }
+  if (name === "view-admin-company") {
+    state.selectedAdminCompanyId = id;
+    render();
+  }
+  if (name === "close-admin-company") {
+    state.selectedAdminCompanyId = null;
+    render();
+  }
+  if (name === "admin-refresh-company-matches") {
+    state.adminMessage = { type: "success", text: "Company matching refresh is handled by the automatic pipeline. Use source imports or profile save to refresh matches." };
+    render();
+  }
+  if (name === "admin-generate-company-report") {
+    state.adminMessage = { type: "success", text: "Report generation is handled by the automatic weekly report pipeline. Manual per-company generation is not enabled yet." };
+    render();
+  }
   if (name === "import-ted") importTedNotices();
   if (name === "import-source-connectors") importSourceConnectors();
   if (name === "test-source-connector") importSourceConnectors(id);
@@ -434,6 +482,13 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && state.selectedOpportunityId) {
     event.preventDefault();
     closeDetails();
+    return;
+  }
+
+  if (event.key === "Escape" && state.selectedAdminCompanyId) {
+    event.preventDefault();
+    state.selectedAdminCompanyId = null;
+    render();
     return;
   }
 
@@ -533,6 +588,12 @@ document.addEventListener("input", (event) => {
     } else {
       state.adminOpportunityFilters[key] = event.target.value;
     }
+    render();
+  }
+
+  if (event.target.matches("[data-admin-company-filter]")) {
+    const key = event.target.dataset.adminCompanyFilter;
+    state.adminCompanyFilters[key] = event.target.value;
     render();
   }
 });
@@ -783,6 +844,7 @@ function afterRouteRender() {
     if (!state.importRunsLoaded && !state.importRunsLoading) loadImportRunsForAdmin();
     if (!state.adminReportsLoaded && !state.adminReportsLoading) loadAdminReports();
     if (!state.sourceCoverageLoaded && !state.sourceCoverageLoading) loadSourceCoverageForAdmin();
+    if (!state.adminCompaniesLoaded && !state.adminCompaniesLoading) loadAdminCompanies();
     if (!state.importedTedOpportunitiesLoaded && !state.importedTedOpportunitiesLoading) loadNewestImportedTedOpportunities().then(render).catch((error) => {
       console.error("Failed to load latest TED opportunities:", error);
     });
@@ -980,13 +1042,120 @@ async function loadSourceCoverageForAdmin() {
   }
 }
 
+async function loadAdminCompanies() {
+  if (!supabaseClient || !state.isAdmin) {
+    state.adminCompanies = [];
+    state.adminCompaniesLoaded = true;
+    return;
+  }
+
+  state.adminCompaniesLoading = true;
+  state.adminCompaniesError = null;
+  render();
+
+  try {
+    const { data: companies, error } = await supabaseClient
+      .from("companies")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    const companyRows = companies || [];
+    const companyIds = companyRows.map((company) => company.id).filter(Boolean);
+    let services = [];
+    let locations = [];
+    let keywords = [];
+    let matches = [];
+    let reports = [];
+
+    if (companyIds.length) {
+      const [servicesResult, locationsResult, keywordsResult, matchesResult, reportsResult] = await Promise.all([
+        supabaseClient.from("company_services").select("company_id, service").in("company_id", companyIds),
+        supabaseClient.from("company_locations").select("company_id, location").in("company_id", companyIds),
+        supabaseClient.from("company_keywords").select("company_id, keyword, type").in("company_id", companyIds),
+        supabaseClient.from("opportunity_matches").select("company_id, opportunity_id, match_score, match_label, opportunities(title, buyer, source_id, sources(name))").in("company_id", companyIds),
+        supabaseClient.from("reports").select("id, company_id, title, created_at, period_start, period_end, status").in("company_id", companyIds).order("created_at", { ascending: false })
+      ]);
+
+      services = servicesResult.error ? [] : servicesResult.data || [];
+      locations = locationsResult.error ? [] : locationsResult.data || [];
+      keywords = keywordsResult.error ? [] : keywordsResult.data || [];
+      matches = matchesResult.error ? [] : matchesResult.data || [];
+      reports = reportsResult.error ? [] : reportsResult.data || [];
+    }
+
+    state.adminCompanies = companyRows.map((company) => mapAdminCompany(company, {
+      services: services.filter((row) => row.company_id === company.id),
+      locations: locations.filter((row) => row.company_id === company.id),
+      keywords: keywords.filter((row) => row.company_id === company.id),
+      matches: matches.filter((row) => row.company_id === company.id),
+      reports: reports.filter((row) => row.company_id === company.id)
+    }));
+    state.adminCompaniesLoaded = true;
+  } catch (error) {
+    console.error("Failed to load admin companies:", error);
+    state.adminCompanies = [];
+    state.adminCompaniesError = formatSupabaseError(error);
+  } finally {
+    state.adminCompaniesLoading = false;
+    state.adminCompaniesLoaded = true;
+    render();
+  }
+}
+
+function mapAdminCompany(company, related) {
+  const services = cleanStringArray((related.services || []).map((row) => row.service));
+  const locations = cleanStringArray((related.locations || []).map((row) => row.location));
+  const includeKeywords = cleanStringArray((related.keywords || []).filter((row) => row.type === "include").map((row) => row.keyword));
+  const excludeKeywords = cleanStringArray((related.keywords || []).filter((row) => row.type === "exclude").map((row) => row.keyword));
+  const reports = related.reports || [];
+  const matches = related.matches || [];
+  const complete = Boolean(company.company_name && company.contact_email && company.industry && services.length && (locations.length || company.base_location || cleanStringArray(company.service_areas).length));
+
+  return {
+    id: company.id,
+    ownerId: company.owner_id || "",
+    companyName: company.company_name || "Unnamed company",
+    contactEmail: company.contact_email || "",
+    website: company.website || "",
+    industry: company.industry || "",
+    plan: company.plan || company.subscription_plan || "Demo",
+    profileStatus: complete ? "Complete" : "Incomplete",
+    createdAt: company.created_at,
+    services,
+    locations,
+    includeKeywords,
+    excludeKeywords,
+    baseLocation: company.base_location || "",
+    serviceAreas: cleanStringArray(company.service_areas),
+    willingToTravel: Boolean(company.willing_to_travel),
+    nationalProjects: Boolean(company.national_projects),
+    remoteProjects: Boolean(company.remote_projects),
+    minimumProjectValueForTravel: company.minimum_project_value_for_travel,
+    minProjectValue: company.min_project_value,
+    maxProjectValue: company.max_project_value,
+    allowUnknownValue: Boolean(company.allow_unknown_value),
+    includeLowConfidence: Boolean(company.include_low_confidence),
+    reportFrequency: company.report_frequency || "weekly",
+    reportDay: company.report_day || "monday",
+    deadlineReminders: Boolean(company.deadline_reminders),
+    matchCount: matches.length,
+    savedCount: 0,
+    latestReportDate: reports[0]?.created_at || "",
+    latestMatches: matches.slice(0, 8),
+    latestReports: reports.slice(0, 5)
+  };
+}
+
 async function refreshAdminOperationsData() {
   if (!state.isAdmin) return;
   await Promise.all([
     loadImportRunsForAdmin(),
     loadNewestImportedTedOpportunities(),
     loadAdminReports(),
-    loadSourceCoverageForAdmin()
+    loadSourceCoverageForAdmin(),
+    loadAdminCompanies()
   ]);
   showToast("Automation status refreshed", "success");
   render();
@@ -5083,12 +5252,13 @@ function renderAdmin() {
   if (!state.isAdmin) return requireAdminPage();
 
   const opportunities = getFilteredAdminOpportunities();
+  const selectedCompany = state.adminCompanies.find((company) => company.id === state.selectedAdminCompanyId);
 
   return renderShell(`
     <section class="page-head">
       <p class="eyebrow">Admin</p>
       <h1>Operations dashboard</h1>
-      <p>Admin tools for monitoring imports, reviewing opportunities and managing manual entries.</p>
+      <p>Admin tools for monitoring imports, reviewing customers, managing sources and handling manual entries.</p>
     </section>
 
     ${state.adminMessage ? `
@@ -5103,13 +5273,180 @@ function renderAdmin() {
       </div>
     ` : ""}
 
-    ${renderAutomationStatusCard()}
-    ${renderAutomationActions()}
-    ${renderSourceCoverageSection()}
-    ${renderLatestImportRunsTable()}
-    ${renderLatestTedOpportunities()}
-    ${renderLatestGeneratedReports()}
+    ${renderAdminTabs()}
+    ${renderAdminActiveTab(opportunities)}
+    ${selectedCompany ? renderAdminCompanyDetails(selectedCompany) : ""}
+  `);
+}
 
+function renderAdminTabs() {
+  const tabs = [
+    ["overview", "Overview"],
+    ["companies", "Companies"],
+    ["sources", "Sources/imports"],
+    ["opportunities", "Opportunities"],
+    ["reports", "Reports"]
+  ];
+  return `
+    <div class="admin-tabs" role="tablist" aria-label="Admin sections">
+      ${tabs.map(([key, label]) => `
+        <button type="button" class="${state.adminActiveTab === key ? "is-active" : ""}" data-action="admin-tab" data-tab="${key}">
+          ${escapeHtml(label)}
+        </button>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderAdminActiveTab(opportunities) {
+  if (state.adminActiveTab === "companies") return renderAdminCompaniesSection();
+  if (state.adminActiveTab === "sources") {
+    return `
+      ${renderAutomationStatusCard()}
+      ${renderAutomationActions()}
+      ${renderSourceCoverageSection()}
+      ${renderLatestImportRunsTable()}
+      ${renderLatestTedOpportunities()}
+    `;
+  }
+  if (state.adminActiveTab === "opportunities") return renderAdminOpportunitiesSection(opportunities);
+  if (state.adminActiveTab === "reports") return renderLatestGeneratedReports();
+  return `
+    ${renderAdminOverview()}
+    ${renderAutomationStatusCard()}
+    ${renderAdminCompaniesSection(true)}
+  `;
+}
+
+function renderAdminOverview() {
+  const companies = state.adminCompanies || [];
+  const opportunities = state.opportunities || [];
+  const latest = getLatestImportRun();
+  const completeCompanies = companies.filter((company) => company.profileStatus === "Complete").length;
+  const incompleteCompanies = Math.max(0, companies.length - completeCompanies);
+  return `
+    <section class="ops-card">
+      <div class="card-header">
+        <div>
+          <h2>Admin overview</h2>
+          <p>Customer, opportunity and automation health at a glance.</p>
+        </div>
+      </div>
+      <div class="ops-metrics admin-overview-metrics">
+        <div><span>Total companies</span><strong>${companies.length}</strong></div>
+        <div><span>Completed profiles</span><strong>${completeCompanies}</strong></div>
+        <div><span>Incomplete profiles</span><strong>${incompleteCompanies}</strong></div>
+        <div><span>Stored opportunities</span><strong>${opportunities.length}</strong></div>
+        <div><span>Confirmed tenders</span><strong>${opportunities.filter((opp) => normalizeOpportunityQualityStatus(opp.qualityStatus, opp) === "confirmed_tender").length}</strong></div>
+        <div><span>Early signals</span><strong>${opportunities.filter((opp) => normalizeOpportunityQualityStatus(opp.qualityStatus, opp) === "early_signal").length}</strong></div>
+        <div><span>Needs review</span><strong>${opportunities.filter((opp) => normalizeOpportunityQualityStatus(opp.qualityStatus, opp) === "needs_review").length}</strong></div>
+        <div><span>Latest import status</span><strong>${escapeHtml(latest?.status || "No runs")}</strong></div>
+      </div>
+    </section>
+  `;
+}
+
+function getFilteredAdminCompanies() {
+  const filters = state.adminCompanyFilters;
+  return (state.adminCompanies || []).filter((company) => {
+    const search = normalizeLocationText(filters.search);
+    if (search) {
+      const haystack = normalizeLocationText(`${company.companyName} ${company.contactEmail} ${company.industry}`);
+      if (!haystack.includes(search)) return false;
+    }
+    if (filters.industry !== "all" && company.industry !== filters.industry) return false;
+    if (filters.profileStatus !== "all" && company.profileStatus !== filters.profileStatus) return false;
+    if (filters.plan !== "all" && company.plan !== filters.plan) return false;
+    return true;
+  });
+}
+
+function renderAdminCompaniesSection(compact = false) {
+  const companies = compact ? (state.adminCompanies || []).slice(0, 5) : getFilteredAdminCompanies();
+  return `
+    <section class="ops-card">
+      <div class="card-header">
+        <div>
+          <h2>Companies / users</h2>
+          <p>${state.adminCompaniesLoading ? "Loading companies..." : `${companies.length} shown from ${(state.adminCompanies || []).length} total companies.`}</p>
+        </div>
+      </div>
+      ${state.adminCompaniesError ? `<div class="admin-message is-error">${escapeHtml(state.adminCompaniesError)}</div>` : ""}
+      ${compact ? "" : renderAdminCompanyFilters()}
+      ${state.adminCompaniesLoading && !companies.length ? `<div class="empty-card">Loading companies...</div>` : companies.length ? `
+        <div class="ops-table-wrap">
+          <table class="ops-table admin-companies-table">
+            <thead>
+              <tr>
+                <th>Company</th>
+                <th>Industry</th>
+                <th>Plan</th>
+                <th>Profile</th>
+                <th>Created</th>
+                <th>Matches</th>
+                <th>Saved</th>
+                <th>Last report</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${companies.map(renderAdminCompanyRow).join("")}
+            </tbody>
+          </table>
+        </div>
+      ` : `<div class="empty-card">No companies found.</div>`}
+    </section>
+  `;
+}
+
+function renderAdminCompanyFilters() {
+  const companies = state.adminCompanies || [];
+  const industries = getAdminFilterOptions(companies, (company) => company.industry);
+  const plans = getAdminFilterOptions(companies, (company) => company.plan);
+  const filters = state.adminCompanyFilters;
+  return `
+    <div class="admin-filters admin-company-filters">
+      <input data-admin-company-filter="search" value="${escapeHtml(filters.search)}" placeholder="Search company or email..." />
+      <select data-admin-company-filter="industry">
+        <option value="all">All industries</option>
+        ${industries.map((industry) => `<option value="${escapeHtml(industry)}" ${filters.industry === industry ? "selected" : ""}>${escapeHtml(industry)}</option>`).join("")}
+      </select>
+      <select data-admin-company-filter="profileStatus">
+        <option value="all">All profiles</option>
+        ${["Complete", "Incomplete"].map((status) => `<option value="${status}" ${filters.profileStatus === status ? "selected" : ""}>${status}</option>`).join("")}
+      </select>
+      <select data-admin-company-filter="plan">
+        <option value="all">All plans</option>
+        ${plans.map((plan) => `<option value="${escapeHtml(plan)}" ${filters.plan === plan ? "selected" : ""}>${escapeHtml(plan)}</option>`).join("")}
+      </select>
+    </div>
+  `;
+}
+
+function renderAdminCompanyRow(company) {
+  return `
+    <tr>
+      <td><strong>${escapeHtml(company.companyName)}</strong><br><span>${escapeHtml(company.contactEmail || "No email")}</span></td>
+      <td>${escapeHtml(company.industry || "Unknown")}</td>
+      <td>${escapeHtml(company.plan || "Demo")}</td>
+      <td><span class="status-pill ${company.profileStatus === "Complete" ? "is-success" : "is-running"}">${escapeHtml(company.profileStatus)}</span></td>
+      <td>${escapeHtml(formatDateTime(company.createdAt))}</td>
+      <td>${company.matchCount}</td>
+      <td>${company.savedCount ? company.savedCount : "Not tracked"}</td>
+      <td>${company.latestReportDate ? escapeHtml(formatDateTime(company.latestReportDate)) : "No reports"}</td>
+      <td>
+        <div class="admin-row-actions">
+          <button class="btn btn-secondary btn-small" type="button" data-action="view-admin-company" data-id="${escapeHtml(company.id)}">View details</button>
+          <button class="btn btn-ghost btn-small" type="button" data-action="admin-refresh-company-matches" data-id="${escapeHtml(company.id)}">Refresh matches</button>
+          <button class="btn btn-ghost btn-small" type="button" data-action="admin-generate-company-report" data-id="${escapeHtml(company.id)}">Generate report</button>
+        </div>
+      </td>
+    </tr>
+  `;
+}
+
+function renderAdminOpportunitiesSection(opportunities) {
+  return `
     <form class="form-card admin-form" id="admin-opportunity-form">
       <div class="form-section">
         <h2>Add opportunity</h2>
@@ -5150,7 +5487,98 @@ function renderAdmin() {
       ${renderAdminOpportunityFilters(opportunities)}
       ${opportunities.length ? opportunities.map(renderAdminOpportunityRow).join("") : `<div class="empty-card">No opportunities loaded.</div>`}
     </section>
-  `);
+  `;
+}
+
+function renderAdminCompanyDetails(company) {
+  const projectRange = [
+    company.minProjectValue ? formatISK(company.minProjectValue) : "No minimum",
+    company.maxProjectValue ? formatISK(company.maxProjectValue) : "No maximum"
+  ].join(" - ");
+  const safeWebsite = getSafeExternalUrl(company.website);
+  return `
+    <div class="modal-backdrop">
+      <div class="modal admin-company-modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <span class="status-pill ${company.profileStatus === "Complete" ? "is-success" : "is-running"}">${escapeHtml(company.profileStatus)}</span>
+            <h2>${escapeHtml(company.companyName)}</h2>
+            <p>${escapeHtml(company.contactEmail || "No contact email")} · ${escapeHtml(company.industry || "Unknown industry")}</p>
+          </div>
+          <button type="button" class="icon-btn modal-close-btn" data-action="close-admin-company" aria-label="Close company details">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="admin-detail-grid">
+            <section class="side-panel">
+              <h3>Company basics</h3>
+              <p><strong>Email:</strong> ${escapeHtml(company.contactEmail || "Unknown")}</p>
+              <p><strong>Website:</strong> ${safeWebsite ? `<a href="${escapeHtml(safeWebsite)}" target="_blank" rel="noreferrer">${escapeHtml(company.website)}</a>` : escapeHtml(company.website || "Not listed")}</p>
+              <p><strong>Industry:</strong> ${escapeHtml(company.industry || "Unknown")}</p>
+              <p><strong>Plan:</strong> ${escapeHtml(company.plan || "Demo")}</p>
+              <p><strong>Created:</strong> ${escapeHtml(formatDateTime(company.createdAt))}</p>
+
+              <h3>Project preferences</h3>
+              <p><strong>Project size:</strong> ${escapeHtml(projectRange)}</p>
+              <p><strong>Unknown value:</strong> ${company.allowUnknownValue ? "Allowed" : "Not preferred"}</p>
+              <p><strong>Travel:</strong> ${company.willingToTravel ? "Yes" : "No"}</p>
+              <p><strong>National:</strong> ${company.nationalProjects ? "Yes" : "No"}</p>
+              <p><strong>Remote:</strong> ${company.remoteProjects ? "Yes" : "No"}</p>
+            </section>
+
+            <section class="side-panel">
+              <h3>Services</h3>
+              ${renderAdminTagList(company.services, "No services saved.")}
+              <h3>Include keywords</h3>
+              ${renderAdminTagList(company.includeKeywords, "No include keywords saved.")}
+              <h3>Exclude keywords</h3>
+              ${renderAdminTagList(company.excludeKeywords, "No exclude keywords saved.")}
+            </section>
+
+            <section class="side-panel">
+              <h3>Locations and service areas</h3>
+              <p><strong>Base:</strong> ${escapeHtml(company.baseLocation || "Not set")}</p>
+              ${renderAdminTagList([...company.locations, ...company.serviceAreas], "No locations saved.")}
+              <h3>Reports</h3>
+              <p><strong>Frequency:</strong> ${escapeHtml(company.reportFrequency)}</p>
+              <p><strong>Day:</strong> ${escapeHtml(company.reportDay)}</p>
+              <p><strong>Deadline reminders:</strong> ${company.deadlineReminders ? "On" : "Off"}</p>
+            </section>
+
+            <section class="side-panel">
+              <h3>Latest matches</h3>
+              ${company.latestMatches.length ? `
+                <ul class="admin-detail-list">
+                  ${company.latestMatches.map((match) => `
+                    <li>
+                      <strong>${escapeHtml(match.opportunities?.title || "Opportunity")}</strong>
+                      <span>${Number(match.match_score || 0)} · ${escapeHtml(match.match_label || getMatchLabel(Number(match.match_score || 0)))}</span>
+                    </li>
+                  `).join("")}
+                </ul>
+              ` : `<p>No stored matches yet.</p>`}
+              <h3>Latest reports</h3>
+              ${company.latestReports.length ? `
+                <ul class="admin-detail-list">
+                  ${company.latestReports.map((report) => `
+                    <li>
+                      <strong>${escapeHtml(report.title || "Report")}</strong>
+                      <span>${escapeHtml(formatDateTime(report.created_at))}</span>
+                    </li>
+                  `).join("")}
+                </ul>
+              ` : `<p>No reports generated yet.</p>`}
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderAdminTagList(values, emptyText) {
+  const items = cleanStringArray(values);
+  if (!items.length) return `<p>${escapeHtml(emptyText)}</p>`;
+  return `<div class="admin-tag-list">${items.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>`;
 }
 
 function renderAdminOpportunityRow(opp) {
