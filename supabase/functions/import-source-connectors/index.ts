@@ -889,16 +889,14 @@ function normalizeConnectorItem(
 
   if (!externalId || !title || !url) return null;
 
-  const description = stripHtml(
-    isWordPress
-      ? stringFromPath(item, ["excerpt", "rendered"]) || stringFromPath(item, ["content", "rendered"])
-      : String(item.description || ""),
-  );
-  const content = stripHtml(
-    isWordPress
-      ? stringFromPath(item, ["content", "rendered"])
-      : String(item.content || ""),
-  );
+  const rawDescription = isWordPress
+    ? stringFromPath(item, ["excerpt", "rendered"]) || stringFromPath(item, ["content", "rendered"])
+    : String(item.description || "");
+  const rawContent = isWordPress
+    ? stringFromPath(item, ["content", "rendered"])
+    : String(item.content || "");
+  const description = cleanConnectorText(rawDescription, title);
+  const content = cleanConnectorText(rawContent, "");
   const publishedDate = parseDate(
     isWordPress
       ? String(item.date || item.date_gmt || "")
@@ -921,7 +919,7 @@ function normalizeConnectorItem(
     buyer: source.name,
     category,
     type: "tender",
-    description: description || `Imported from ${source.name}`,
+    description: description || title || `Imported from ${source.name}`,
     deadline,
     published_date: publishedDate,
     location: inferIcelandicLocation(`${title} ${description} ${source.name}`),
@@ -1715,12 +1713,52 @@ function stripHtml(value: string) {
     .trim();
 }
 
+function cleanConnectorText(value: string, fallback = "") {
+  const original = String(value || "");
+  const withoutBlocks = original
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/gi, "$1")
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\[[a-z][^\]\[]*(?:\][^\[]*\[\/[a-z][^\]]*)?\]/gi, " ")
+    .replace(/(?:^|\s)[.#]?[a-z0-9_-]+\s*\{[^{}]*\}/gi, " ")
+    .replace(/\b[a-z-]+\s*:\s*[^;{}]+;/gi, " ");
+  const cleaned = decodeHtml(withoutBlocks)
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!cleaned || isMostlyCssText(cleaned)) return stripHtml(fallback);
+  return cleaned;
+}
+
+function isMostlyCssText(value: string) {
+  const text = String(value || "").trim();
+  if (!text) return true;
+  const cssSignals = [
+    /\bdisplay\s*:/i,
+    /\bfont-size\s*:/i,
+    /\bline-height\s*:/i,
+    /\bbackground(?:-color)?\s*:/i,
+    /\bmargin(?:-[a-z]+)?\s*:/i,
+    /\bpadding(?:-[a-z]+)?\s*:/i,
+    /\bcolor\s*:/i,
+    /\bwidth\s*:/i,
+    /\bheight\s*:/i,
+    /\bvar\(--/i,
+  ].filter((pattern) => pattern.test(text)).length;
+  const words = text.split(/\s+/).filter(Boolean).length;
+  return cssSignals >= 3 || (cssSignals >= 2 && words < 24);
+}
+
 function decodeHtml(value: string) {
   return String(value || "")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, " ")
     .replace(/&#8211;/g, "-")
     .replace(/&#8217;/g, "'")
     .replace(/&#038;/g, "&")
