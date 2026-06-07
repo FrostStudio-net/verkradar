@@ -1468,6 +1468,104 @@ select option:checked {
   color: #ff9b9b;
 }
 
+.import-debug {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.035);
+}
+
+.import-debug.is-compact {
+  margin-top: 0;
+  background: rgba(255,255,255,0.025);
+}
+
+.import-debug-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text);
+}
+
+.import-debug-header span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.import-skip-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.import-per-source {
+  display: grid;
+  gap: 7px;
+}
+
+.import-per-source div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px solid rgba(255,255,255,0.06);
+}
+
+.import-per-source strong {
+  min-width: 150px;
+  color: var(--text);
+}
+
+.import-per-source span {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.import-skip-reasons span {
+  padding: 7px 9px;
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.045);
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.import-skip-reasons strong {
+  color: var(--text);
+}
+
+.import-skip-samples {
+  display: grid;
+  gap: 6px;
+}
+
+.import-skip-samples div {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.7fr) minmax(220px, 1.8fr) minmax(120px, 0.8fr);
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.import-skip-samples strong {
+  color: var(--text);
+}
+
+.import-skip-samples span,
+.import-skip-samples em {
+  overflow-wrap: anywhere;
+}
+
+.import-skip-samples em {
+  color: #ffd54f;
+  font-style: normal;
+}
+
 .ops-card {
   display: grid;
   gap: 18px;
@@ -1585,6 +1683,11 @@ select option:checked {
 
 .ops-table tr:last-child td {
   border-bottom: 0;
+}
+
+.ops-table .import-run-debug-row td {
+  padding: 0 12px 12px;
+  background: rgba(255,255,255,0.018);
 }
 
 .admin-filters {

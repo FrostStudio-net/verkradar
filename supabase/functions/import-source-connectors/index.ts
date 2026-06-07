@@ -59,6 +59,103 @@ type MatchDebugSample = {
   reason_not_stored: string;
 };
 
+type ImportSkipReason =
+  | "missing_title"
+  | "missing_url"
+  | "duplicate_existing_opportunity"
+  | "no_include_keyword_match"
+  | "matched_exclude_keyword"
+  | "low_quality_needs_review"
+  | "unsupported_connector"
+  | "parse_failed"
+  | "fetch_failed";
+
+type ImportSkipSample = {
+  source_name: string;
+  title: string;
+  reason: ImportSkipReason;
+  matchedKeyword?: string;
+  included_reason?: string;
+  excluded_reason?: string;
+  matched_include_keywords?: string[];
+  matched_exclude_keywords?: string[];
+  final_quality_status?: string;
+};
+
+type KeywordDecisionSample = {
+  source_name: string;
+  title: string;
+  included_reason: string;
+  excluded_reason: string | null;
+  matched_include_keywords: string[];
+  matched_exclude_keywords: string[];
+  final_quality_status: string;
+};
+
+type PerSourceImportResult = {
+  source_name: string;
+  source_id: string;
+  connector_type: string;
+  endpoint_url: string;
+  fetched: number;
+  inserted: number;
+  updated: number;
+  skipped: number;
+  matched: number;
+  reports_generated: number;
+  status: string;
+  error?: string | null;
+};
+
+type ImportDebugDetails = {
+  source_name: string;
+  source_id: string;
+  connectorType: string;
+  debug_version: string;
+  sources_checked: number;
+  source_names_checked: string[];
+  connectors_checked: number;
+  per_source: PerSourceImportResult[];
+  items_seen: number;
+  items_filtered: number;
+  filtered_out_by_keyword: number;
+  filtered_out_by_include_keyword: number;
+  filtered_out_by_exclude_keyword: number;
+  opportunities_imported: number;
+  opportunities_updated: number;
+  opportunities_filtered: number;
+  matches_created_or_updated: number;
+  reports_generated: number;
+  score_threshold: number;
+  opportunities_checked: number;
+  companies_checked: number;
+  matches_stored: number;
+  skipped_low_score: number;
+  skipped_no_company_fit: number;
+  skipped_missing_location_or_scope: number;
+  skipped_not_visible: number;
+  skip_reasons: Record<string, number>;
+  skipped_samples: ImportSkipSample[];
+  keyword_decision_samples: KeywordDecisionSample[];
+  match_skipped_samples: MatchDebugSample[];
+  matching_by_source: SourceMatchDetails[];
+  inserted: number;
+  updated: number;
+  skipped: number;
+  errors: string[];
+};
+
+type KeywordFilterResult = {
+  passed: boolean;
+  reason: "exclude_keyword" | "include_keyword" | "no_keyword_required";
+  matchedKeyword?: string;
+  included_reason: string;
+  excluded_reason: string | null;
+  matched_include_keywords: string[];
+  matched_exclude_keywords: string[];
+  final_quality_status: string;
+};
+
 type SourceMatchDetails = {
   source_name: string;
   source_id: string;
@@ -77,6 +174,42 @@ const SUPPORTED_CONNECTORS = new Set(["rss_feed", "wordpress_rest"]);
 const DEFAULT_LIMIT = 50;
 const MIN_MATCH_SCORE = 50;
 const MAX_MATCH_DEBUG_SAMPLES = 20;
+const MAX_IMPORT_SKIP_SAMPLES = 10;
+const MAX_KEYWORD_DECISION_SAMPLES = 20;
+const IMPORT_DEBUG_VERSION = "source-connectors-skip-debug-v2";
+const STRONG_OPPORTUNITY_KEYWORDS = [
+  "útboð",
+  "utbod",
+  "óskað eftir tilboðum",
+  "oskad eftir tilbodum",
+  "tilboð",
+  "tilbod",
+  "verðfyrirspurn",
+  "verdfyrirspurn",
+  "senn í útboð",
+  "senn i utbod",
+  "rammasamningur",
+  "framkvæmdir",
+  "framkvaemdir",
+  "lóðarframkvæmdir",
+  "lodarframkvaemdir",
+  "veituframkvæmdir",
+  "veitu framkvæmdir",
+  "gatnagerð",
+  "gatnagerd",
+  "malbikun",
+  "brú",
+  "bru",
+  "innréttingar",
+  "innrettingar",
+];
+const WEAK_EXCLUDE_KEYWORDS = [
+  "frett",
+  "frétt",
+  "kynnt",
+  "tilkynning",
+  "fundur",
+];
 const DEFAULT_TENDER_INCLUDE_KEYWORDS = [
   "útboð",
   "utbod",
@@ -168,7 +301,7 @@ Deno.serve(async (req) => {
 
     const body = await safeJson(req);
     const limit = clamp(Number(body.limit || DEFAULT_LIMIT), 1, 100);
-    const sourceId = typeof body.sourceId === "string" ? body.sourceId : "";
+    const sourceId = firstString(body.sourceId, body.source_id, body.connectorId, body.connector_id);
     const connectors = await loadEnabledConnectors(adminClient, sourceId);
 
     if (!connectors.length) {
@@ -178,19 +311,28 @@ Deno.serve(async (req) => {
       });
     }
 
+    const aggregateRunDetails = createImportDebugDetails({
+      sourceName: sourceId ? connectors[0]?.sources?.name || "Source connector" : "All source connectors",
+      sourceId: sourceId || "",
+      connectorType: sourceId ? connectors[0]?.connector_type || "source_connector" : "source_connectors_batch",
+    });
+    aggregateRunDetails.sources_checked = 0;
+    aggregateRunDetails.connectors_checked = connectors.length;
+    aggregateRunDetails.source_names_checked = [];
+
+    const runId = await startImportRun(adminClient, {
+      runType: isAutomation ? "source-connectors-automation" : "source-connectors-manual",
+      sourceName: sourceId ? connectors[0]?.sources?.name || "Source connector" : "All source connectors",
+      importMode: sourceId ? connectors[0]?.connector_type || "source_connector" : "source-connectors-batch",
+      query: sourceId ? connectors[0]?.endpoint_url || "" : `enabled connectors: ${connectors.length}`,
+    });
+
     for (const connector of connectors) {
       const source = connector.sources;
       if (!source?.id || !source.name) {
         summary.skipped += 1;
         continue;
       }
-
-      const runId = await startImportRun(adminClient, {
-        runType: isAutomation ? "source-connectors-automation" : "source-connectors-manual",
-        sourceName: source.name,
-        importMode: connector.connector_type,
-        query: connector.endpoint_url,
-      });
 
       const sourceSummary: ImportSummary = {
         fetched: 0,
@@ -201,35 +343,11 @@ Deno.serve(async (req) => {
         reports_generated: 0,
         errors: [],
       };
-      const runDetails = {
-        source_name: source.name,
-        source_id: source.id,
+      const runDetails = createImportDebugDetails({
+        sourceName: source.name,
+        sourceId: source.id,
         connectorType: connector.connector_type,
-        sources_checked: 1,
-        items_seen: 0,
-        items_filtered: 0,
-        filtered_out_by_keyword: 0,
-        filtered_out_by_include_keyword: 0,
-        filtered_out_by_exclude_keyword: 0,
-        opportunities_imported: 0,
-        opportunities_updated: 0,
-        opportunities_filtered: 0,
-        matches_created_or_updated: 0,
-        score_threshold: MIN_MATCH_SCORE,
-        opportunities_checked: 0,
-        companies_checked: 0,
-        matches_stored: 0,
-        skipped_low_score: 0,
-        skipped_no_company_fit: 0,
-        skipped_missing_location_or_scope: 0,
-        skipped_not_visible: 0,
-        skipped_samples: [] as MatchDebugSample[],
-        matching_by_source: [] as SourceMatchDetails[],
-        inserted: 0,
-        updated: 0,
-        skipped: 0,
-        errors: [] as string[],
-      };
+      });
 
       try {
         await updateConnectorState(adminClient, connector.source_id, "running");
@@ -239,7 +357,30 @@ Deno.serve(async (req) => {
 
         const filteredItems = items.filter((item) => {
           const keywordResult = connectorItemPassesKeywordFilter(item, connector);
+          recordKeywordDecision(runDetails, {
+            source_name: source.name,
+            title: getConnectorItemTitle(item, connector.connector_type),
+            included_reason: keywordResult.included_reason,
+            excluded_reason: keywordResult.excluded_reason,
+            matched_include_keywords: keywordResult.matched_include_keywords,
+            matched_exclude_keywords: keywordResult.matched_exclude_keywords,
+            final_quality_status: keywordResult.final_quality_status,
+          });
           if (keywordResult.passed) return true;
+          const skipReason = keywordResult.reason === "exclude_keyword"
+            ? "matched_exclude_keyword"
+            : "no_include_keyword_match";
+          recordImportSkip(runDetails, {
+            source_name: source.name,
+            title: getConnectorItemTitle(item, connector.connector_type),
+            reason: skipReason,
+            matchedKeyword: keywordResult.matchedKeyword,
+            included_reason: keywordResult.included_reason,
+            excluded_reason: keywordResult.excluded_reason || undefined,
+            matched_include_keywords: keywordResult.matched_include_keywords,
+            matched_exclude_keywords: keywordResult.matched_exclude_keywords,
+            final_quality_status: keywordResult.final_quality_status,
+          });
           runDetails.items_filtered += 1;
           runDetails.filtered_out_by_keyword += 1;
           if (keywordResult.reason === "exclude_keyword") runDetails.filtered_out_by_exclude_keyword += 1;
@@ -249,13 +390,20 @@ Deno.serve(async (req) => {
           return false;
         });
 
-        const normalized = filteredItems
-          .map((item) => normalizeConnectorItem(item, connector, source))
-          .filter((opportunity): opportunity is NormalizedOpportunity => {
-            if (opportunity) return true;
-            sourceSummary.skipped += 1;
-            return false;
+        const normalized: NormalizedOpportunity[] = [];
+        for (const item of filteredItems) {
+          const opportunity = normalizeConnectorItem(item, connector, source);
+          if (opportunity) {
+            normalized.push(opportunity);
+            continue;
+          }
+          recordImportSkip(runDetails, {
+            source_name: source.name,
+            title: getConnectorItemTitle(item, connector.connector_type),
+            reason: getNormalizeSkipReason(item, connector),
           });
+          sourceSummary.skipped += 1;
+        }
 
         if (normalized.length) {
           const existing = await getExistingExternalIds(
@@ -272,7 +420,19 @@ Deno.serve(async (req) => {
           if (upsertError) throw upsertError;
 
           const savedCount = savedRows?.length || 0;
-          sourceSummary.skipped += normalized.length - savedCount;
+          const unsavedCount = normalized.length - savedCount;
+          sourceSummary.skipped += unsavedCount;
+          if (unsavedCount > 0) {
+            const savedIds = new Set((savedRows || []).map((row) => row.external_id));
+            for (const opportunity of normalized) {
+              if (savedIds.has(opportunity.external_id)) continue;
+              recordImportSkip(runDetails, {
+                source_name: source.name,
+                title: opportunity.title,
+                reason: existing.has(opportunity.external_id) ? "duplicate_existing_opportunity" : "parse_failed",
+              });
+            }
+          }
           for (const row of savedRows || []) {
             if (existing.has(row.external_id)) sourceSummary.updated += 1;
             else sourceSummary.inserted += 1;
@@ -299,21 +459,20 @@ Deno.serve(async (req) => {
           runDetails.skipped_no_company_fit = matchDetails.skipped_no_company_fit;
           runDetails.skipped_missing_location_or_scope = matchDetails.skipped_missing_location_or_scope;
           runDetails.skipped_not_visible = matchDetails.skipped_not_visible;
-          runDetails.skipped_samples = matchDetails.skipped_samples;
+          runDetails.match_skipped_samples = matchDetails.skipped_samples;
           runDetails.matching_by_source = [matchDetails];
           sourceSummary.reports_generated = await generateWeeklyReports(adminClient);
         }
 
-        await finalizeImportRun(adminClient, runId, {
-          status: "success",
-          ...sourceSummary,
-          query: connector.endpoint_url,
-          details: runDetails,
-        });
         await updateSourceStatus(adminClient, connector.source_id, "connected", sourceSummary);
         await updateConnectorState(adminClient, connector.source_id, "connected", sourceSummary);
       } catch (error) {
         const message = errorMessage(error);
+        recordImportSkip(runDetails, {
+          source_name: source.name,
+          title: source.name,
+          reason: message.toLowerCase().includes("fetch failed") ? "fetch_failed" : "parse_failed",
+        });
         sourceSummary.errors.push(message);
         runDetails.errors.push(message);
         runDetails.opportunities_imported = sourceSummary.inserted;
@@ -321,19 +480,34 @@ Deno.serve(async (req) => {
         runDetails.inserted = sourceSummary.inserted;
         runDetails.updated = sourceSummary.updated;
         runDetails.skipped = sourceSummary.skipped;
-        await finalizeImportRun(adminClient, runId, {
-          status: "error",
-          ...sourceSummary,
-          query: connector.endpoint_url,
-          error: message,
-          details: runDetails,
-        });
         await updateSourceStatus(adminClient, connector.source_id, "error", sourceSummary, message);
         await updateConnectorState(adminClient, connector.source_id, "error", sourceSummary, message);
       }
 
+      mergeImportDetails(aggregateRunDetails, runDetails, {
+        source,
+        connector,
+        summary: sourceSummary,
+      });
       mergeSummary(summary, sourceSummary);
     }
+
+    aggregateRunDetails.inserted = summary.inserted;
+    aggregateRunDetails.updated = summary.updated;
+    aggregateRunDetails.skipped = summary.skipped;
+    aggregateRunDetails.opportunities_imported = summary.inserted;
+    aggregateRunDetails.opportunities_updated = summary.updated;
+    aggregateRunDetails.matches_created_or_updated = summary.matched;
+    aggregateRunDetails.reports_generated = summary.reports_generated;
+    aggregateRunDetails.errors = summary.errors;
+
+    await finalizeImportRun(adminClient, runId, {
+      status: summary.errors.length ? "error" : "success",
+      ...summary,
+      query: sourceId ? connectors[0]?.endpoint_url || "" : `enabled connectors: ${connectors.length}`,
+      error: summary.errors.length ? summary.errors.join("; ") : null,
+      details: aggregateRunDetails,
+    });
 
     return json(summary);
   } catch (error) {
@@ -446,7 +620,7 @@ function escapeRegExp(value: string) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function connectorItemPassesKeywordFilter(item: Record<string, unknown>, connector: ConnectorRow) {
+function connectorItemPassesKeywordFilter(item: Record<string, unknown>, connector: ConnectorRow): KeywordFilterResult {
   const searchableText = getConnectorItemSearchableText(item, connector.connector_type);
   const includeKeywords = normalizeKeywordList(
     connector.include_keywords?.length ? connector.include_keywords : DEFAULT_TENDER_INCLUDE_KEYWORDS,
@@ -454,18 +628,219 @@ function connectorItemPassesKeywordFilter(item: Record<string, unknown>, connect
   const excludeKeywords = normalizeKeywordList(
     connector.exclude_keywords?.length ? connector.exclude_keywords : DEFAULT_TENDER_EXCLUDE_KEYWORDS,
   );
+  const strongKeywords = normalizeKeywordList(STRONG_OPPORTUNITY_KEYWORDS);
   const requireAnyKeyword = connector.require_any_keyword !== false;
+  const matchedIncludeKeywords = uniqueStrings([
+    ...includeKeywords.filter((keyword) => keywordMatches(searchableText, keyword)),
+    ...strongKeywords.filter((keyword) => keywordMatches(searchableText, keyword)),
+  ]);
+  const matchedExcludeKeywords = excludeKeywords.filter((keyword) => keywordMatches(searchableText, keyword));
+  const matchedStrongKeywords = matchedIncludeKeywords.filter((keyword) => strongKeywords.includes(keyword));
+  const finalQualityStatus = getConnectorOpportunityQuality(searchableText);
+  const hasStrongOpportunitySignal = matchedStrongKeywords.length > 0 || finalQualityStatus === "confirmed_tender";
+  const weakExcludeKeywords = normalizeKeywordList(WEAK_EXCLUDE_KEYWORDS);
+  const hardExcludeKeywords = matchedExcludeKeywords.filter((keyword) => !weakExcludeKeywords.includes(keyword));
 
-  if (excludeKeywords.some((keyword) => keywordMatches(searchableText, keyword))) {
-    return { passed: false, reason: "exclude_keyword" };
+  if (matchedExcludeKeywords.length && !hasStrongOpportunitySignal) {
+    return {
+      passed: false,
+      reason: "exclude_keyword",
+      matchedKeyword: matchedExcludeKeywords[0],
+      included_reason: matchedIncludeKeywords.length ? "include matched, but no strong opportunity signal" : "no accepted include override",
+      excluded_reason: hardExcludeKeywords.length
+        ? `matched hard exclude keyword: ${hardExcludeKeywords[0]}`
+        : `matched weak exclude keyword: ${matchedExcludeKeywords[0]}`,
+      matched_include_keywords: matchedIncludeKeywords,
+      matched_exclude_keywords: matchedExcludeKeywords,
+      final_quality_status: finalQualityStatus,
+    };
   }
+
   if (requireAnyKeyword && includeKeywords.length) {
-    const matchedInclude = includeKeywords.some((keyword) => keywordMatches(searchableText, keyword));
-    return matchedInclude
-      ? { passed: true, reason: "include_keyword" }
-      : { passed: false, reason: "include_keyword" };
+    if (matchedIncludeKeywords.length) {
+      return {
+        passed: true,
+        reason: "include_keyword",
+        matchedKeyword: matchedIncludeKeywords[0],
+        included_reason: matchedExcludeKeywords.length && hasStrongOpportunitySignal
+          ? "strong include keyword overrode weak exclude keyword"
+          : "matched include keyword",
+        excluded_reason: matchedExcludeKeywords.length ? `ignored exclude keyword because strong signal exists: ${matchedExcludeKeywords[0]}` : null,
+        matched_include_keywords: matchedIncludeKeywords,
+        matched_exclude_keywords: matchedExcludeKeywords,
+        final_quality_status: finalQualityStatus,
+      };
+    }
+    return {
+      passed: false,
+      reason: "include_keyword",
+      included_reason: "no include keyword match",
+      excluded_reason: null,
+      matched_include_keywords: [],
+      matched_exclude_keywords: matchedExcludeKeywords,
+      final_quality_status: finalQualityStatus,
+    };
   }
-  return { passed: true, reason: "no_keyword_required" };
+
+  return {
+    passed: true,
+    reason: "no_keyword_required",
+    included_reason: "connector does not require an include keyword",
+    excluded_reason: matchedExcludeKeywords.length && hasStrongOpportunitySignal ? "exclude keyword ignored because strong signal exists" : null,
+    matched_include_keywords: matchedIncludeKeywords,
+    matched_exclude_keywords: matchedExcludeKeywords,
+    final_quality_status: finalQualityStatus,
+  };
+}
+
+function recordImportSkip(details: ImportDebugDetails, sample: ImportSkipSample) {
+  details.skip_reasons[sample.reason] = (details.skip_reasons[sample.reason] || 0) + 1;
+  if (details.skipped_samples.length >= MAX_IMPORT_SKIP_SAMPLES) return;
+  details.skipped_samples.push({
+    source_name: sample.source_name,
+    title: sample.title || "Untitled item",
+    reason: sample.reason,
+    ...(sample.matchedKeyword ? { matchedKeyword: sample.matchedKeyword } : {}),
+    ...(sample.included_reason ? { included_reason: sample.included_reason } : {}),
+    ...(sample.excluded_reason ? { excluded_reason: sample.excluded_reason } : {}),
+    ...(sample.matched_include_keywords ? { matched_include_keywords: sample.matched_include_keywords } : {}),
+    ...(sample.matched_exclude_keywords ? { matched_exclude_keywords: sample.matched_exclude_keywords } : {}),
+    ...(sample.final_quality_status ? { final_quality_status: sample.final_quality_status } : {}),
+  });
+}
+
+function recordKeywordDecision(details: ImportDebugDetails, sample: KeywordDecisionSample) {
+  if (details.keyword_decision_samples.length >= MAX_KEYWORD_DECISION_SAMPLES) return;
+  details.keyword_decision_samples.push(sample);
+}
+
+function createImportDebugDetails(options: {
+  sourceName: string;
+  sourceId: string;
+  connectorType: string;
+}): ImportDebugDetails {
+  return {
+    source_name: options.sourceName,
+    source_id: options.sourceId,
+    connectorType: options.connectorType,
+    debug_version: IMPORT_DEBUG_VERSION,
+    sources_checked: 1,
+    source_names_checked: options.sourceName ? [options.sourceName] : [],
+    connectors_checked: 1,
+    per_source: [],
+    items_seen: 0,
+    items_filtered: 0,
+    filtered_out_by_keyword: 0,
+    filtered_out_by_include_keyword: 0,
+    filtered_out_by_exclude_keyword: 0,
+    opportunities_imported: 0,
+    opportunities_updated: 0,
+    opportunities_filtered: 0,
+    matches_created_or_updated: 0,
+    reports_generated: 0,
+    score_threshold: MIN_MATCH_SCORE,
+    opportunities_checked: 0,
+    companies_checked: 0,
+    matches_stored: 0,
+    skipped_low_score: 0,
+    skipped_no_company_fit: 0,
+    skipped_missing_location_or_scope: 0,
+    skipped_not_visible: 0,
+    skip_reasons: {},
+    skipped_samples: [],
+    keyword_decision_samples: [],
+    match_skipped_samples: [],
+    matching_by_source: [],
+    inserted: 0,
+    updated: 0,
+    skipped: 0,
+    errors: [],
+  };
+}
+
+function mergeImportDetails(
+  target: ImportDebugDetails,
+  sourceDetails: ImportDebugDetails,
+  context: {
+    source: NonNullable<ConnectorRow["sources"]>;
+    connector: ConnectorRow;
+    summary: ImportSummary;
+  },
+) {
+  target.sources_checked += 1;
+  target.source_names_checked = uniqueStrings([
+    ...target.source_names_checked,
+    context.source.name,
+  ]);
+  target.items_seen += sourceDetails.items_seen;
+  target.items_filtered += sourceDetails.items_filtered;
+  target.filtered_out_by_keyword += sourceDetails.filtered_out_by_keyword;
+  target.filtered_out_by_include_keyword += sourceDetails.filtered_out_by_include_keyword;
+  target.filtered_out_by_exclude_keyword += sourceDetails.filtered_out_by_exclude_keyword;
+  target.opportunities_filtered += sourceDetails.opportunities_filtered;
+  target.opportunities_checked += sourceDetails.opportunities_checked;
+  target.companies_checked += sourceDetails.companies_checked;
+  target.matches_stored += sourceDetails.matches_stored;
+  target.skipped_low_score += sourceDetails.skipped_low_score;
+  target.skipped_no_company_fit += sourceDetails.skipped_no_company_fit;
+  target.skipped_missing_location_or_scope += sourceDetails.skipped_missing_location_or_scope;
+  target.skipped_not_visible += sourceDetails.skipped_not_visible;
+  target.match_skipped_samples.push(...sourceDetails.match_skipped_samples);
+  target.keyword_decision_samples.push(...sourceDetails.keyword_decision_samples);
+  target.keyword_decision_samples = target.keyword_decision_samples.slice(0, MAX_KEYWORD_DECISION_SAMPLES);
+  target.matching_by_source.push(...sourceDetails.matching_by_source);
+  target.errors.push(...sourceDetails.errors);
+
+  for (const [reason, count] of Object.entries(sourceDetails.skip_reasons)) {
+    target.skip_reasons[reason] = (target.skip_reasons[reason] || 0) + Number(count || 0);
+  }
+  for (const sample of sourceDetails.skipped_samples) {
+    if (target.skipped_samples.length >= MAX_IMPORT_SKIP_SAMPLES) break;
+    target.skipped_samples.push(sample);
+  }
+
+  target.per_source.push({
+    source_name: context.source.name,
+    source_id: context.source.id,
+    connector_type: context.connector.connector_type,
+    endpoint_url: context.connector.endpoint_url,
+    fetched: context.summary.fetched,
+    inserted: context.summary.inserted,
+    updated: context.summary.updated,
+    skipped: context.summary.skipped,
+    matched: context.summary.matched,
+    reports_generated: context.summary.reports_generated,
+    status: context.summary.errors.length ? "error" : "success",
+    error: context.summary.errors[0] || null,
+  });
+}
+
+function getConnectorItemTitle(item: Record<string, unknown>, connectorType: ConnectorType) {
+  return stripHtml(
+    connectorType === "wordpress_rest"
+      ? stringFromPath(item, ["title", "rendered"])
+      : String(item.title || ""),
+  ) || String(item.link || item.externalId || item.id || "Untitled item");
+}
+
+function getNormalizeSkipReason(item: Record<string, unknown>, connector: ConnectorRow): ImportSkipReason {
+  const isWordPress = connector.connector_type === "wordpress_rest";
+  const title = stripHtml(
+    isWordPress
+      ? stringFromPath(item, ["title", "rendered"])
+      : String(item.title || ""),
+  );
+  const url = String(isWordPress ? item.link || "" : item.link || "").trim();
+  const externalId = cleanExternalId(
+    isWordPress
+      ? String(item.id || item.guid || url || title)
+      : String(item.externalId || url || title),
+  );
+
+  if (!title) return "missing_title";
+  if (!url) return "missing_url";
+  if (!externalId) return "parse_failed";
+  return "parse_failed";
 }
 
 function keywordMatches(searchableText: string, keyword: string) {
@@ -660,6 +1035,13 @@ async function finalizeImportRun(
     details?: Record<string, unknown>;
   },
 ) {
+  const details = {
+    debug_version: IMPORT_DEBUG_VERSION,
+    skip_reasons: {},
+    skipped_samples: [],
+    keyword_decision_samples: [],
+    ...(payload.details || {}),
+  };
   const { error } = await supabase
     .from("import_runs")
     .update({
@@ -672,7 +1054,7 @@ async function finalizeImportRun(
       reports_generated: payload.reports_generated || 0,
       error: payload.error || null,
       query: payload.query || null,
-      details: payload.details || {},
+      details,
       finished_at: new Date().toISOString(),
     })
     .eq("id", runId);
@@ -1097,6 +1479,7 @@ function normalizeLocationText(value: string) {
   return String(value || "")
     .toLowerCase()
     .normalize("NFD")
+    .replace(/\u00ad/g, "")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/æ/g, "ae")
     .replace(/[ðþ]/g, (char) => char === "ð" ? "d" : "th")
@@ -1403,6 +1786,13 @@ async function safeJson(req: Request) {
   } catch {
     return {};
   }
+}
+
+function firstString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
 }
 
 function clamp(value: number, min: number, max: number) {

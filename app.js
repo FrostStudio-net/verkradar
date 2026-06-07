@@ -426,6 +426,10 @@ document.addEventListener("click", (event) => {
     state.filters.label = "all";
     render();
   }
+  if (name === "show-all-opportunities") {
+    state.filters.label = "all_opportunities";
+    render();
+  }
   if (name === "include-national-opportunities") {
     initializeProfileDraft();
     state.profileDraft.nationalProjects = true;
@@ -3124,8 +3128,38 @@ function getMatchedOpportunities() {
     .sort((a, b) => b.matchScore - a.matchScore || daysUntilDeadline(a.deadline) - daysUntilDeadline(b.deadline));
 }
 
+function getStoredDashboardMatches() {
+  return state.storedMatches
+    .filter(isDashboardVisibleOpportunity)
+    .filter((opp) => !state.ignored.includes(opp.id))
+    .sort((a, b) => b.matchScore - a.matchScore || daysUntilDeadline(a.deadline) - daysUntilDeadline(b.deadline));
+}
+
+function getAvailableDashboardOpportunities() {
+  const profile = state.profile || (state.user ? null : defaultProfile);
+  if (!profile) return [];
+  return state.opportunities
+    .map((opp) => calculateMatch(profile, opp))
+    .filter(isDashboardVisibleOpportunity)
+    .filter((opp) => !state.ignored.includes(opp.id))
+    .sort((a, b) => {
+      const qualityDiff = getOpportunityQualityRank(a) - getOpportunityQualityRank(b);
+      if (qualityDiff) return qualityDiff;
+      return b.matchScore - a.matchScore || daysUntilDeadline(a.deadline) - daysUntilDeadline(b.deadline);
+    });
+}
+
+function getDashboardOpportunityById(id) {
+  return [
+    ...getStoredDashboardMatches(),
+    ...getAvailableDashboardOpportunities(),
+  ].find((item) => item.id === id);
+}
+
 function getFilteredMatches() {
-  const matches = getMatchedOpportunities();
+  const matches = ["all_opportunities", "needs_review"].includes(state.filters.label)
+    ? getAvailableDashboardOpportunities()
+    : getStoredDashboardMatches();
   const baseMatches = matches.filter((opp) => {
     const search = state.filters.search.toLowerCase();
     if (search && !opportunityText(opp).includes(search)) return false;
@@ -3148,6 +3182,8 @@ function getFilteredMatches() {
 function matchesSelectedLabelFilter(opp) {
   const selected = state.filters.label;
   if (selected === "all") return true;
+  if (selected === "all_opportunities") return true;
+  if (selected === "needs_review") return normalizeOpportunityQualityStatus(opp.qualityStatus, opp) === "needs_review";
   if (selected === "recommended") return isRecommendedDashboardMatch(opp);
   if (selected === "strong") return opp.matchLabel === "Strong match" || opp.matchScore >= 85;
   if (selected === "possible") return ["Possible match", "Weak match"].includes(opp.matchLabel) || opp.matchScore < 65;
@@ -3186,13 +3222,24 @@ function getOpportunityQualityRank(opp) {
   return 2;
 }
 
-function getDashboardFilterSummary(visibleCount, totalCount) {
+function getDashboardFilterSummary({ visibleCount, storedMatchCount, availableCount, recommendedCount, companyName }) {
   const selected = state.filters.label;
-  if (selected === "all") return `${totalCount} matches found. Showing all ${visibleCount} stored matches.`;
-  if (selected === "strong") return `${totalCount} matches found. Showing ${visibleCount} strong matches.`;
-  if (selected === "recommended") return `${totalCount} matches found. Showing ${visibleCount} recommended or possible matches.`;
-  if (selected === "possible") return `${totalCount} matches found. Showing ${visibleCount} possible or weak matches.`;
-  return `${totalCount} matches found. Showing ${visibleCount} ${selected.toLowerCase()} opportunities.`;
+  if (selected === "all_opportunities") {
+    return `${availableCount} opportunities are available in the system. Showing ${visibleCount} visible opportunities for inspection.`;
+  }
+  if (selected === "needs_review") {
+    return `${availableCount} opportunities are available in the system. Showing ${visibleCount} needs-review opportunities.`;
+  }
+  if (selected === "all") return `${storedMatchCount} stored matches for ${companyName}. Showing all ${visibleCount}.`;
+  if (selected === "strong") return `${storedMatchCount} stored matches for ${companyName}. Showing ${visibleCount} strong matches.`;
+  if (selected === "recommended") {
+    if (!visibleCount) {
+      return `No recommended matches for ${companyName} yet. ${availableCount} opportunities are available in the system, but none match this profile strongly enough.`;
+    }
+    return `${storedMatchCount} stored matches for ${companyName}. Showing ${visibleCount} recommended or possible matches.`;
+  }
+  if (selected === "possible") return `${storedMatchCount} stored matches for ${companyName}. Showing ${visibleCount} possible or weak matches.`;
+  return `${storedMatchCount} stored matches for ${companyName}. Showing ${visibleCount} ${selected.toLowerCase()} opportunities.`;
 }
 
 function toggleSave(id) {
@@ -3237,7 +3284,7 @@ function syncDetailsFromState() {
     document.body.classList.remove("modal-open");
     return;
   }
-  const opp = getMatchedOpportunities().find((item) => item.id === state.selectedOpportunityId);
+  const opp = getDashboardOpportunityById(state.selectedOpportunityId);
   if (!opp) {
     state.selectedOpportunityId = null;
     document.body.classList.remove("modal-open");
@@ -3360,7 +3407,7 @@ function render() {
 
   app.innerHTML = html;
   if (state.selectedOpportunityId) {
-    const opp = getMatchedOpportunities().find((x) => x.id === state.selectedOpportunityId);
+    const opp = getDashboardOpportunityById(state.selectedOpportunityId);
     if (opp) {
       document.body.classList.add("modal-open");
       app.insertAdjacentHTML("beforeend", renderOpportunityModal(opp));
@@ -4174,6 +4221,7 @@ function renderAutomationStatusCard() {
         <div><span>Finished</span><strong>${escapeHtml(formatDateTime(latest.finished_at))}</strong></div>
       </div>
       ${latest.error ? `<div class="admin-message is-error">${escapeHtml(latest.error)}</div>` : ""}
+      ${renderImportRunDebug(latest)}
     </section>
   `;
 }
@@ -4260,6 +4308,7 @@ function renderLatestImportRunsTable() {
 }
 
 function renderImportRunTableRow(run) {
+  const debug = renderImportRunDebug(run, { compact: true });
   return `
     <tr>
       <td>${escapeHtml(formatDateTime(run.started_at || run.finished_at))}</td>
@@ -4273,7 +4322,94 @@ function renderImportRunTableRow(run) {
       <td>${Number(run.reports_generated || 0)}</td>
       <td>${run.error ? escapeHtml(run.error) : ""}</td>
     </tr>
+    ${debug ? `
+      <tr class="import-run-debug-row">
+        <td colspan="10">${debug}</td>
+      </tr>
+    ` : ""}
   `;
+}
+
+function getImportRunDetails(run) {
+  const details = run?.details;
+  if (!details) return {};
+  if (typeof details === "string") {
+    try {
+      return JSON.parse(details) || {};
+    } catch {
+      return {};
+    }
+  }
+  return typeof details === "object" ? details : {};
+}
+
+function renderImportRunDebug(run, options = {}) {
+  const details = getImportRunDetails(run);
+  const skipReasons = details.skip_reasons && typeof details.skip_reasons === "object" ? details.skip_reasons : {};
+  const samples = Array.isArray(details.skipped_samples) ? details.skipped_samples : [];
+  const perSource = Array.isArray(details.per_source) ? details.per_source : [];
+  const reasonEntries = Object.entries(skipReasons)
+    .filter(([, count]) => Number(count) > 0)
+    .sort((a, b) => Number(b[1]) - Number(a[1]))
+    .slice(0, 5);
+
+  if (!reasonEntries.length && !samples.length && !perSource.length) return "";
+
+  return `
+    <div class="import-debug ${options.compact ? "is-compact" : ""}">
+      <div class="import-debug-header">
+        <strong>Skip diagnostics</strong>
+        <span>${Number(run.skipped || 0)} skipped · ${Number(details.connectors_checked || perSource.length || 0)} connector${Number(details.connectors_checked || perSource.length || 0) === 1 ? "" : "s"}</span>
+      </div>
+      ${perSource.length ? `
+        <div class="import-per-source">
+          ${perSource.slice(0, 8).map((source) => `
+            <div>
+              <strong>${escapeHtml(source.source_name || "Unknown source")}</strong>
+              <span>${Number(source.fetched || 0)} fetched</span>
+              <span>${Number(source.inserted || 0)} inserted</span>
+              <span>${Number(source.updated || 0)} updated</span>
+              <span>${Number(source.skipped || 0)} skipped</span>
+              <span>${Number(source.matched || 0)} matched</span>
+            </div>
+          `).join("")}
+        </div>
+      ` : ""}
+      ${reasonEntries.length ? `
+        <div class="import-skip-reasons">
+          ${reasonEntries.map(([reason, count]) => `
+            <span><strong>${Number(count)}</strong> ${escapeHtml(formatImportSkipReason(reason))}</span>
+          `).join("")}
+        </div>
+      ` : ""}
+      ${samples.length ? `
+        <div class="import-skip-samples">
+          ${samples.slice(0, 10).map((sample) => `
+            <div>
+              <strong>${escapeHtml(sample.source_name || sample.source || "Unknown source")}</strong>
+              <span>${escapeHtml(sample.title || "Untitled item")}</span>
+              <em>${escapeHtml(formatImportSkipReason(sample.reason || "skipped"))}${sample.matchedKeyword ? `: ${escapeHtml(sample.matchedKeyword)}` : ""}${sample.final_quality_status ? ` · ${escapeHtml(formatQualityStatus(sample.final_quality_status))}` : ""}</em>
+            </div>
+          `).join("")}
+        </div>
+      ` : ""}
+    </div>
+  `;
+}
+
+function formatImportSkipReason(reason) {
+  const labels = {
+    missing_title: "missing title",
+    missing_url: "missing URL",
+    duplicate_existing_opportunity: "duplicate existing opportunity",
+    no_include_keyword_match: "no include keyword match",
+    matched_exclude_keyword: "matched exclude keyword",
+    low_quality_needs_review: "low quality needs review",
+    unsupported_connector: "unsupported connector",
+    parse_failed: "parse failed",
+    fetch_failed: "fetch failed",
+  };
+  return labels[reason] || String(reason || "skipped").replaceAll("_", " ");
 }
 
 function renderLatestTedOpportunities() {
@@ -4841,6 +4977,8 @@ function getFilterOptions(key) {
       { value: "strong", label: "Strong only" },
       { value: "recommended", label: "Recommended" },
       { value: "all", label: "All matches" },
+      { value: "all_opportunities", label: "All opportunities" },
+      { value: "needs_review", label: "Needs review" },
       { value: "possible", label: "Possible matches" },
       ...["Good match", "Weak match"].map((value) => ({ value, label: value }))
     ];
@@ -4971,12 +5109,20 @@ function renderDashboard() {
   }
 
   const matches = getFilteredMatches();
-  const allMatches = getMatchedOpportunities();
+  const allMatches = getStoredDashboardMatches();
+  const availableOpportunities = getAvailableDashboardOpportunities();
   const strong = allMatches.filter((o) => o.matchScore >= 85).length;
   const closingSoon = allMatches.filter((o) => daysUntilDeadline(o.deadline) <= 14 && daysUntilDeadline(o.deadline) >= 0).length;
   const savedCount = state.saved.length;
   const totalValue = allMatches.filter((o) => o.matchScore >= 65).reduce((sum, o) => sum + (o.estimatedValue || 0), 0);
-  const filterSummary = getDashboardFilterSummary(matches.length, allMatches.length);
+  const recommendedCount = allMatches.filter(isRecommendedDashboardMatch).length;
+  const filterSummary = getDashboardFilterSummary({
+    visibleCount: matches.length,
+    storedMatchCount: allMatches.length,
+    availableCount: availableOpportunities.length,
+    recommendedCount,
+    companyName: state.profile.companyName,
+  });
   const matchRefreshText = state.lastMatchedAt
     ? `Last refreshed ${formatDateTime(state.lastMatchedAt)}.`
     : "Matches refresh automatically after profile saves.";
@@ -5029,7 +5175,11 @@ function renderDashboard() {
     </div>
 
     <section class="opportunity-list">
-      ${matches.length ? matches.map(renderOpportunityCard).join("") : renderDashboardEmptyState(state.profile, state.filters.label)}
+      ${matches.length ? matches.map(renderOpportunityCard).join("") : renderDashboardEmptyState(state.profile, state.filters.label, {
+        availableCount: availableOpportunities.length,
+        storedMatchCount: allMatches.length,
+        recommendedCount,
+      })}
     </section>
   `);
 }
@@ -5069,12 +5219,26 @@ function getDashboardProfileSuggestions(profile) {
   return suggestions;
 }
 
-function getDashboardEmptyCopy(filter) {
+function getDashboardEmptyCopy(filter, context = {}) {
   if (filter === "all") {
     return {
       eyebrow: "No matches",
       title: "No stored matches yet.",
       body: "Refresh matches or broaden your profile to create stored opportunity matches."
+    };
+  }
+  if (filter === "all_opportunities") {
+    return {
+      eyebrow: "No opportunities",
+      title: "No available opportunities yet.",
+      body: "Import more sources or check Admin source coverage."
+    };
+  }
+  if (filter === "needs_review") {
+    return {
+      eyebrow: "No needs-review items",
+      title: "No needs-review opportunities right now.",
+      body: "Broad-feed opportunities that need manual verification will appear here."
     };
   }
   if (filter === "strong") {
@@ -5093,14 +5257,17 @@ function getDashboardEmptyCopy(filter) {
   }
   return {
     eyebrow: "No recommended matches",
-    title: "No recommended matches yet.",
-    body: "Try broadening the profile or viewing all stored matches."
+    title: `No recommended matches for ${context.companyName || "this profile"} yet.`,
+    body: `${Number(context.availableCount || 0)} opportunities are available in the system, but none match this profile strongly enough.`
   };
 }
 
-function renderDashboardEmptyState(profile, filter = state.filters.label) {
+function renderDashboardEmptyState(profile, filter = state.filters.label, context = {}) {
   const suggestions = getDashboardProfileSuggestions(profile);
-  const copy = getDashboardEmptyCopy(filter);
+  const copy = getDashboardEmptyCopy(filter, {
+    ...context,
+    companyName: profile?.companyName,
+  });
   return `
     <div class="dashboard-empty-state">
       <div>
@@ -5114,7 +5281,8 @@ function renderDashboardEmptyState(profile, filter = state.filters.label) {
       <div class="dashboard-empty-actions">
         <button class="btn btn-primary" type="button" data-action="go" data-href="/settings">Improve profile</button>
         <button class="btn btn-secondary" type="button" data-action="include-national-opportunities">Include national opportunities</button>
-        <button class="btn btn-secondary" type="button" data-action="show-all-matches">Show all possible matches</button>
+        <button class="btn btn-secondary" type="button" data-action="show-all-matches">Show all stored matches</button>
+        <button class="btn btn-secondary" type="button" data-action="show-all-opportunities">Inspect all opportunities</button>
       </div>
     </div>
   `;

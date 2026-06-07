@@ -108,6 +108,7 @@ Deploy outline:
 ```bash
 supabase db push
 supabase functions deploy import-ted
+supabase functions deploy import-source-connectors
 ```
 
 Required Edge Function environment:
