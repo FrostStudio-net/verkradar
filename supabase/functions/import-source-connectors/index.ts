@@ -178,6 +178,8 @@ const MAX_IMPORT_SKIP_SAMPLES = 10;
 const MAX_KEYWORD_DECISION_SAMPLES = 20;
 const IMPORT_DEBUG_VERSION = "source-connectors-skip-debug-v2";
 const RIKISKAUP_SOURCE_NAME = "Ríkiskaup / island.is procurement";
+const VEGAGERDIN_SOURCE_NAME = "Vegagerðin";
+const VEGAGERDIN_PROJECT_EXTRACTION_METHOD = "vegagerdin_article_project_parser";
 const MISSING_DEADLINE_RISK = "Deadline not available in feed — verify on source page.";
 const STRONG_OPPORTUNITY_KEYWORDS = [
   "útboð",
@@ -386,9 +388,9 @@ Deno.serve(async (req) => {
 
         const normalized: NormalizedOpportunity[] = [];
         for (const item of filteredItems) {
-          const opportunity = normalizeConnectorItem(item, connector, source);
-          if (opportunity) {
-            normalized.push(opportunity);
+          const opportunities = await normalizeConnectorItems(item, connector, source);
+          if (opportunities.length) {
+            normalized.push(...opportunities);
             continue;
           }
           recordImportSkip(runDetails, {
@@ -864,6 +866,29 @@ function getConnectorItemSearchableText(item: Record<string, unknown>, connector
   ].join(" "));
 }
 
+async function normalizeConnectorItems(
+  item: Record<string, unknown>,
+  connector: ConnectorRow,
+  source: NonNullable<ConnectorRow["sources"]>,
+): Promise<NormalizedOpportunity[]> {
+  const parent = normalizeConnectorItem(item, connector, source);
+  if (!parent) return [];
+
+  const children = await extractVegagerdinArticleProjects(item, connector, source, parent);
+  if (!children.length) return [parent];
+
+  parent.raw_payload = {
+    ...parent.raw_payload,
+    quality_status: "needs_review",
+    child_opportunities_extracted: children.length,
+    extraction_method: "parent_article_with_child_opportunities",
+  };
+  parent.status = "hidden";
+  parent.keywords = uniqueStrings([...parent.keywords, "project roundup", "útboðsverk"]);
+
+  return [parent, ...children];
+}
+
 function normalizeConnectorItem(
   item: Record<string, unknown>,
   connector: ConnectorRow,
@@ -951,6 +976,341 @@ function normalizeConnectorItem(
       item,
     },
   };
+}
+
+type VegagerdinProject = {
+  number: string;
+  title: string;
+  description: string;
+  region: string;
+  qualityStatus: string;
+  tenderState: string;
+};
+
+async function extractVegagerdinArticleProjects(
+  item: Record<string, unknown>,
+  connector: ConnectorRow,
+  source: NonNullable<ConnectorRow["sources"]>,
+  parent: NormalizedOpportunity,
+): Promise<NormalizedOpportunity[]> {
+  if (connector.connector_type !== "rss_feed") return [];
+  if (source.name !== VEGAGERDIN_SOURCE_NAME) return [];
+
+  const url = String(item.link || parent.url || "");
+  const articleSlug = getUrlSlug(url);
+  const titleText = normalizeSearchText(`${parent.title} ${url}`);
+  const isKnownRoundup = titleText.includes("helstu utbodsverk arsins") || articleSlug === "helstu-utbodsverk-arsins";
+  if (!isKnownRoundup) return [];
+  if (!isSafeVegagerdinArticleUrl(url)) return [];
+
+  let html = "";
+  try {
+    html = await fetchTextWithTimeout(url, 8000);
+  } catch (error) {
+    parent.raw_payload = {
+      ...parent.raw_payload,
+      article_project_extraction_error: errorMessage(error),
+    };
+    return [];
+  }
+
+  const projects = parseVegagerdinProjectArticle(html);
+  if (!projects.length) return [];
+
+  return projects.map((project) => {
+    const text = `${project.title} ${project.description}`;
+    const extractedDeadline = extractStrictTenderDeadline(text);
+    const deadlineWarning = getVegagerdinProjectDeadlineWarning(project.tenderState, extractedDeadline.date);
+    return {
+      source_id: connector.source_id,
+      external_id: cleanExternalId(`vegagerdin:${articleSlug}:${project.number || slugify(project.title)}`),
+      country_code: "IS",
+      title: project.title,
+      buyer: VEGAGERDIN_SOURCE_NAME,
+      category: "Road and infrastructure works",
+      type: "tender",
+      description: project.description || project.title,
+      deadline: extractedDeadline.date,
+      published_date: parent.published_date,
+      location: project.region || inferIcelandicLocation(`${project.title} ${project.description}`),
+      estimated_value: null,
+      currency: "ISK",
+      url,
+      cpv_code: null,
+      requirements: [],
+      keywords: uniqueStrings([
+        VEGAGERDIN_SOURCE_NAME,
+        "road works",
+        "infrastructure",
+        "útboðsverk",
+        project.region,
+        project.number,
+        ...extractKeywordsFromText(text),
+      ]),
+      difficulty: "medium",
+      status: "open",
+      raw_payload: {
+        connector_type: connector.connector_type,
+        source_name: source.name,
+        buyer: VEGAGERDIN_SOURCE_NAME,
+        quality_status: project.qualityStatus,
+        tender_state: project.tenderState,
+        deadline_warning: deadlineWarning,
+        extracted_deadline_text: extractedDeadline.rawText,
+        parent_article_title: parent.title,
+        parent_url: url,
+        parent_external_id: parent.external_id,
+        project_number: project.number,
+        region: project.region,
+        extraction_method: VEGAGERDIN_PROJECT_EXTRACTION_METHOD,
+      },
+    };
+  });
+}
+
+function isSafeVegagerdinArticleUrl(value: string) {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.replace(/^www\./i, "");
+    return host === "vegagerdin.is" && url.pathname.startsWith("/vegagerdin/starfsemi/frettir/");
+  } catch {
+    return false;
+  }
+}
+
+async function fetchTextWithTimeout(url: string, timeoutMs: number) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      headers: {
+        accept: "text/html,application/xhtml+xml",
+        "user-agent": "VerkRadar source connector (+support@verkradar.is)",
+      },
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`Article fetch failed with ${response.status}`);
+    return await response.text();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function parseVegagerdinProjectArticle(html: string): VegagerdinProject[] {
+  const articleHtml = extractVegagerdinMainArticleHtml(html);
+  const blocks = splitVegagerdinArticleBlocks(articleHtml);
+  const projects: VegagerdinProject[] = [];
+  let currentRegion = "";
+
+  for (const block of blocks) {
+    if (block.type === "heading") {
+      currentRegion = cleanConnectorText(block.html, "");
+      continue;
+    }
+
+    const project = parseVegagerdinProjectParagraph(block.html, currentRegion);
+    if (project) projects.push(project);
+  }
+
+  return projects;
+}
+
+function extractVegagerdinMainArticleHtml(html: string) {
+  const start = html.indexOf("<h1>Vestursvæði</h1>");
+  const end = html.indexOf("Þessi grein birtist fyrst", start);
+  if (start >= 0 && end > start) return html.slice(start, end);
+  return html;
+}
+
+function splitVegagerdinArticleBlocks(html: string) {
+  const blocks: Array<{ type: "heading" | "paragraph"; html: string }> = [];
+  const pattern = /<h1\b[^>]*>[\s\S]*?<\/h1>|<p\b[^>]*>[\s\S]*?<\/p>/gi;
+  for (const match of html.matchAll(pattern)) {
+    const value = match[0] || "";
+    if (/^<h1\b/i.test(value)) blocks.push({ type: "heading", html: value });
+    else blocks.push({ type: "paragraph", html: value });
+  }
+  return blocks;
+}
+
+function parseVegagerdinProjectParagraph(html: string, region: string): VegagerdinProject | null {
+  const plain = cleanConnectorText(html, "");
+  if (!plain) return null;
+
+  const numbered = plain.match(/^(\d{2})\s*:\s*(.+)$/u);
+  const lettered = plain.match(/^([A-ZÁÉÍÓÚÝÞÆÖ])\s*:\s*(.+)$/u);
+  const match = numbered || lettered;
+  if (!match?.[1] || !match?.[2]) return null;
+
+  const number = match[1].trim();
+  const rest = match[2].replace(/\s+/g, " ").trim();
+  const titleEnd = findVegagerdinProjectTitleEnd(rest);
+  const title = `${number}: ${rest.slice(0, titleEnd).replace(/[.。]\s*$/u, "").trim()}`;
+  const description = rest.slice(titleEnd).replace(/^[.\s]+/u, "").trim() || rest;
+  if (title.length < 6 || description.length < 24) return null;
+
+  return {
+    number,
+    title,
+    description,
+    region,
+    ...classifyVegagerdinProject(`${title} ${description}`),
+  };
+}
+
+function findVegagerdinProjectTitleEnd(value: string) {
+  const starts = [
+    " Verkið ",
+    "Verkið ",
+    " Lagður ",
+    "Lagður ",
+    " Um er ",
+    "Um er ",
+    " Verkefnið ",
+    "Verkefnið ",
+    " Framkvæmdin ",
+    "Framkvæmdin ",
+    " Ætlunin ",
+    "Ætlunin ",
+    " Stálþilsframkvæmd",
+    "Stálþilsframkvæmd",
+    " Gerð ",
+    "Gerð ",
+    " Steyping ",
+    "Steyping ",
+    " Viðhaldsdýpkun",
+    "Viðhaldsdýpkun",
+    " Dýpkun ",
+    "Dýpkun ",
+  ];
+  const indexes = starts
+    .map((needle) => value.indexOf(needle))
+    .filter((index) => index > 8);
+  if (indexes.length) return Math.min(...indexes);
+
+  const sentenceEnd = value.indexOf(". ");
+  if (sentenceEnd > 8 && sentenceEnd < 180) return sentenceEnd;
+  return Math.min(value.length, 150);
+}
+
+function classifyVegagerdinProject(text: string) {
+  const normalized = normalizeSearchText(text);
+  const alreadyTendered = [
+    "utbod var auglyst",
+    "utbodid var auglyst",
+    "utbod auglyst",
+    "auglyst utbod",
+    "bodid ut",
+    "var bodid ut",
+    "verdid bodid ut",
+    "utbod var opnad",
+    "utbod opnud",
+    "utbod hefur thegar farid fram",
+    "utbod hefur farid fram",
+    "utbodid hefur farid fram",
+    "utbodid hefur thegar farid fram",
+    "verkid var bodid ut",
+    "laegstbjodandi",
+    "laegst bjodandi",
+    "laegstbjodandi var",
+    "samningur var",
+    "samid var",
+    "skrifad var undir verksamning",
+    "tilbod barst",
+    "tilbod voru opnud",
+    "tilbod opnud",
+  ];
+  if (alreadyTendered.some((phrase) => normalized.includes(normalizeSearchText(phrase)))) {
+    const awardedPhrases = [
+      "laegstbjodandi",
+      "laegst bjodandi",
+      "samningur var",
+      "samid var",
+      "skrifad var undir verksamning",
+    ];
+    const tenderState = awardedPhrases.some((phrase) => normalized.includes(normalizeSearchText(phrase)))
+      ? "awarded"
+      : "already_tendered";
+    return { qualityStatus: "confirmed_tender", tenderState };
+  }
+
+  const openTender = [
+    "oskad eftir tilbodum",
+    "tilbodsfrestur",
+    "skilafrestur",
+    "verdfyrirspurn",
+    "rammasamningur",
+    "forval",
+    "utbodsauglysing",
+    "utbod auglyst",
+  ];
+  if (openTender.some((phrase) => normalized.includes(normalizeSearchText(phrase)))) {
+    return { qualityStatus: "confirmed_tender", tenderState: "announced" };
+  }
+
+  const early = [
+    "aaetlad utbod",
+    "aaetlad er ad bjoda",
+    "aaetlad er ad bjoda ut",
+    "fyrirhugad utbod",
+    "utbod er aaetlad",
+    "utbodid fer fram",
+    "utbod fer fram",
+    "utbodid verdur",
+    "utbod verdur",
+    "verdur bodid ut",
+    "boda verkid ut",
+    "senn i utbod",
+    "fyrirhugad",
+    "fyrirhugadar framkvaemdir",
+    "aaetladar framkvaemdir",
+    "stefnt er",
+  ];
+  if (early.some((phrase) => normalized.includes(normalizeSearchText(phrase)))) {
+    return { qualityStatus: "early_signal", tenderState: "upcoming_tender" };
+  }
+
+  return { qualityStatus: "needs_review", tenderState: "project_signal" };
+}
+
+function getVegagerdinProjectDeadlineWarning(tenderState: string, deadline: string | null) {
+  if (deadline) return null;
+  if (tenderState === "already_tendered" || tenderState === "awarded" || tenderState === "announced") {
+    return "Tender appears already announced/awarded — verify source article.";
+  }
+  if (tenderState === "upcoming_tender") {
+    return "Formal tender deadline not found yet — monitor source article.";
+  }
+  return "No formal tender deadline extracted — verify source article.";
+}
+
+function extractStrictTenderDeadline(text: string) {
+  const normalized = normalizeSearchText(text);
+  const hasDeadlineIntent = [
+    "skilafrestur",
+    "tilbodsfrestur",
+    "frestur til",
+    "skila fyrir",
+    "fyrir kl",
+  ].some((phrase) => normalized.includes(normalizeSearchText(phrase)));
+  if (!hasDeadlineIntent) return { date: null, rawText: null };
+  return extractDeadline(text);
+}
+
+function getUrlSlug(value: string) {
+  try {
+    const pathname = new URL(value).pathname;
+    return slugify(pathname.split("/").filter(Boolean).pop() || value);
+  } catch {
+    return slugify(value);
+  }
+}
+
+function slugify(value: string) {
+  return normalizeSearchText(value)
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 100);
 }
 
 function buildConnectorDescription(options: {

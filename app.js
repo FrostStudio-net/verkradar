@@ -12,6 +12,7 @@ const supabaseClient =
     : null;
 
 const MISSING_DEADLINE_RISK = "Deadline not available in feed — verify on source page.";
+const EXTRACTED_PROJECT_DEADLINE_RISK = "No formal tender deadline extracted — verify source article.";
 
 const STORAGE_KEYS = {
   profile: "verkradar_profile",
@@ -259,6 +260,7 @@ let suppressNextHashChange = false;
 
 window.addEventListener("hashchange", () => {
   const nextRoute = location.hash.replace("#", "") || "/";
+  const routeChanged = nextRoute !== state.route;
 
   if (suppressNextHashChange && nextRoute === state.route) {
     suppressNextHashChange = false;
@@ -274,6 +276,7 @@ window.addEventListener("hashchange", () => {
   state.route = nextRoute;
   state.isMobileMenuOpen = false;
   state.profileMenuOpen = false;
+  if (routeChanged) clearOpportunityDetailsState();
   document.body.classList.remove("mobile-menu-active");
   render();
   scrollToPageTop();
@@ -851,6 +854,7 @@ function navigate(route) {
     return;
   }
 
+  clearOpportunityDetailsState();
   state.route = route;
   suppressNextHashChange = true;
   location.hash = route;
@@ -1300,6 +1304,7 @@ function isDashboardVisibleOpportunity(opp) {
   if (!opp.url || opp.url === "#") return false;
   if (daysUntilDeadline(opp.deadline) < 0) return false;
   if (isDemoTestOpportunity(opp)) return false;
+  if (opp.rawPayload?.extraction_method === "parent_article_with_child_opportunities") return false;
   if (!isTedOpportunity(opp)) return true;
   const country = getOpportunityCountryCode(opp);
   return ["IS", "NO", "DK", "SE", "FI"].includes(country);
@@ -1324,14 +1329,95 @@ function isDemoTestOpportunity(opp) {
 function normalizeOpportunityQualityStatus(status, opp = {}) {
   const value = String(status || "").toLowerCase();
   if (isTedOpportunity(opp)) return "confirmed_tender";
+  if (isVegagerdinExtractedProject(opp)) {
+    const tenderState = getVegagerdinExtractedTenderState(opp);
+    if (["awarded", "already_tendered", "announced"].includes(tenderState)) return "confirmed_tender";
+    if (tenderState === "upcoming_tender") return "early_signal";
+    return "needs_review";
+  }
+  if (value === "early_signal" || value === "needs_review") return value;
   const text = getOpportunityQualityText(opp);
   if (containsAnyNormalizedPhrase(text, ["senn í útboð", "senn i utbod"])) return "early_signal";
   if (containsConfirmedTenderIntent(text)) return "confirmed_tender";
   if (containsEarlySignalIntent(text)) return "early_signal";
   if (containsObviousNewsIntent(text)) return "needs_review";
-  if (value === "early_signal" || value === "needs_review") return value;
   if (value === "confirmed_tender" || value === "likely_opportunity" || value === "verified") return "needs_review";
   return "needs_review";
+}
+
+function isVegagerdinExtractedProject(opp) {
+  return opp?.rawPayload?.extraction_method === "vegagerdin_article_project_parser";
+}
+
+function getVegagerdinExtractedTenderState(opp) {
+  const stored = String(opp?.rawPayload?.tender_state || "").trim();
+  const aliases = {
+    open_or_published: "announced",
+    planned_tender: "upcoming_tender",
+    unclear: "project_signal"
+  };
+  if (stored) return aliases[stored] || stored;
+
+  const text = getOpportunityQualityText(opp);
+  if (containsAnyNormalizedPhrase(text, [
+    "lægstbjóðandi",
+    "laegstbjodandi",
+    "samningur var",
+    "samið var",
+    "samid var",
+    "skrifað var undir verksamning",
+    "skrifad var undir verksamning"
+  ])) {
+    return "awarded";
+  }
+  if (containsAnyNormalizedPhrase(text, [
+    "útboð var auglýst",
+    "utbod var auglyst",
+    "útboðið var auglýst",
+    "utbodid var auglyst",
+    "útboð hefur farið fram",
+    "utbod hefur farid fram",
+    "útboðið hefur farið fram",
+    "utbodid hefur farid fram",
+    "boðið út",
+    "bodid ut",
+    "verkið var boðið út",
+    "verkid var bodid ut",
+    "útboð var opnað",
+    "utbod var opnad",
+    "tilboð opnuð",
+    "tilbod opnud"
+  ])) {
+    return "already_tendered";
+  }
+  if (containsAnyNormalizedPhrase(text, [
+    "óskað eftir tilboðum",
+    "oskad eftir tilbodum",
+    "tilboðsfrestur",
+    "tilbodsfrestur",
+    "skilafrestur",
+    "verðfyrirspurn",
+    "verdfyrirspurn",
+    "rammasamningur",
+    "forval"
+  ])) {
+    return "announced";
+  }
+  if (containsAnyNormalizedPhrase(text, [
+    "áætlað útboð",
+    "aaetlad utbod",
+    "áætlað er að bjóða út",
+    "aaetlad er ad bjoda ut",
+    "fyrirhugað útboð",
+    "fyrirhugad utbod",
+    "senn í útboð",
+    "senn i utbod",
+    "útboð verður",
+    "utbod verdur"
+  ])) {
+    return "upcoming_tender";
+  }
+  return "project_signal";
 }
 
 function getOpportunityQualityText(opp) {
@@ -3161,7 +3247,7 @@ function calculateMatch(profile, opp) {
 
   const days = daysUntilDeadline(opp.deadline);
   if (!opp.deadline) {
-    risks.push(MISSING_DEADLINE_RISK);
+    risks.push(getOpportunityMissingDeadlineRisk(opp));
   } else if (days >= 0 && days <= 30) {
     score += 8;
     reasons.push("Deadline is coming up soon");
@@ -3461,9 +3547,13 @@ function openDetails(id) {
 }
 
 function closeDetails() {
+  clearOpportunityDetailsState();
+  render();
+}
+
+function clearOpportunityDetailsState() {
   state.selectedOpportunityId = null;
   document.body.classList.remove("modal-open");
-  render();
 }
 
 function syncDetailsFromState() {
@@ -3513,6 +3603,36 @@ function getDeadlineDisplay(value) {
 
 function formatOpportunityDeadline(value) {
   return value ? formatShortDate(value) : MISSING_DEADLINE_RISK;
+}
+
+function formatOpportunityDeadlineForReport(opp) {
+  return opp?.deadline ? formatShortDate(opp.deadline) : getOpportunityMissingDeadlineRisk(opp);
+}
+
+function getOpportunityMissingDeadlineRisk(opp) {
+  if (isVegagerdinExtractedProject(opp)) {
+    const tenderState = getVegagerdinExtractedTenderState(opp);
+    if (["awarded", "already_tendered", "announced"].includes(tenderState)) {
+      return "Tender appears already announced/awarded — verify source article.";
+    }
+    if (tenderState === "upcoming_tender") {
+      return "Formal tender deadline not found yet — monitor source article.";
+    }
+    return EXTRACTED_PROJECT_DEADLINE_RISK;
+  }
+  const rawWarning = String(opp?.rawPayload?.deadline_warning || "").trim();
+  if (rawWarning) return rawWarning;
+  return MISSING_DEADLINE_RISK;
+}
+
+function getOpportunityDeadlineDisplay(opp) {
+  if (!opp?.deadline) {
+    return {
+      label: getOpportunityMissingDeadlineRisk(opp),
+      className: "deadline danger"
+    };
+  }
+  return getDeadlineDisplay(opp.deadline);
 }
 
 function formatISK(value) {
@@ -5573,7 +5693,7 @@ function renderDashboardEmptyState(profile, filter = state.filters.label, contex
 function renderOpportunityCard(opp) {
   const saved = state.saved.includes(opp.id);
   const days = daysUntilDeadline(opp.deadline);
-  const deadline = getDeadlineDisplay(opp.deadline);
+  const deadline = getOpportunityDeadlineDisplay(opp);
   return `
     <article class="opportunity-card">
       <div class="opp-main">
@@ -5581,6 +5701,7 @@ function renderOpportunityCard(opp) {
           <div class="opportunity-badges">
             <span class="source-pill source-badge">${escapeHtml(opp.source)}</span>
             ${renderQualityBadge(opp)}
+            ${renderExtractedArticleBadge(opp)}
             ${isTedOpportunity(opp) ? `<span class="source-pill source-badge muted-badge">Original language</span>` : ""}
           </div>
           <span class="${badgeClass(opp.matchLabel)}">${opp.matchLabel} · ${opp.matchScore}</span>
@@ -5620,19 +5741,63 @@ function formatQualityStatus(status) {
   return labels[value] || capitalize(value.replace(/_/g, " "));
 }
 
+function getOpportunityQualityLabel(opp) {
+  if (isVegagerdinExtractedProject(opp)) {
+    return formatTenderState(getVegagerdinExtractedTenderState(opp));
+  }
+  return formatQualityStatus(normalizeOpportunityQualityStatus(opp.qualityStatus, opp));
+}
+
 function renderQualityBadge(opp) {
   const status = normalizeOpportunityQualityStatus(opp.qualityStatus, opp);
-  return `<span class="source-pill source-badge quality-badge ${escapeHtml(status)}">${escapeHtml(formatQualityStatus(status))}</span>`;
+  return `<span class="source-pill source-badge quality-badge ${escapeHtml(status)}">${escapeHtml(getOpportunityQualityLabel(opp))}</span>`;
+}
+
+function renderExtractedArticleBadge(opp) {
+  if (opp?.rawPayload?.extraction_method !== "vegagerdin_article_project_parser") return "";
+  const region = opp.rawPayload?.region ? ` · ${opp.rawPayload.region}` : "";
+  return `<span class="source-pill source-badge muted-badge">Extracted project${escapeHtml(region)}</span>`;
+}
+
+function renderTenderStateBadge(opp) {
+  if (!isVegagerdinExtractedProject(opp)) return "";
+  const stateValue = getVegagerdinExtractedTenderState(opp);
+  const labels = {
+    awarded: "Tender awarded",
+    already_tendered: "Tender already announced",
+    announced: "Tender announced",
+    upcoming_tender: "Upcoming tender",
+    project_signal: "Project signal"
+  };
+  const label = labels[stateValue] || "";
+  return label ? `<span class="source-pill source-badge muted-badge">${escapeHtml(label)}</span>` : "";
+}
+
+function formatTenderState(value) {
+  const labels = {
+    awarded: "Tender awarded",
+    already_tendered: "Tender already announced",
+    announced: "Tender announced",
+    upcoming_tender: "Upcoming tender",
+    project_signal: "Project signal",
+    open_or_published: "Tender announced",
+    planned_tender: "Upcoming tender",
+    unclear: "Project signal"
+  };
+  return labels[String(value || "")] || capitalize(String(value || "").replace(/_/g, " "));
 }
 
 function renderQualityWarning(opp) {
   if (normalizeOpportunityQualityStatus(opp.qualityStatus, opp) !== "needs_review") return "";
+  if (isVegagerdinExtractedProject(opp)) {
+    return `<div class="note-panel quality-warning">Extracted project signal — verify tender timing in the source article.</div>`;
+  }
   return `<div class="note-panel quality-warning">Imported from broad feed — verify source page.</div>`;
 }
 
 function renderOpportunityModal(opp) {
   const saved = state.saved.includes(opp.id);
-  const deadline = getDeadlineDisplay(opp.deadline);
+  const deadline = getOpportunityDeadlineDisplay(opp);
   return `
     <div class="modal-backdrop">
       <div class="modal" role="dialog" aria-modal="true">
@@ -5641,6 +5806,7 @@ function renderOpportunityModal(opp) {
             <div class="opportunity-badges">
               <span class="${badgeClass(opp.matchLabel)}">${opp.matchLabel} · ${opp.matchScore}</span>
               ${renderQualityBadge(opp)}
+              ${renderExtractedArticleBadge(opp)}
             </div>
             <h2>${escapeHtml(opp.title)}</h2>
             <p>${escapeHtml(opp.buyer)} · ${escapeHtml(opp.location)} · ${formatISK(opp.estimatedValue)}</p>
@@ -5667,7 +5833,12 @@ function renderOpportunityModal(opp) {
             <aside class="side-panel">
               <h3>Opportunity info</h3>
               <p><strong>Source:</strong> ${escapeHtml(opp.source)}</p>
-              <p><strong>Quality:</strong> ${escapeHtml(formatQualityStatus(opp.qualityStatus))}</p>
+              ${opp.rawPayload?.parent_article_title ? `<p><strong>Source article:</strong> ${escapeHtml(opp.rawPayload.parent_article_title)}</p>` : ""}
+              ${opp.rawPayload?.parent_url ? `<p><strong>Parent article:</strong> <a href="${escapeHtml(opp.rawPayload.parent_url)}" target="_blank" rel="noreferrer">Open source article</a></p>` : ""}
+              ${opp.rawPayload?.region ? `<p><strong>Extracted region:</strong> ${escapeHtml(opp.rawPayload.region)}</p>` : ""}
+              ${opp.rawPayload?.project_number ? `<p><strong>Project number:</strong> ${escapeHtml(opp.rawPayload.project_number)}</p>` : ""}
+              ${isVegagerdinExtractedProject(opp) ? `<p><strong>Tender state:</strong> ${escapeHtml(formatTenderState(getVegagerdinExtractedTenderState(opp)))}</p>` : ""}
+              <p><strong>Quality:</strong> ${escapeHtml(getOpportunityQualityLabel(opp))}</p>
               <p><strong>Category:</strong> ${escapeHtml(opp.category)}</p>
               <p><strong>Type:</strong> ${escapeHtml(opp.type)}</p>
               <p><strong>Deadline:</strong> <span class="${deadline.className}">${escapeHtml(deadline.label)}</span></p>
@@ -6041,7 +6212,7 @@ function renderAdminOpportunityRow(opp) {
       <div>
         <h3>${escapeHtml(opp.title)}</h3>
         <p>${escapeHtml(opp.buyer)} · ${escapeHtml(opp.source)} · ${escapeHtml(opp.location)} · ${escapeHtml(opp.status)}</p>
-        <p>Quality: ${escapeHtml(formatQualityStatus(opp.qualityStatus))}</p>
+        <p>Quality: ${escapeHtml(getOpportunityQualityLabel(opp))}</p>
       </div>
       <button
         class="btn btn-ghost"
@@ -6370,17 +6541,19 @@ function renderReportOpportunityItem(opp) {
 
 function renderReportQualityBadge(opp) {
   const status = normalizeOpportunityQualityStatus(opp.qualityStatus, opp);
-  return `<span class="report-quality ${escapeHtml(status)}">${escapeHtml(formatQualityStatus(status))}</span>`;
+  return `<span class="report-quality ${escapeHtml(status)}">${escapeHtml(getOpportunityQualityLabel(opp))}</span>`;
 }
 
 function getReportRisks(opp) {
   const risks = Array.isArray(opp.risks) && opp.risks.length
     ? [...opp.risks]
     : ["Open the source page and confirm mandatory requirements."];
-  if (!opp.deadline) risks.unshift(MISSING_DEADLINE_RISK);
+  if (!opp.deadline) risks.unshift(getOpportunityMissingDeadlineRisk(opp));
   if (!opp.estimatedValue) risks.push("Estimated value is not listed in the imported data.");
   if (normalizeOpportunityQualityStatus(opp.qualityStatus, opp) === "needs_review") {
-    risks.push("Imported from broad feed — verify that this is a real tender or business opportunity.");
+    risks.push(isVegagerdinExtractedProject(opp)
+      ? "Extracted project signal — verify tender timing in the source article."
+      : "Imported from broad feed — verify that this is a real tender or business opportunity.");
   }
   return [...new Set(risks.map((risk) => String(risk || "").trim()).filter(Boolean))];
 }
@@ -6397,11 +6570,11 @@ Summary:
 - Saved opportunities: ${sections.saved.length}
 
 ${matches.length ? matches.map((opp, i) => `${i + 1}. ${opp.title}
-Quality: ${formatQualityStatus(opp.qualityStatus)}
+Quality: ${getOpportunityQualityLabel(opp)}
 Buyer: ${opp.buyer}
 Source: ${opp.source}
 Location: ${opp.location}
-Deadline: ${formatOpportunityDeadline(opp.deadline)}
+Deadline: ${formatOpportunityDeadlineForReport(opp)}
 Value: ${opp.estimatedValue ? formatISK(opp.estimatedValue) : "Not listed"}
 Match: ${opp.matchScore}/100 (${opp.matchLabel})
 Why this fits:
@@ -6523,7 +6696,7 @@ function renderOpportunitySummaryForCopy() {}
 function generateOpportunitySummary(opp) {
   return `${opp.title}
 Buyer: ${opp.buyer}
-Deadline: ${formatOpportunityDeadline(opp.deadline)}
+Deadline: ${formatOpportunityDeadlineForReport(opp)}
 Match: ${opp.matchScore}/100 (${opp.matchLabel})
 Why this fits:
 ${opp.matchReasons.map((r) => `- ${r}`).join("\n")}
