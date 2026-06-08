@@ -177,31 +177,25 @@ const MAX_MATCH_DEBUG_SAMPLES = 20;
 const MAX_IMPORT_SKIP_SAMPLES = 10;
 const MAX_KEYWORD_DECISION_SAMPLES = 20;
 const IMPORT_DEBUG_VERSION = "source-connectors-skip-debug-v2";
+const RIKISKAUP_SOURCE_NAME = "Ríkiskaup / island.is procurement";
+const MISSING_DEADLINE_RISK = "Deadline not available in feed — verify on source page.";
 const STRONG_OPPORTUNITY_KEYWORDS = [
   "útboð",
   "utbod",
+  "útboðsauglýsing",
+  "utbodsauglysing",
   "óskað eftir tilboðum",
   "oskad eftir tilbodum",
   "tilboð",
   "tilbod",
+  "tilboðum",
+  "tilbodum",
   "verðfyrirspurn",
   "verdfyrirspurn",
   "senn í útboð",
   "senn i utbod",
   "rammasamningur",
-  "framkvæmdir",
-  "framkvaemdir",
-  "lóðarframkvæmdir",
-  "lodarframkvaemdir",
-  "veituframkvæmdir",
-  "veitu framkvæmdir",
-  "gatnagerð",
-  "gatnagerd",
-  "malbikun",
-  "brú",
-  "bru",
-  "innréttingar",
-  "innrettingar",
+  "forval",
 ];
 const WEAK_EXCLUDE_KEYWORDS = [
   "frett",
@@ -583,6 +577,7 @@ function parseRssItems(xml: string) {
       link,
       description,
       content,
+      creator: extractXmlTag(block, "dc:creator") || extractXmlTag(block, "author"),
       publishedDate: extractXmlTag(block, "pubDate"),
       categories: extractXmlTags(block, "category"),
       raw: block,
@@ -895,7 +890,7 @@ function normalizeConnectorItem(
   const rawContent = isWordPress
     ? stringFromPath(item, ["content", "rendered"])
     : String(item.content || "");
-  const description = cleanConnectorText(rawDescription, title);
+  const cleanDescription = cleanConnectorText(rawDescription, "");
   const content = cleanConnectorText(rawContent, "");
   const publishedDate = parseDate(
     isWordPress
@@ -905,18 +900,27 @@ function normalizeConnectorItem(
   const categories = isWordPress
     ? extractWordPressTerms(item)
     : Array.isArray(item.categories) ? item.categories.map(String) : [];
-  const extractedDeadline = extractDeadline(`${title} ${description} ${content}`);
+  const category = categories[0] || "Public procurement";
+  const description = buildConnectorDescription({
+    title,
+    cleanDescription,
+    content,
+    category,
+    sourceName: source.name,
+  });
+  const searchText = `${title} ${description} ${content} ${categories.join(" ")}`;
+  const extractedDeadline = extractDeadline(searchText);
   const deadline = extractedDeadline.date;
   const isExpired = deadline ? daysUntil(deadline) < 0 : false;
-  const category = categories[0] || "Public procurement";
-  const qualityStatus = getConnectorOpportunityQuality(`${title} ${description} ${content}`);
+  const qualityStatus = getConnectorOpportunityQuality(searchText);
+  const buyer = getConnectorItemBuyer(item, connector.connector_type, source.name, title) || "Unknown buyer";
 
   return {
     source_id: connector.source_id,
     external_id: externalId,
     country_code: "IS",
     title,
-    buyer: source.name,
+    buyer,
     category,
     type: "tender",
     description: description || title || `Imported from ${source.name}`,
@@ -940,20 +944,107 @@ function normalizeConnectorItem(
     raw_payload: {
       connector_type: connector.connector_type,
       source_name: source.name,
+      buyer,
       quality_status: qualityStatus,
       extracted_deadline_text: extractedDeadline.rawText,
+      deadline_warning: deadline ? null : MISSING_DEADLINE_RISK,
       item,
     },
   };
 }
 
+function buildConnectorDescription(options: {
+  title: string;
+  cleanDescription: string;
+  content: string;
+  category: string;
+  sourceName: string;
+}) {
+  const bestText = [options.cleanDescription, options.content]
+    .map((value) => cleanConnectorText(value, ""))
+    .find((value) => value && normalizeSearchText(value) !== normalizeSearchText(options.title));
+
+  if (bestText) return bestText;
+
+  if (options.sourceName === RIKISKAUP_SOURCE_NAME) {
+    return [
+      "Procurement notice imported from Útboðsvefur.",
+      options.category ? `Category: ${options.category}.` : "",
+      "Open the source page for full buyer details, deadline, requirements and tender documents.",
+    ].filter(Boolean).join(" ");
+  }
+
+  return options.title;
+}
+
+function getConnectorItemBuyer(item: Record<string, unknown>, connectorType: ConnectorType, sourceName = "", title = "") {
+  if (connectorType === "wordpress_rest") {
+    const embedded = item._embedded as Record<string, unknown> | undefined;
+    const authors = Array.isArray(embedded?.author) ? embedded?.author as Record<string, unknown>[] : [];
+    const authorName = stripHtml(String(authors[0]?.name || ""));
+    const authorUrl = stripHtml(String(authors[0]?.url || ""));
+    if (sourceName === RIKISKAUP_SOURCE_NAME) {
+      return inferRikiskaupBuyer(title, authorName, authorUrl);
+    }
+    return authorName;
+  }
+
+  return stripHtml(String(item.creator || item.buyer || ""));
+}
+
+function inferRikiskaupBuyer(title: string, authorName: string, authorUrl = "") {
+  const normalizedAuthor = normalizeSearchText(authorName);
+  const normalizedUrl = normalizeSearchText(authorUrl);
+  const titleBuyer = inferBuyerFromTitle(title);
+  if (titleBuyer) return titleBuyer;
+
+  if (!normalizedAuthor) return "";
+  if (normalizedAuthor.includes("rikiskaup") || normalizedAuthor.includes("fjarsyslan")) return "Fjársýslan / Ríkiskaup";
+  if (normalizedAuthor.includes("vegagerd")) return "Vegagerðin";
+  if (normalizedAuthor.includes("landspitali")) return "Landspítali";
+  if (normalizedAuthor.includes("landsvirkjun")) return "Landsvirkjun";
+  if (normalizedAuthor.includes("reykjanes")) return "Reykjanesbær";
+  if (normalizedAuthor.includes("sveitarfelag") || normalizedAuthor.includes("sveitarfelagid")) return authorName;
+  if (normalizedAuthor.includes("innkaupadeild") && authorName.split(/\s+/).length <= 4) return authorName;
+  if (normalizedUrl.includes("landsvirkjun")) return "Landsvirkjun";
+  if (normalizedUrl.includes("landspitali")) return "Landspítali";
+  if (normalizedUrl.includes("vegagerd")) return "Vegagerðin";
+  return "";
+}
+
+function inferBuyerFromTitle(title: string) {
+  const cleanTitle = stripHtml(title);
+  const directPatterns = [
+    /^(.{3,90}?)\s+(?:óskar|oskar)\s+eftir\s+(?:tilboðum|tilbodum|upplýsingum|upplysingum)/i,
+    /^(.{3,90}?)\s+(?:býður|bydur)\s+(?:hér\s+með\s+)?út/i,
+    /^(.{3,90}?)\s+auglýsir\s+(?:útboð|utbod|eftir)/i,
+    /^(.{3,90}?)\s+(?:fyrir hönd|f\.h\.)/i,
+  ];
+  for (const pattern of directPatterns) {
+    const match = cleanTitle.match(pattern);
+    if (match?.[1]) return cleanBuyerName(match[1]);
+  }
+
+  const municipalityMatch = cleanTitle.match(/\bí\s+(Sveitarfélaginu\s+[A-ZÁÉÍÓÚÝÞÆÖ][^,–-]+)/);
+  if (municipalityMatch?.[1]) return cleanBuyerName(municipalityMatch[1].replace("Sveitarfélaginu", "Sveitarfélagið"));
+
+  return "";
+}
+
+function cleanBuyerName(value: string) {
+  return stripHtml(value)
+    .replace(/^(?:útboð|utbod|verðfyrirspurn|verdfyrirspurn)\s+/i, "")
+    .replace(/[,:–-]\s*$/g, "")
+    .trim();
+}
+
 function getConnectorOpportunityQuality(text: string) {
   const normalized = normalizeSearchText(text);
+  if (normalized.includes("senn i utbod")) return "early_signal";
+
   const confirmedTenderPhrases = [
     "útboð",
     "utbod",
-    "senn í útboð",
-    "senn i utbod",
     "útboðsauglýsing",
     "utbodsauglysing",
     "tilboð",
@@ -964,12 +1055,18 @@ function getConnectorOpportunityQuality(text: string) {
     "oskad eftir tilbodum",
     "verðfyrirspurn",
     "verdfyrirspurn",
+    "verðkönnun",
+    "verdkonnun",
     "innkaup",
     "rammasamningur",
+    "samningskaup",
+    "forval",
   ].map(normalizeSearchText);
   if (confirmedTenderPhrases.some((phrase) => normalized.includes(phrase))) return "confirmed_tender";
 
   const earlySignalPhrases = [
+    "senn í útboð",
+    "senn i utbod",
     "áætlaðar framkvæmdir",
     "aaetladar framkvaemdir",
     "fyrirhugaðar framkvæmdir",
@@ -980,10 +1077,15 @@ function getConnectorOpportunityQuality(text: string) {
     "malbikunarframkvaemdir",
     "vegaframkvæmdir",
     "vegaframkvaemdir",
-    "framkvæmdir við",
-    "framkvaemdir vid",
-    "senn",
-    "malbikun",
+    "brúargerð",
+    "bruargerd",
+    "jarðvinna",
+    "jardvinna",
+    "gatnagerð",
+    "gatnagerd",
+    "markaðskönnun",
+    "markadskonnun",
+    "rfi",
   ].map(normalizeSearchText);
   if (earlySignalPhrases.some((phrase) => normalized.includes(phrase))) return "early_signal";
 
@@ -1310,7 +1412,7 @@ function calculateMatch(profile: Record<string, unknown>, opportunity: Record<st
   }
 
   if (!opportunity.deadline) {
-    risks.push("Deadline could not be extracted from source feed");
+    risks.push(MISSING_DEADLINE_RISK);
   } else {
     const days = daysUntil(String(opportunity.deadline));
     if (days >= 0 && days <= 30) {

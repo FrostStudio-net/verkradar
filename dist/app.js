@@ -11,6 +11,8 @@ const supabaseClient =
     ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
     : null;
 
+const MISSING_DEADLINE_RISK = "Deadline not available in feed — verify on source page.";
+
 const STORAGE_KEYS = {
   profile: "verkradar_profile",
   saved: "verkradar_saved_opportunities",
@@ -92,6 +94,7 @@ let state = {
   companyId: null,
   opportunities: [],
   storedMatches: [],
+  opportunityActions: [],
   saved: loadArray(STORAGE_KEYS.saved),
   ignored: loadArray(STORAGE_KEYS.ignored),
   filters: {
@@ -150,6 +153,7 @@ let state = {
     manualOnly: false,
     showDemoTest: true
   },
+  adminOpportunityDraft: createEmptyAdminOpportunityDraft(),
   matchStatus: null,
   matchingLoading: false,
   lastMatchedAt: null,
@@ -187,6 +191,7 @@ function clearLocalProfileState() {
   state.currentUser = null;
   state.companyId = null;
   state.storedMatches = [];
+  state.opportunityActions = [];
   state.reports = [];
   state.reportsLoaded = false;
   state.reportsLoadError = null;
@@ -219,6 +224,35 @@ function clearLocalProfileState() {
   state.adminCompaniesError = null;
   state.selectedAdminCompanyId = null;
   state.lastMatchedAt = null;
+}
+
+function createEmptyAdminOpportunityDraft() {
+  return {
+    title: "",
+    buyer: "",
+    sourceName: "",
+    category: "",
+    type: "tender",
+    deadline: "",
+    published_date: "",
+    location: "",
+    estimated_value: "",
+    url: "",
+    cpv_code: "",
+    difficulty: "medium",
+    status: "open",
+    description: "",
+    requirements: "",
+    keywords: ""
+  };
+}
+
+function updateAdminOpportunityDraftFromForm(formData) {
+  const nextDraft = createEmptyAdminOpportunityDraft();
+  Object.keys(nextDraft).forEach((key) => {
+    nextDraft[key] = String(formData.get(key) || "");
+  });
+  state.adminOpportunityDraft = nextDraft;
 }
 
 let suppressNextHashChange = false;
@@ -600,6 +634,16 @@ document.addEventListener("input", (event) => {
     render();
   }
 
+  if (event.target.matches("[data-admin-opportunity-field]")) {
+    const key = event.target.dataset.adminOpportunityField;
+    state.adminOpportunityDraft = {
+      ...createEmptyAdminOpportunityDraft(),
+      ...(state.adminOpportunityDraft || {}),
+      [key]: event.target.value
+    };
+    return;
+  }
+
   if (event.target.matches("[data-admin-company-filter]")) {
     const key = event.target.dataset.adminCompanyFilter;
     state.adminCompanyFilters[key] = event.target.value;
@@ -647,7 +691,9 @@ document.addEventListener("submit", async (event) => {
 
   if (event.target.id === "admin-opportunity-form") {
     event.preventDefault();
-    addOpportunity(new FormData(event.target), event.target);
+    const form = new FormData(event.target);
+    updateAdminOpportunityDraftFromForm(form);
+    addOpportunity(form, event.target);
     return;
   }
 
@@ -895,7 +941,10 @@ async function loadOpportunities() {
     } else {
       state.opportunities = data.map(mapSupabaseOpportunity);
       state.opportunityLoadError = null;
-      if (state.companyId) await loadStoredMatchesForCurrentCompany();
+      if (state.companyId) {
+        await loadOpportunityActionsForCurrentCompany();
+        await loadStoredMatchesForCurrentCompany();
+      }
     }
   } catch (err) {
     console.error("Failed to load Supabase opportunities:", err);
@@ -1274,15 +1323,15 @@ function isDemoTestOpportunity(opp) {
 
 function normalizeOpportunityQualityStatus(status, opp = {}) {
   const value = String(status || "").toLowerCase();
-  if (value === "confirmed_tender" || value === "early_signal" || value === "needs_review") return value;
-  if (value === "likely_opportunity" || value === "verified") return "confirmed_tender";
-
+  if (isTedOpportunity(opp)) return "confirmed_tender";
   const text = getOpportunityQualityText(opp);
+  if (containsAnyNormalizedPhrase(text, ["senn í útboð", "senn i utbod"])) return "early_signal";
   if (containsConfirmedTenderIntent(text)) return "confirmed_tender";
   if (containsEarlySignalIntent(text)) return "early_signal";
   if (containsObviousNewsIntent(text)) return "needs_review";
-  if (isTedOpportunity(opp)) return "confirmed_tender";
-  return "confirmed_tender";
+  if (value === "early_signal" || value === "needs_review") return value;
+  if (value === "confirmed_tender" || value === "likely_opportunity" || value === "verified") return "needs_review";
+  return "needs_review";
 }
 
 function getOpportunityQualityText(opp) {
@@ -1304,8 +1353,8 @@ function containsConfirmedTenderIntent(text) {
   return containsAnyNormalizedPhrase(text, [
     "útboð",
     "utbod",
-    "senn í útboð",
-    "senn i utbod",
+    "útboðsauglýsing",
+    "utbodsauglysing",
     "tilboð",
     "tilboðum",
     "tilbod",
@@ -1316,12 +1365,14 @@ function containsConfirmedTenderIntent(text) {
     "verdfyrirspurn",
     "innkaup",
     "rammasamningur",
-    "útboðsauglýsing"
+    "forval"
   ]);
 }
 
 function containsEarlySignalIntent(text) {
   return containsAnyNormalizedPhrase(text, [
+    "senn í útboð",
+    "senn i utbod",
     "áætlaðar framkvæmdir",
     "aaetladar framkvaemdir",
     "fyrirhugaðar framkvæmdir",
@@ -1332,9 +1383,12 @@ function containsEarlySignalIntent(text) {
     "malbikunarframkvaemdir",
     "vegaframkvæmdir",
     "vegaframkvaemdir",
-    "framkvæmdir við",
-    "framkvaemdir vid",
-    "senn"
+    "brúargerð",
+    "bruargerd",
+    "jarðvinna",
+    "jardvinna",
+    "gatnagerð",
+    "gatnagerd"
   ]);
 }
 
@@ -1351,6 +1405,12 @@ function containsObviousNewsIntent(text) {
     "myndband",
     "ráðstefna",
     "radstefna",
+    "kynningarfundur",
+    "tilkynning",
+    "fundur",
+    "fjölskylduganga",
+    "fjolskylduganga",
+    "tafir",
     "kynnt",
     "styrkur",
     "frétt",
@@ -1975,6 +2035,7 @@ async function loadCompanyProfile(options = {}) {
     }
     state.profileLoadError = null;
     saveProfile(state.profile);
+    await loadOpportunityActionsForCurrentCompany();
     await loadStoredMatchesForCurrentCompany();
     render();
     afterRouteRender();
@@ -2362,6 +2423,7 @@ async function runMatchingForCurrentCompany() {
     const plural = rows.length === 1 ? "match" : "matches";
     state.matchStatus = { type: "success", text: `Matching complete — ${rows.length} stored ${plural} found.` };
     await loadOpportunities();
+    await loadOpportunityActionsForCurrentCompany();
     await loadStoredMatchesForCurrentCompany();
     return rows.length;
   } catch (error) {
@@ -2394,6 +2456,7 @@ async function addOpportunity(formData, formElement) {
     const sourceName = String(values.sourceName || values.source || "Manual").trim() || "Manual";
     const title = String(values.title || "").trim();
     if (!title) throw new Error("Title is required.");
+    const description = String(values.description || "").trim() || `Manual opportunity: ${title}`;
 
     const sourceId = await getOrCreateSource(sourceName);
     const insertPayload = {
@@ -2403,7 +2466,7 @@ async function addOpportunity(formData, formElement) {
       buyer: String(values.buyer || "").trim() || null,
       category: String(values.category || "").trim() || null,
       type: String(values.type || "").trim() || "tender",
-      description: String(values.description || "").trim() || null,
+      description,
       deadline: values.deadline || null,
       published_date: values.publishedDate || values.published_date || null,
       location: String(values.location || "").trim() || null,
@@ -2432,6 +2495,7 @@ async function addOpportunity(formData, formElement) {
     }
 
     state.adminMessage = { type: "success", text: "Opportunity saved to Supabase." };
+    state.adminOpportunityDraft = createEmptyAdminOpportunityDraft();
     formElement?.reset();
     await loadOpportunities();
     if (state.companyId) await runMatchingForCurrentCompany();
@@ -3097,7 +3161,7 @@ function calculateMatch(profile, opp) {
 
   const days = daysUntilDeadline(opp.deadline);
   if (!opp.deadline) {
-    risks.push("Deadline could not be extracted from source feed");
+    risks.push(MISSING_DEADLINE_RISK);
   } else if (days >= 0 && days <= 30) {
     score += 8;
     reasons.push("Deadline is coming up soon");
@@ -3232,6 +3296,7 @@ function isRecommendedDashboardMatch(opp) {
 
 function isFallbackDashboardMatch(opp) {
   if (!isRecommendedScore(opp)) return false;
+  if (normalizeOpportunityQualityStatus(opp.qualityStatus, opp) === "needs_review") return false;
   if (containsObviousNewsIntent(getOpportunityQualityText(opp))) return false;
   return true;
 }
@@ -3275,29 +3340,118 @@ function getDashboardFilterSummary({ visibleCount, storedMatchCount, availableCo
   return `${storedMatchCount} stored matches for ${companyName}. Showing ${visibleCount} ${selected.toLowerCase()} opportunities.`;
 }
 
-function toggleSave(id) {
-  let message = "Opportunity saved";
-  if (state.saved.includes(id)) {
-    state.saved = state.saved.filter((x) => x !== id);
-    message = "Removed from saved";
-  } else {
-    state.saved.push(id);
+async function loadOpportunityActionsForCurrentCompany() {
+  if (!supabaseClient || !state.companyId) {
+    state.opportunityActions = [];
+    return;
   }
-  saveArray(STORAGE_KEYS.saved, state.saved);
-  showToast(message, "success");
+
+  try {
+    const { data, error } = await supabaseClient
+      .from("company_opportunity_actions")
+      .select("id, company_id, opportunity_id, action_type, note, created_at, updated_at")
+      .eq("company_id", state.companyId);
+
+    if (error) throw error;
+    state.opportunityActions = data || [];
+    state.saved = state.opportunityActions
+      .filter((action) => ["saved", "watched"].includes(action.action_type))
+      .map((action) => action.opportunity_id);
+    state.ignored = state.opportunityActions
+      .filter((action) => action.action_type === "ignored")
+      .map((action) => action.opportunity_id);
+  } catch (error) {
+    console.error("Failed to load company opportunity actions:", error);
+    state.opportunityActions = [];
+    state.saved = [];
+    state.ignored = [];
+  }
 }
 
-function ignoreOpportunity(id) {
-  if (!state.ignored.includes(id)) state.ignored.push(id);
-  saveArray(STORAGE_KEYS.ignored, state.ignored);
-  if (state.selectedOpportunityId === id) state.selectedOpportunityId = null;
-  showToast("Opportunity hidden", "success");
+async function setCompanyOpportunityAction(opportunityId, actionType) {
+  if (!supabaseClient || !state.companyId) {
+    if (actionType === "saved" || actionType === "watched") {
+      state.saved = Array.from(new Set([...state.saved, opportunityId]));
+      state.ignored = state.ignored.filter((id) => id !== opportunityId);
+    }
+    if (actionType === "ignored") {
+      state.ignored = Array.from(new Set([...state.ignored, opportunityId]));
+      state.saved = state.saved.filter((id) => id !== opportunityId);
+    }
+    saveArray(STORAGE_KEYS.saved, state.saved);
+    saveArray(STORAGE_KEYS.ignored, state.ignored);
+    return;
+  }
+
+  const { error } = await supabaseClient
+    .from("company_opportunity_actions")
+    .upsert({
+      company_id: state.companyId,
+      opportunity_id: opportunityId,
+      action_type: actionType,
+      updated_at: new Date().toISOString()
+    }, { onConflict: "company_id,opportunity_id" });
+
+  if (error) throw error;
+  await loadOpportunityActionsForCurrentCompany();
 }
 
-function unignoreOpportunity(id) {
-  state.ignored = state.ignored.filter((x) => x !== id);
-  saveArray(STORAGE_KEYS.ignored, state.ignored);
-  render();
+async function clearCompanyOpportunityAction(opportunityId) {
+  if (!supabaseClient || !state.companyId) {
+    state.saved = state.saved.filter((id) => id !== opportunityId);
+    state.ignored = state.ignored.filter((id) => id !== opportunityId);
+    saveArray(STORAGE_KEYS.saved, state.saved);
+    saveArray(STORAGE_KEYS.ignored, state.ignored);
+    return;
+  }
+
+  const { error } = await supabaseClient
+    .from("company_opportunity_actions")
+    .delete()
+    .eq("company_id", state.companyId)
+    .eq("opportunity_id", opportunityId);
+
+  if (error) throw error;
+  await loadOpportunityActionsForCurrentCompany();
+}
+
+async function toggleSave(id) {
+  let message = "Opportunity saved";
+  try {
+    if (state.saved.includes(id)) {
+      await clearCompanyOpportunityAction(id);
+      message = "Removed from saved";
+    } else {
+      await setCompanyOpportunityAction(id, "saved");
+    }
+    showToast(message, "success");
+    render();
+  } catch (error) {
+    console.error("Failed to update saved opportunity:", error);
+    showToast("Could not update saved opportunity", "error");
+  }
+}
+
+async function ignoreOpportunity(id) {
+  try {
+    await setCompanyOpportunityAction(id, "ignored");
+    if (state.selectedOpportunityId === id) state.selectedOpportunityId = null;
+    showToast("Opportunity hidden", "success");
+    render();
+  } catch (error) {
+    console.error("Failed to ignore opportunity:", error);
+    showToast("Could not hide opportunity", "error");
+  }
+}
+
+async function unignoreOpportunity(id) {
+  try {
+    await clearCompanyOpportunityAction(id);
+    render();
+  } catch (error) {
+    console.error("Failed to unignore opportunity:", error);
+    showToast("Could not restore opportunity", "error");
+  }
 }
 
 function openDetails(id) {
@@ -3338,7 +3492,7 @@ function daysUntilDeadline(dateString) {
 function getDeadlineDisplay(value) {
   if (!value) {
     return {
-      label: "Deadline missing — check source page",
+      label: MISSING_DEADLINE_RISK,
       className: "deadline danger"
     };
   }
@@ -3346,7 +3500,7 @@ function getDeadlineDisplay(value) {
   const days = daysUntilDeadline(value);
   if (days === 999) {
     return {
-      label: "Deadline missing — check source page",
+      label: MISSING_DEADLINE_RISK,
       className: "deadline danger"
     };
   }
@@ -3358,7 +3512,7 @@ function getDeadlineDisplay(value) {
 }
 
 function formatOpportunityDeadline(value) {
-  return value ? formatShortDate(value) : "Deadline missing — check source page";
+  return value ? formatShortDate(value) : MISSING_DEADLINE_RISK;
 }
 
 function formatISK(value) {
@@ -5742,28 +5896,32 @@ function renderAdminCompanyRow(company) {
 }
 
 function renderAdminOpportunitiesSection(opportunities) {
+  const draft = {
+    ...createEmptyAdminOpportunityDraft(),
+    ...(state.adminOpportunityDraft || {})
+  };
   return `
     <form class="form-card admin-form" id="admin-opportunity-form">
       <div class="form-section">
         <h2>Add opportunity</h2>
         <div class="form-grid">
-          <label>Title <input name="title" required /></label>
-          <label>Buyer <input name="buyer" /></label>
-          <label>Source name <input name="sourceName" required /></label>
-          <label>Category <input name="category" /></label>
-          <label>Type <input name="type" value="tender" /></label>
-          <label>Deadline <input type="date" name="deadline" /></label>
-          <label>Published date <input type="date" name="published_date" /></label>
-          <label>Location <input name="location" /></label>
-          <label>Estimated value <input type="number" min="0" step="1" name="estimated_value" /></label>
-          <label>URL <input type="url" name="url" /></label>
-          <label>CPV code <input name="cpv_code" /></label>
-          <label>Difficulty <input name="difficulty" value="medium" /></label>
-          <label>Status <input name="status" value="open" /></label>
+          <label>Title <input name="title" data-admin-opportunity-field="title" value="${escapeHtml(draft.title)}" required /></label>
+          <label>Buyer <input name="buyer" data-admin-opportunity-field="buyer" value="${escapeHtml(draft.buyer)}" /></label>
+          <label>Source name <input name="sourceName" data-admin-opportunity-field="sourceName" value="${escapeHtml(draft.sourceName)}" required /></label>
+          <label>Category <input name="category" data-admin-opportunity-field="category" value="${escapeHtml(draft.category)}" /></label>
+          <label>Type <input name="type" data-admin-opportunity-field="type" value="${escapeHtml(draft.type)}" /></label>
+          <label>Deadline <input type="date" name="deadline" data-admin-opportunity-field="deadline" value="${escapeHtml(draft.deadline)}" /></label>
+          <label>Published date <input type="date" name="published_date" data-admin-opportunity-field="published_date" value="${escapeHtml(draft.published_date)}" /></label>
+          <label>Location <input name="location" data-admin-opportunity-field="location" value="${escapeHtml(draft.location)}" /></label>
+          <label>Estimated value <input type="number" min="0" step="1" name="estimated_value" data-admin-opportunity-field="estimated_value" value="${escapeHtml(draft.estimated_value)}" /></label>
+          <label>URL <input type="url" name="url" data-admin-opportunity-field="url" value="${escapeHtml(draft.url)}" /></label>
+          <label>CPV code <input name="cpv_code" data-admin-opportunity-field="cpv_code" value="${escapeHtml(draft.cpv_code)}" /></label>
+          <label>Difficulty <input name="difficulty" data-admin-opportunity-field="difficulty" value="${escapeHtml(draft.difficulty)}" /></label>
+          <label>Status <input name="status" data-admin-opportunity-field="status" value="${escapeHtml(draft.status)}" /></label>
         </div>
-        <label>Description <textarea name="description" rows="4"></textarea></label>
-        <label>Requirements comma-separated <textarea name="requirements" rows="3"></textarea></label>
-        <label>Keywords comma-separated <textarea name="keywords" rows="3"></textarea></label>
+        <label>Description <textarea name="description" data-admin-opportunity-field="description" rows="4">${escapeHtml(draft.description)}</textarea></label>
+        <label>Requirements comma-separated <textarea name="requirements" data-admin-opportunity-field="requirements" rows="3">${escapeHtml(draft.requirements)}</textarea></label>
+        <label>Keywords comma-separated <textarea name="keywords" data-admin-opportunity-field="keywords" rows="3">${escapeHtml(draft.keywords)}</textarea></label>
       </div>
 
       <div class="form-actions">
@@ -6219,7 +6377,7 @@ function getReportRisks(opp) {
   const risks = Array.isArray(opp.risks) && opp.risks.length
     ? [...opp.risks]
     : ["Open the source page and confirm mandatory requirements."];
-  if (!opp.deadline) risks.unshift("Deadline missing — check source page.");
+  if (!opp.deadline) risks.unshift(MISSING_DEADLINE_RISK);
   if (!opp.estimatedValue) risks.push("Estimated value is not listed in the imported data.");
   if (normalizeOpportunityQualityStatus(opp.qualityStatus, opp) === "needs_review") {
     risks.push("Imported from broad feed — verify that this is a real tender or business opportunity.");
