@@ -4545,6 +4545,35 @@ function getSourceOpportunityStats(opportunities = []) {
   });
 }
 
+function getSourceCoverageStatus(source) {
+  const status = source.source_status || {};
+  const connector = source.source_connectors || {};
+  const rawStatus = String(connector.status || status.status || "").toLowerCase();
+  const connectorType = String(connector.connector_type || "").toLowerCase();
+
+  if (rawStatus.includes("error")) {
+    return { label: "Error", className: "is-error", tone: "error" };
+  }
+
+  if (rawStatus === "permission_required" || connectorType === "permission_required") {
+    return { label: "Permission required", className: "is-permission", tone: "planned" };
+  }
+
+  if (connector.enabled && ["connected", "success", "completed", "complete"].includes(rawStatus)) {
+    return { label: "Connected", className: "is-success", tone: "connected" };
+  }
+
+  if (connector.enabled && ["rss_feed", "wordpress_rest", "ted_api"].includes(connectorType)) {
+    return { label: "Connected", className: "is-success", tone: "connected" };
+  }
+
+  if (rawStatus === "planned" || connectorType === "planned") {
+    return { label: "Planned", className: "is-planned", tone: "planned" };
+  }
+
+  return { label: "Disabled", className: "is-disabled", tone: "disabled" };
+}
+
 function renderSourceCoverageSection() {
   const rows = state.sourceCoverage || [];
   return `
@@ -4562,14 +4591,16 @@ function renderSourceCoverageSection() {
             <thead>
               <tr>
                 <th>Source</th>
+                <th>Source type</th>
                 <th>Connector</th>
                 <th>Enabled</th>
+                <th>Status</th>
                 <th>Last success</th>
+                <th>Last error</th>
                 <th>Active</th>
                 <th>Confirmed</th>
                 <th>Early</th>
                 <th>Needs review</th>
-                <th>Last error</th>
                 <th>Action</th>
               </tr>
             </thead>
@@ -4586,21 +4617,21 @@ function renderSourceCoverageSection() {
 function renderSourceCoverageRow(source) {
   const status = source.source_status || {};
   const connector = source.source_connectors || {};
-  const effectiveStatus = connector.status || status.status || (source.is_active ? "planned" : "inactive");
-  const statusClass = getRunStatusClass(effectiveStatus);
+  const coverageStatus = getSourceCoverageStatus(source);
   const canTestConnector = connector.enabled && ["rss_feed", "wordpress_rest"].includes(connector.connector_type);
   const isTesting = state.connectorTestingSourceId === source.id;
   const stats = source.opportunityStats || { active: Number(status.active_opportunities_count || 0), confirmed: 0, early: 0, needsReview: 0 };
   const latest = source.latestOpportunities || [];
   const isExpanded = state.expandedSourceId === source.id;
   const lastError = connector.last_error || status.last_error || "";
+  const rowClass = coverageStatus.tone === "connected" ? "source-row-connected" : "source-row-muted";
   return `
-    <tr>
+    <tr class="${rowClass}">
       <td>
         <strong>${escapeHtml(source.name || "Unknown source")}</strong>
-        <br><span>${escapeHtml(formatSourceType(source.source_type))}</span>
         ${connector.endpoint_url || source.base_url ? `<br><a href="${escapeHtml(connector.endpoint_url || source.base_url)}" target="_blank" rel="noreferrer">${escapeHtml(connector.endpoint_url || source.base_url)}</a>` : ""}
       </td>
+      <td>${escapeHtml(formatSourceType(source.source_type))}</td>
       <td>
         <strong>${escapeHtml(formatConnectorType(connector.connector_type))}</strong>
         ${connector.require_any_keyword === false ? `<br><span>Keyword match optional</span>` : `<br><span>Requires keyword match</span>`}
@@ -4608,15 +4639,15 @@ function renderSourceCoverageRow(source) {
         ${Array.isArray(connector.exclude_keywords) && connector.exclude_keywords.length ? `<br><span>Excludes: ${escapeHtml(connector.exclude_keywords.slice(0, 5).join(", "))}${connector.exclude_keywords.length > 5 ? "..." : ""}</span>` : ""}
       </td>
       <td>
-        <span class="status-pill ${connector.enabled ? "is-success" : ""}">${connector.enabled ? "Enabled" : "Disabled"}</span>
-        <br><span class="status-pill ${statusClass}">${escapeHtml(effectiveStatus)}</span>
+        <span class="status-pill ${connector.enabled ? "is-success" : "is-disabled"}">${connector.enabled ? "Enabled" : "Disabled"}</span>
       </td>
+      <td><span class="status-pill ${coverageStatus.className}">${escapeHtml(coverageStatus.label)}</span></td>
       <td>${escapeHtml(formatDateTime(connector.last_success_at || status.last_success_at))}</td>
+      <td>${lastError ? escapeHtml(lastError) : `<span class="muted-text">None</span>`}</td>
       <td>${Number(stats.active || 0)}</td>
       <td>${Number(stats.confirmed || 0)}</td>
       <td>${Number(stats.early || 0)}</td>
       <td>${Number(stats.needsReview || 0)}</td>
-      <td>${lastError ? escapeHtml(lastError) : ""}</td>
       <td>
         <button class="btn btn-secondary btn-small" type="button" data-action="test-source-connector" data-id="${escapeHtml(source.id)}" ${(!canTestConnector || isTesting || state.connectorImportLoading) ? "disabled" : ""}>
           ${isTesting ? "Testing..." : "Test source"}
@@ -4634,7 +4665,7 @@ function renderSourceLatestItemsRow(source) {
   const latest = source.latestOpportunities || [];
   return `
     <tr class="source-items-row">
-      <td colspan="10">
+      <td colspan="12">
         <div class="source-items-panel">
           <div class="source-items-header">
             <strong>Latest active items</strong>

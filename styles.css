@@ -1652,6 +1652,23 @@ select option:checked {
   color: #ff6b6b;
 }
 
+.status-pill.is-planned,
+.status-pill.is-permission {
+  border-color: rgba(255,213,79,0.30);
+  background: rgba(255,213,79,0.08);
+  color: #ffd54f;
+}
+
+.status-pill.is-disabled {
+  border-color: rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.035);
+  color: var(--muted);
+}
+
+.muted-text {
+  color: var(--muted);
+}
+
 .ops-table-wrap {
   overflow-x: auto;
   border: 1px solid rgba(255,255,255,0.08);
@@ -1683,6 +1700,19 @@ select option:checked {
 
 .ops-table tr:last-child td {
   border-bottom: 0;
+}
+
+.ops-table tr.source-row-muted td {
+  background: rgba(255,255,255,0.012);
+}
+
+.ops-table tr.source-row-muted td,
+.ops-table tr.source-row-muted td a {
+  color: rgba(161,161,170,0.82);
+}
+
+.ops-table tr.source-row-connected td {
+  background: rgba(215,255,63,0.012);
 }
 
 .source-items-row td {
