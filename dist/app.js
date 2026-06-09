@@ -1340,9 +1340,11 @@ function isDemoTestOpportunity(opp) {
   const sourceType = normalizeLocationText(opp?.sourceType || "");
   const haystack = `${source} ${title} ${externalId} ${sourceType}`;
 
+  if (source === "private lead" || source.includes("private lead")) return true;
+  if (source === "grant portal" || source.includes("grant portal")) return true;
   if (source === "manual test") return true;
   if (source.includes("manual test")) return true;
-  if (/\b(demo|test|sample|mock|fake)\b/.test(haystack)) return true;
+  if (/\b(demo|test|sample|mock|fake|manual)\b/.test(haystack)) return true;
   if (title.includes("manual test")) return true;
   if (title.includes("municipal websites example")) return true;
   if (externalId.includes("demo") || externalId.includes("test")) return true;
@@ -6634,9 +6636,18 @@ function getSafeExternalUrl(value) {
 }
 
 function getReportMatches() {
-  return getMatchedOpportunities()
-    .filter((opp) => opp.matchScore >= 50 || state.saved.includes(opp.id))
-    .slice(0, 12);
+  const matches = getMatchedOpportunities()
+    .filter((opp) => opp.matchScore >= 50 || isSavedOrWatchedOpportunity(opp))
+    .filter(isReportEligibleOpportunity);
+  const sections = getReportSections(matches);
+  return [
+    ...sections.awarded,
+    ...sections.confirmed,
+    ...sections.early,
+    ...sections.saved,
+    ...sections.review,
+    ...sections.additional,
+  ];
 }
 
 function buildReportContent(profile, matches) {
@@ -6647,7 +6658,8 @@ function buildReportContent(profile, matches) {
   const periodStart = start.toISOString().slice(0, 10);
   const title = `Weekly Opportunity Report for ${profile.companyName}`;
   const sections = getReportSections(matches);
-  const summary = `${matches.length} stored matches reviewed for ${profile.companyName}.`;
+  const coreCount = sections.awarded.length + sections.confirmed.length + sections.early.length;
+  const summary = `${coreCount} actionable tenders and project signals shortlisted for ${profile.companyName}.`;
   const textContent = generateWeeklyReport(profile, matches);
   const htmlContent = `
     <div class="report-cover">
@@ -6659,16 +6671,18 @@ function buildReportContent(profile, matches) {
     </div>
 
     <div class="report-summary-grid">
-      ${renderReportSummaryCard("Confirmed tenders", sections.confirmed.length)}
-      ${renderReportSummaryCard("Early signals", sections.early.length)}
+      ${renderReportSummaryCard("Actionable tenders", sections.confirmed.length)}
+      ${renderReportSummaryCard("Upcoming project signals", sections.early.length)}
+      ${renderReportSummaryCard("Already announced/awarded", sections.awarded.length)}
       ${renderReportSummaryCard("Needs review", sections.review.length)}
-      ${renderReportSummaryCard("Saved opportunities", sections.saved.length)}
     </div>
 
-    ${renderReportOpportunitySection("Confirmed tenders", "Clear procurement intent. Review source documents and decide whether to pursue.", sections.confirmed)}
+    ${renderReportOpportunitySection("Already announced/awarded", "Tender activity is already visible in the source. Verify status before spending bid time.", sections.awarded)}
+    ${renderReportOpportunitySection("Actionable tenders", "Clear procurement intent. Review source documents and decide whether to pursue.", sections.confirmed)}
     ${renderReportOpportunitySection("Early signals", "Planned work or upcoming procurement signals. Useful for pipeline planning before a tender is published.", sections.early)}
-    ${renderReportOpportunitySection("Needs review", "Imported from broad feeds or lower-confidence matches. Verify source page before treating as a tender.", sections.review)}
     ${renderReportOpportunitySection("Saved", "Opportunities your team has already marked for follow-up.", sections.saved)}
+    ${renderReportOpportunitySection("Needs review / verify source", "Lower-confidence signals that may be useful, but should not be treated as confirmed tenders.", sections.review)}
+    ${renderReportOpportunitySection("Additional lower-confidence signals", "Hidden from the main shortlist to keep the report focused. Review only if you want broader market context.", sections.additional)}
 
     <p class="report-footer-note">VerkRadar helps prioritise public opportunity review. Always check the original source documents, deadlines, requirements and eligibility before acting.</p>
   `;
@@ -6688,23 +6702,169 @@ function formatReportDateRange(start, end) {
 }
 
 function getReportSections(matches) {
-  const confirmed = [];
-  const early = [];
-  const review = [];
+  const buckets = {
+    awarded: [],
+    confirmed: [],
+    early: [],
+    review: [],
+    saved: [],
+    additional: [],
+  };
+  const seen = new Set();
 
-  matches.forEach((opp) => {
-    const quality = normalizeOpportunityQualityStatus(opp.qualityStatus, opp);
-    if (quality === "early_signal") early.push(opp);
-    else if (quality === "needs_review") review.push(opp);
-    else confirmed.push(opp);
+  sortDashboardMatches(matches).forEach((opp) => {
+    const savedOrWatched = isSavedOrWatchedOpportunity(opp);
+    if (savedOrWatched && !seen.has(opp.id)) {
+      buckets.saved.push(opp);
+      seen.add(opp.id);
+      return;
+    }
+
+    const placement = getReportOpportunityPlacement(opp);
+    if (placement === "excluded") return;
+    if (seen.has(opp.id)) return;
+    seen.add(opp.id);
+
+    if (placement === "awarded") buckets.awarded.push(opp);
+    else if (placement === "confirmed") buckets.confirmed.push(opp);
+    else if (placement === "early") buckets.early.push(opp);
+    else if (placement === "review") buckets.review.push(opp);
+    else buckets.additional.push(opp);
   });
 
-  return {
-    confirmed,
-    early,
-    review,
-    saved: matches.filter((opp) => state.saved.includes(opp.id))
-  };
+  const mainBudget = 8;
+  let remainingMain = mainBudget;
+  for (const key of ["awarded", "confirmed", "early", "saved"]) {
+    const kept = buckets[key].slice(0, remainingMain);
+    const overflow = buckets[key].slice(remainingMain);
+    buckets[key] = kept;
+    buckets.additional.push(...overflow);
+    remainingMain = Math.max(0, remainingMain - kept.length);
+  }
+
+  const reviewKept = buckets.review.slice(0, 2);
+  buckets.additional.push(...buckets.review.slice(2));
+  buckets.review = reviewKept;
+  buckets.additional = buckets.additional.slice(0, 6);
+
+  return buckets;
+}
+
+function getReportOpportunityPlacement(opp) {
+  if (!isReportEligibleOpportunity(opp)) return "excluded";
+  if (isVegagerdinNoiseOpportunity(opp) && !hasStrongTenderIntentForReport(opp)) return "review";
+  const tenderState = isVegagerdinExtractedProject(opp) ? getVegagerdinExtractedTenderState(opp) : "";
+  if (["tender_awarded", "awarded", "already_tendered", "announced"].includes(tenderState)) return "awarded";
+  if (tenderState === "upcoming_tender") return "early";
+
+  const quality = normalizeOpportunityQualityStatus(opp.qualityStatus, opp);
+  if (quality === "confirmed_tender") return "confirmed";
+  if (quality === "early_signal") return "early";
+  if (quality === "needs_review") return "review";
+  return "additional";
+}
+
+function isReportEligibleOpportunity(opp) {
+  if (!opp || isDemoTestOpportunity(opp)) return false;
+  if (!isDashboardVisibleOpportunity(opp)) return false;
+  if (isSavedOrWatchedOpportunity(opp)) return true;
+  const placementQuality = normalizeOpportunityQualityStatus(opp.qualityStatus, opp);
+  const tenderState = isVegagerdinExtractedProject(opp) ? getVegagerdinExtractedTenderState(opp) : "";
+  if (["tender_awarded", "awarded", "already_tendered", "announced", "upcoming_tender"].includes(tenderState)) return true;
+  if (placementQuality === "confirmed_tender" || placementQuality === "early_signal") return !isReportNoiseWithoutTenderIntent(opp);
+  if (placementQuality === "needs_review") {
+    if (opp.matchScore >= 75) return true;
+    if (isTrustedReportSource(opp) && hasClearConstructionProjectTerms(opp) && !isReportNoiseWithoutTenderIntent(opp)) return true;
+    return false;
+  }
+  return false;
+}
+
+function isSavedOrWatchedOpportunity(opp) {
+  return state.saved.includes(opp.id) ||
+    (state.opportunityActions || []).some((action) =>
+      action.opportunity_id === opp.id && ["saved", "watched"].includes(action.action_type)
+    );
+}
+
+function isReportNoiseWithoutTenderIntent(opp) {
+  return isVegagerdinNoiseOpportunity(opp) && !hasStrongTenderIntentForReport(opp);
+}
+
+function isVegagerdinNoiseOpportunity(opp) {
+  if (!/vegagerðin|vegagerdin/i.test(String(opp?.source || ""))) return false;
+  return containsAnyNormalizedPhrase(getOpportunityQualityText(opp), [
+    "lokun",
+    "lokanir",
+    "tafir",
+    "umferð",
+    "umferd",
+    "hámarkshraði",
+    "hamarkshradi",
+    "myndband",
+    "fjölskylduganga",
+    "fjolskylduganga",
+    "kynningarfundur",
+  ]);
+}
+
+function hasStrongTenderIntentForReport(opp) {
+  return containsAnyNormalizedPhrase(getOpportunityQualityText(opp), [
+    "útboð",
+    "utbod",
+    "boðið út",
+    "bodid ut",
+    "útboð var auglýst",
+    "utbod var auglyst",
+    "lægstbjóðandi",
+    "laegstbjodandi",
+    "samningur var",
+    "senn í útboð",
+    "senn i utbod",
+    "áætlað útboð",
+    "aaetlad utbod",
+  ]);
+}
+
+function hasClearConstructionProjectTerms(opp) {
+  return containsAnyNormalizedPhrase(getOpportunityQualityText(opp), [
+    "framkvæmdir",
+    "framkvaemdir",
+    "viðhald",
+    "vidhald",
+    "jarðvinna",
+    "jardvinna",
+    "gatnagerð",
+    "gatnagerd",
+    "malbikun",
+    "brú",
+    "bru",
+    "lagnir",
+    "bygging",
+    "endurbætur",
+    "endurbaetur",
+  ]);
+}
+
+function isTrustedReportSource(opp) {
+  const source = normalizeLocationText(opp?.source || "");
+  return [
+    "vegagerdin",
+    "vegagerðin",
+    "rikiskaup",
+    "ríkiskaup",
+    "utbodsvefur",
+    "útboðsvefur",
+    "ted iceland/nordic",
+    "gardabaer municipality",
+    "garðabær municipality",
+    "akureyri municipality",
+    "hafnarfjordur municipality",
+    "múlaþing",
+    "mulathing",
+    "reykjanesbaer",
+    "reykjanesbær",
+  ].some((trusted) => source.includes(normalizeLocationText(trusted)));
 }
 
 function renderReportSummaryCard(label, value) {
@@ -6787,16 +6947,26 @@ function getReportRisks(opp) {
 
 function generateWeeklyReport(profile, matches) {
   const sections = getReportSections(matches);
+  const orderedMatches = [
+    ...sections.awarded,
+    ...sections.confirmed,
+    ...sections.early,
+    ...sections.saved,
+    ...sections.review,
+    ...sections.additional,
+  ];
   return `Weekly Opportunity Report for ${profile.companyName}
 Date range: ${formatReportDateRange(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10), new Date().toISOString().slice(0, 10))}
 
 Summary:
-- Confirmed tenders: ${sections.confirmed.length}
-- Early signals: ${sections.early.length}
-- Needs review: ${sections.review.length}
+- Actionable tenders: ${sections.confirmed.length}
+- Upcoming project signals: ${sections.early.length}
+- Already announced/awarded: ${sections.awarded.length}
+- Needs review / verify source: ${sections.review.length}
 - Saved opportunities: ${sections.saved.length}
+- Additional lower-confidence signals: ${sections.additional.length}
 
-${matches.length ? matches.map((opp, i) => `${i + 1}. ${opp.title}
+${orderedMatches.length ? orderedMatches.map((opp, i) => `${i + 1}. ${opp.title}
 Quality: ${getOpportunityQualityLabel(opp)}
 Buyer: ${opp.buyer}
 Source: ${opp.source}
