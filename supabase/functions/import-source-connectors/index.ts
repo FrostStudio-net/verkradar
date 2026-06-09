@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
-type ConnectorType = "rss_feed" | "wordpress_rest";
+type ConnectorType = "rss_feed" | "wordpress_rest" | "page_monitor_allowed";
 
 type ImportSummary = {
   fetched: number;
@@ -170,7 +170,7 @@ type SourceMatchDetails = {
   skipped_samples: MatchDebugSample[];
 };
 
-const SUPPORTED_CONNECTORS = new Set(["rss_feed", "wordpress_rest"]);
+const SUPPORTED_CONNECTORS = new Set(["rss_feed", "wordpress_rest", "page_monitor_allowed"]);
 const DEFAULT_LIMIT = 50;
 const MIN_MATCH_SCORE = 50;
 const MAX_MATCH_DEBUG_SAMPLES = 20;
@@ -180,6 +180,7 @@ const IMPORT_DEBUG_VERSION = "source-connectors-skip-debug-v2";
 const RIKISKAUP_SOURCE_NAME = "Ríkiskaup / island.is procurement";
 const VEGAGERDIN_SOURCE_NAME = "Vegagerðin";
 const VEGAGERDIN_PROJECT_EXTRACTION_METHOD = "vegagerdin_article_project_parser";
+const GARDABAER_SOURCE_NAME = "Garðabær Municipality";
 const MISSING_DEADLINE_RISK = "Deadline not available in feed — verify on source page.";
 const STRONG_OPPORTUNITY_KEYWORDS = [
   "útboð",
@@ -552,6 +553,10 @@ async function fetchConnectorItems(connector: ConnectorRow, limit: number) {
     return parseRssItems(await response.text()).slice(0, limit);
   }
 
+  if (connector.connector_type === "page_monitor_allowed") {
+    return fetchPageMonitorItems(connector, limit);
+  }
+
   const url = new URL(connector.endpoint_url);
   if (!url.searchParams.has("per_page")) url.searchParams.set("per_page", String(limit));
   if (!url.searchParams.has("_embed")) url.searchParams.set("_embed", "1");
@@ -562,6 +567,31 @@ async function fetchConnectorItems(connector: ConnectorRow, limit: number) {
   if (!response.ok) throw new Error(`WordPress REST fetch failed (${response.status})`);
   const payload = await response.json();
   return Array.isArray(payload) ? payload.slice(0, limit) : [];
+}
+
+async function fetchPageMonitorItems(connector: ConnectorRow, limit: number) {
+  if (!isGardabaerTenderPageConnector(connector)) {
+    throw new Error("Unsupported page monitor connector");
+  }
+
+  const response = await fetch(connector.endpoint_url, {
+    headers: {
+      accept: "text/html,application/xhtml+xml",
+      "user-agent": "VerkRadar source connector (+support@verkradar.is)",
+    },
+  });
+  if (!response.ok) throw new Error(`Page monitor fetch failed (${response.status})`);
+  return parseGardabaerTenderPage(await response.text(), connector.endpoint_url).slice(0, limit);
+}
+
+function isGardabaerTenderPageConnector(connector: ConnectorRow) {
+  if (connector.sources?.name !== GARDABAER_SOURCE_NAME) return false;
+  try {
+    const url = new URL(connector.endpoint_url);
+    return url.hostname.replace(/^www\./i, "") === "gardabaer.is" && url.pathname === "/framkvaemdir/utbod";
+  } catch {
+    return false;
+  }
 }
 
 function parseRssItems(xml: string) {
@@ -688,6 +718,86 @@ function connectorItemPassesKeywordFilter(item: Record<string, unknown>, connect
     matched_exclude_keywords: matchedExcludeKeywords,
     final_quality_status: finalQualityStatus,
   };
+}
+
+function parseGardabaerTenderPage(html: string, endpointUrl: string) {
+  const items: Record<string, unknown>[] = [];
+  const cardPattern = /<a\b[^>]*href="([^"]*\/framkvaemdir\/utbod\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  const seen = new Set<string>();
+  let match: RegExpExecArray | null;
+
+  while ((match = cardPattern.exec(html)) !== null) {
+    const href = decodeHtml(match[1] || "");
+    const cardHtml = match[2] || "";
+    const url = absolutizeUrl(href, endpointUrl);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+
+    const title = cleanConnectorText(firstHtmlMatch(cardHtml, /<h2\b[^>]*>([\s\S]*?)<\/h2>/i), "");
+    const description = cleanConnectorText(firstHtmlMatch(cardHtml, /<p\b[^>]*>([\s\S]*?)<\/p>/i), title);
+    const details = extractGardabaerTenderDetails(cardHtml);
+    const deadline = parseDate(details["Útboð lýkur"] || "");
+    const openDate = parseDate(details["Útboð opnar"] || "");
+    const workDueDate = parseDate(details["Skiladagur verks"] || "");
+    const statusText = details["Staða útboðs"] || "";
+
+    if (!title || !url) continue;
+
+    items.push({
+      externalId: `gardabaer:${getUrlSlug(url)}`,
+      title,
+      link: url,
+      description,
+      content: [
+        description,
+        statusText ? `Staða útboðs: ${statusText}` : "",
+        details["Útboð opnar"] ? `Útboð opnar: ${details["Útboð opnar"]}` : "",
+        details["Útboð lýkur"] ? `Útboð lýkur: ${details["Útboð lýkur"]}` : "",
+        details["Skiladagur verks"] ? `Skiladagur verks: ${details["Skiladagur verks"]}` : "",
+      ].filter(Boolean).join(". "),
+      publishedDate: openDate,
+      deadline,
+      categories: ["Útboð í auglýsingu"],
+      buyer: "Garðabær",
+      tenderStatus: statusText,
+      workDueDate,
+      raw: {
+        source_page: endpointUrl,
+        source_page_type: "gardabaer_tender_listing",
+        status: statusText,
+        opening_date: openDate,
+        deadline,
+        work_due_date: workDueDate,
+      },
+    });
+  }
+
+  return items;
+}
+
+function extractGardabaerTenderDetails(html: string) {
+  const details: Record<string, string> = {};
+  const detailPattern = /<div\b[^>]*detailsTitle[^>]*>([\s\S]*?)<\/div>\s*<div\b[^>]*detailsContent[^>]*>([\s\S]*?)<\/div>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = detailPattern.exec(html)) !== null) {
+    const key = cleanConnectorText(match[1] || "", "");
+    const value = cleanConnectorText(match[2] || "", "");
+    if (key && value) details[key] = value;
+  }
+  return details;
+}
+
+function firstHtmlMatch(html: string, pattern: RegExp) {
+  const match = html.match(pattern);
+  return match?.[1] || "";
+}
+
+function absolutizeUrl(value: string, baseUrl: string) {
+  try {
+    return new URL(value, baseUrl).toString();
+  } catch {
+    return "";
+  }
 }
 
 function recordImportSkip(details: ImportDebugDetails, sample: ImportSkipSample) {
@@ -935,7 +1045,7 @@ function normalizeConnectorItem(
   });
   const searchText = `${title} ${description} ${content} ${categories.join(" ")}`;
   const extractedDeadline = extractDeadline(searchText);
-  const deadline = extractedDeadline.date;
+  const deadline = String(item.deadline || "") || extractedDeadline.date;
   const isExpired = deadline ? daysUntil(deadline) < 0 : false;
   const qualityStatus = getConnectorOpportunityQuality(searchText);
   const buyer = getConnectorItemBuyer(item, connector.connector_type, source.name, title) || "Unknown buyer";
@@ -1229,7 +1339,7 @@ function classifyVegagerdinProject(text: string) {
       "skrifad var undir verksamning",
     ];
     const tenderState = awardedPhrases.some((phrase) => normalized.includes(normalizeSearchText(phrase)))
-      ? "awarded"
+      ? "tender_awarded"
       : "already_tendered";
     return { qualityStatus: "confirmed_tender", tenderState };
   }
@@ -1275,7 +1385,7 @@ function classifyVegagerdinProject(text: string) {
 
 function getVegagerdinProjectDeadlineWarning(tenderState: string, deadline: string | null) {
   if (deadline) return null;
-  if (tenderState === "already_tendered" || tenderState === "awarded" || tenderState === "announced") {
+  if (tenderState === "already_tendered" || tenderState === "tender_awarded" || tenderState === "awarded" || tenderState === "announced") {
     return "Tender appears already announced/awarded — verify source article.";
   }
   if (tenderState === "upcoming_tender") {
@@ -1772,7 +1882,7 @@ function calculateMatch(profile: Record<string, unknown>, opportunity: Record<st
   }
 
   if (!opportunity.deadline) {
-    risks.push(MISSING_DEADLINE_RISK);
+    risks.push(getOpportunityMissingDeadlineRisk(opportunity));
   } else {
     const days = daysUntil(String(opportunity.deadline));
     if (days >= 0 && days <= 30) {
@@ -1801,6 +1911,25 @@ function calculateMatch(profile: Record<string, unknown>, opportunity: Record<st
     has_company_fit: hasCompanyFit,
     location_category: locationCategory,
   };
+}
+
+function getOpportunityMissingDeadlineRisk(opportunity: Record<string, unknown>) {
+  const rawPayload = opportunity.raw_payload && typeof opportunity.raw_payload === "object"
+    ? opportunity.raw_payload as Record<string, unknown>
+    : {};
+  const warning = String(rawPayload.deadline_warning || "").trim();
+  if (warning) return warning;
+  if (rawPayload.extraction_method === VEGAGERDIN_PROJECT_EXTRACTION_METHOD) {
+    const tenderState = String(rawPayload.tender_state || "").trim();
+    if (["tender_awarded", "awarded", "already_tendered", "announced"].includes(tenderState)) {
+      return "Tender appears already announced/awarded — verify source article.";
+    }
+    if (tenderState === "upcoming_tender") {
+      return "Formal tender deadline not found yet — monitor source article.";
+    }
+    return "No formal tender deadline extracted — verify source article.";
+  }
+  return MISSING_DEADLINE_RISK;
 }
 
 function addMatchDebugSample(details: SourceMatchDetails, sample: MatchDebugSample) {

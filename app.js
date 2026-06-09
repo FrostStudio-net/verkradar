@@ -1331,7 +1331,7 @@ function normalizeOpportunityQualityStatus(status, opp = {}) {
   if (isTedOpportunity(opp)) return "confirmed_tender";
   if (isVegagerdinExtractedProject(opp)) {
     const tenderState = getVegagerdinExtractedTenderState(opp);
-    if (["awarded", "already_tendered", "announced"].includes(tenderState)) return "confirmed_tender";
+    if (["tender_awarded", "awarded", "already_tendered", "announced"].includes(tenderState)) return "confirmed_tender";
     if (tenderState === "upcoming_tender") return "early_signal";
     return "needs_review";
   }
@@ -1351,13 +1351,23 @@ function isVegagerdinExtractedProject(opp) {
 
 function getVegagerdinExtractedTenderState(opp) {
   const stored = String(opp?.rawPayload?.tender_state || "").trim();
+  const inferred = inferVegagerdinExtractedTenderState(opp);
   const aliases = {
+    awarded: "tender_awarded",
     open_or_published: "announced",
     planned_tender: "upcoming_tender",
     unclear: "project_signal"
   };
-  if (stored) return aliases[stored] || stored;
+  const normalizedStored = aliases[stored] || stored;
+  if (inferred === "tender_awarded") return "tender_awarded";
+  if (inferred === "already_tendered" && !["tender_awarded", "announced"].includes(normalizedStored)) return "already_tendered";
+  if (inferred === "announced" && !["tender_awarded", "already_tendered"].includes(normalizedStored)) return "announced";
+  if (inferred === "upcoming_tender" && ["", "project_signal", "needs_review", "unclear"].includes(normalizedStored)) return "upcoming_tender";
+  if (normalizedStored) return normalizedStored;
+  return inferred;
+}
 
+function inferVegagerdinExtractedTenderState(opp) {
   const text = getOpportunityQualityText(opp);
   if (containsAnyNormalizedPhrase(text, [
     "lægstbjóðandi",
@@ -1368,7 +1378,7 @@ function getVegagerdinExtractedTenderState(opp) {
     "skrifað var undir verksamning",
     "skrifad var undir verksamning"
   ])) {
-    return "awarded";
+    return "tender_awarded";
   }
   if (containsAnyNormalizedPhrase(text, [
     "útboð var auglýst",
@@ -3343,15 +3353,7 @@ function getFilteredMatches() {
   const matches = ["all_opportunities", "needs_review"].includes(state.filters.label)
     ? getAvailableDashboardOpportunities()
     : getStoredDashboardMatches();
-  const baseMatches = matches.filter((opp) => {
-    const search = state.filters.search.toLowerCase();
-    if (search && !opportunityText(opp).includes(search)) return false;
-    if (state.filters.category !== "all" && opp.category !== state.filters.category) return false;
-    if (state.filters.location !== "all" && opp.location !== state.filters.location) return false;
-    if (state.filters.type !== "all" && opp.type !== state.filters.type) return false;
-    if (state.filters.savedOnly && !state.saved.includes(opp.id)) return false;
-    return true;
-  });
+  const baseMatches = getDashboardFilterBaseMatches(matches);
 
   if (state.filters.label === "recommended") {
     const recommended = baseMatches.filter(isRecommendedDashboardMatch);
@@ -3360,6 +3362,18 @@ function getFilteredMatches() {
   }
 
   return sortDashboardMatches(baseMatches.filter(matchesSelectedLabelFilter));
+}
+
+function getDashboardFilterBaseMatches(matches) {
+  return matches.filter((opp) => {
+    const search = state.filters.search.toLowerCase();
+    if (search && !opportunityText(opp).includes(search)) return false;
+    if (state.filters.category !== "all" && opp.category !== state.filters.category) return false;
+    if (state.filters.location !== "all" && opp.location !== state.filters.location) return false;
+    if (state.filters.type !== "all" && opp.type !== state.filters.type) return false;
+    if (state.filters.savedOnly && !state.saved.includes(opp.id)) return false;
+    return true;
+  });
 }
 
 function matchesSelectedLabelFilter(opp) {
@@ -3375,6 +3389,7 @@ function matchesSelectedLabelFilter(opp) {
 
 function isRecommendedDashboardMatch(opp) {
   if (!isRecommendedScore(opp)) return false;
+  if (opp.matchScore >= 85 || opp.matchLabel === "Strong match") return true;
   if (normalizeOpportunityQualityStatus(opp.qualityStatus, opp) === "needs_review") return false;
   if (containsObviousNewsIntent(getOpportunityQualityText(opp))) return false;
   return true;
@@ -3382,6 +3397,7 @@ function isRecommendedDashboardMatch(opp) {
 
 function isFallbackDashboardMatch(opp) {
   if (!isRecommendedScore(opp)) return false;
+  if (opp.matchScore >= 85 || opp.matchLabel === "Strong match") return true;
   if (normalizeOpportunityQualityStatus(opp.qualityStatus, opp) === "needs_review") return false;
   if (containsObviousNewsIntent(getOpportunityQualityText(opp))) return false;
   return true;
@@ -3406,7 +3422,7 @@ function getOpportunityQualityRank(opp) {
   return 2;
 }
 
-function getDashboardFilterSummary({ visibleCount, storedMatchCount, availableCount, recommendedCount, companyName }) {
+function getDashboardFilterSummary({ visibleCount, storedMatchCount, filteredStoredCount, availableCount, recommendedCount, strongCount, companyName }) {
   const selected = state.filters.label;
   if (selected === "all_opportunities") {
     return `${availableCount} opportunities are available in the system. Showing ${visibleCount} visible opportunities for inspection.`;
@@ -3418,6 +3434,12 @@ function getDashboardFilterSummary({ visibleCount, storedMatchCount, availableCo
   if (selected === "strong") return `${storedMatchCount} stored matches for ${companyName}. Showing ${visibleCount} strong matches.`;
   if (selected === "recommended") {
     if (!visibleCount) {
+      if (strongCount > 0) {
+        return `${strongCount} strong ${strongCount === 1 ? "match exists" : "matches exist"} for ${companyName}, but ${strongCount === 1 ? "it is" : "they are"} hidden by your current filters.`;
+      }
+      if (filteredStoredCount > 0) {
+        return `${filteredStoredCount} stored ${filteredStoredCount === 1 ? "match is" : "matches are"} hidden from Recommended by quality checks. Use All matches or Needs review to inspect them.`;
+      }
       return `No recommended matches for ${companyName} yet. ${availableCount} opportunities are available in the system, but none match this profile strongly enough.`;
     }
     return `${storedMatchCount} stored matches for ${companyName}. Showing ${visibleCount} recommended or possible matches.`;
@@ -3612,7 +3634,7 @@ function formatOpportunityDeadlineForReport(opp) {
 function getOpportunityMissingDeadlineRisk(opp) {
   if (isVegagerdinExtractedProject(opp)) {
     const tenderState = getVegagerdinExtractedTenderState(opp);
-    if (["awarded", "already_tendered", "announced"].includes(tenderState)) {
+    if (["tender_awarded", "awarded", "already_tendered", "announced"].includes(tenderState)) {
       return "Tender appears already announced/awarded — verify source article.";
     }
     if (tenderState === "upcoming_tender") {
@@ -5512,17 +5534,20 @@ function renderDashboard() {
 
   const matches = getFilteredMatches();
   const allMatches = getStoredDashboardMatches();
+  const filteredStoredMatches = getDashboardFilterBaseMatches(allMatches);
   const availableOpportunities = getAvailableDashboardOpportunities();
-  const strong = allMatches.filter((o) => o.matchScore >= 85).length;
-  const closingSoon = allMatches.filter((o) => daysUntilDeadline(o.deadline) <= 14 && daysUntilDeadline(o.deadline) >= 0).length;
+  const strong = filteredStoredMatches.filter((o) => o.matchScore >= 85).length;
+  const closingSoon = filteredStoredMatches.filter((o) => daysUntilDeadline(o.deadline) <= 14 && daysUntilDeadline(o.deadline) >= 0).length;
   const savedCount = state.saved.length;
-  const totalValue = allMatches.filter((o) => o.matchScore >= 65).reduce((sum, o) => sum + (o.estimatedValue || 0), 0);
-  const recommendedCount = allMatches.filter(isRecommendedDashboardMatch).length;
+  const totalValue = filteredStoredMatches.filter((o) => o.matchScore >= 65).reduce((sum, o) => sum + (o.estimatedValue || 0), 0);
+  const recommendedCount = filteredStoredMatches.filter(isRecommendedDashboardMatch).length;
   const filterSummary = getDashboardFilterSummary({
     visibleCount: matches.length,
     storedMatchCount: allMatches.length,
+    filteredStoredCount: filteredStoredMatches.length,
     availableCount: availableOpportunities.length,
     recommendedCount,
+    strongCount: strong,
     companyName: state.profile.companyName,
   });
   const matchRefreshText = state.lastMatchedAt
@@ -5580,7 +5605,9 @@ function renderDashboard() {
       ${matches.length ? matches.map(renderOpportunityCard).join("") : renderDashboardEmptyState(state.profile, state.filters.label, {
         availableCount: availableOpportunities.length,
         storedMatchCount: allMatches.length,
+        filteredStoredCount: filteredStoredMatches.length,
         recommendedCount,
+        strongCount: strong,
       })}
     </section>
   `);
@@ -5659,9 +5686,30 @@ function getDashboardEmptyCopy(filter, context = {}) {
   }
   return {
     eyebrow: "No recommended matches",
-    title: `No recommended matches for ${context.companyName || "this profile"} yet.`,
-    body: `${Number(context.availableCount || 0)} opportunities are available in the system, but none match this profile strongly enough.`
+    title: getRecommendedEmptyTitle(context),
+    body: getRecommendedEmptyBody(context)
   };
+}
+
+function getRecommendedEmptyTitle(context = {}) {
+  const companyName = context.companyName || "this profile";
+  if (Number(context.strongCount || 0) > 0) {
+    return `${context.strongCount} strong ${Number(context.strongCount) === 1 ? "match is" : "matches are"} hidden by filters.`;
+  }
+  return `No recommended matches for ${companyName} yet.`;
+}
+
+function getRecommendedEmptyBody(context = {}) {
+  const strongCount = Number(context.strongCount || 0);
+  const filteredStoredCount = Number(context.filteredStoredCount || 0);
+  const availableCount = Number(context.availableCount || 0);
+  if (strongCount > 0) {
+    return "Clear search/category/location filters or turn off Saved only to see the strong matches.";
+  }
+  if (filteredStoredCount > 0) {
+    return `${filteredStoredCount} stored ${filteredStoredCount === 1 ? "match is" : "matches are"} available, but hidden from Recommended by quality checks. Use All matches or Needs review to inspect them.`;
+  }
+  return `${availableCount} opportunities are available in the system, but none match this profile strongly enough.`;
 }
 
 function renderDashboardEmptyState(profile, filter = state.filters.label, context = {}) {
@@ -5763,6 +5811,7 @@ function renderTenderStateBadge(opp) {
   if (!isVegagerdinExtractedProject(opp)) return "";
   const stateValue = getVegagerdinExtractedTenderState(opp);
   const labels = {
+    tender_awarded: "Tender awarded",
     awarded: "Tender awarded",
     already_tendered: "Tender already announced",
     announced: "Tender announced",
@@ -5775,6 +5824,7 @@ function renderTenderStateBadge(opp) {
 
 function formatTenderState(value) {
   const labels = {
+    tender_awarded: "Tender awarded",
     awarded: "Tender awarded",
     already_tendered: "Tender already announced",
     announced: "Tender announced",
@@ -5833,6 +5883,7 @@ function renderOpportunityModal(opp) {
             <aside class="side-panel">
               <h3>Opportunity info</h3>
               <p><strong>Source:</strong> ${escapeHtml(opp.source)}</p>
+              ${isVegagerdinExtractedProject(opp) ? `<p><strong>Extraction:</strong> Extracted from Vegagerðin article</p>` : ""}
               ${opp.rawPayload?.parent_article_title ? `<p><strong>Source article:</strong> ${escapeHtml(opp.rawPayload.parent_article_title)}</p>` : ""}
               ${opp.rawPayload?.parent_url ? `<p><strong>Parent article:</strong> <a href="${escapeHtml(opp.rawPayload.parent_url)}" target="_blank" rel="noreferrer">Open source article</a></p>` : ""}
               ${opp.rawPayload?.region ? `<p><strong>Extracted region:</strong> ${escapeHtml(opp.rawPayload.region)}</p>` : ""}
