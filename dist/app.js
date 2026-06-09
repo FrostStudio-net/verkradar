@@ -80,7 +80,9 @@ let state = {
   authMessage: null,
   authForm: {
     email: "",
-    password: ""
+    password: "",
+    newPassword: "",
+    confirmPassword: ""
   },
   authSubmitting: false,
   isSavingProfile: false,
@@ -268,7 +270,7 @@ window.addEventListener("hashchange", () => {
   }
   suppressNextHashChange = false;
 
-  if (["/login", "/signup"].includes(nextRoute) && nextRoute !== state.route) {
+  if (["/login", "/signup", "/forgot-password", "/reset-password"].includes(nextRoute) && nextRoute !== state.route) {
     state.authMessage = null;
     state.authSubmitting = false;
   }
@@ -692,6 +694,20 @@ document.addEventListener("submit", async (event) => {
     return;
   }
 
+  if (event.target.id === "forgot-password-form") {
+    event.preventDefault();
+    const form = new FormData(event.target);
+    sendPasswordResetEmail(form.get("email"));
+    return;
+  }
+
+  if (event.target.id === "reset-password-form") {
+    event.preventDefault();
+    const form = new FormData(event.target);
+    updatePasswordFromReset(form.get("newPassword"), form.get("confirmPassword"));
+    return;
+  }
+
   if (event.target.id === "admin-opportunity-form") {
     event.preventDefault();
     const form = new FormData(event.target);
@@ -836,7 +852,7 @@ function updateMobileMenuOffset() {
 
 function navigate(route) {
   route = route || "/";
-  const authRoutes = ["/login", "/signup"];
+  const authRoutes = ["/login", "/signup", "/forgot-password", "/reset-password"];
 
   if (authRoutes.includes(route) && route !== state.route) {
     state.authMessage = null;
@@ -870,11 +886,18 @@ function getPostAuthRoute() {
 
 function isPublicAuthEntryRoute(route = state.route) {
   const normalized = String(route || "");
-  return ["/", "/login", "/signup"].includes(normalized) ||
+  if (isPasswordRecoveryRoute(normalized)) return false;
+  return ["/", "/login", "/signup", "/forgot-password"].includes(normalized) ||
     normalized.startsWith("access_token=") ||
     normalized.startsWith("code=") ||
     normalized.includes("type=signup") ||
-    normalized.includes("type=email_change") ||
+    normalized.includes("type=email_change");
+}
+
+function isPasswordRecoveryRoute(route = state.route) {
+  const normalized = String(route || "");
+  return normalized === "/reset-password" ||
+    normalized.startsWith("/reset-password") ||
     normalized.includes("type=recovery");
 }
 
@@ -1572,8 +1595,15 @@ function sanitizeMatchReasons(opp, reasons) {
 function clearAuthForm() {
   state.authForm = {
     email: "",
-    password: ""
+    password: "",
+    newPassword: "",
+    confirmPassword: ""
   };
+}
+
+function clearResetPasswordFields() {
+  state.authForm.newPassword = "";
+  state.authForm.confirmPassword = "";
 }
 
 function getTedImportEndpoint() {
@@ -1748,6 +1778,10 @@ function getAuthRedirectUrl() {
   return window.location.origin;
 }
 
+function getPasswordResetRedirectUrl() {
+  return `${window.location.origin}/#/reset-password`;
+}
+
 async function signUp(email, password) {
   state.authSubmitting = true;
   state.authMessage = null;
@@ -1813,6 +1847,78 @@ async function signIn(email, password) {
   } catch (error) {
     console.error("Login failed:", error);
     state.authMessage = { type: "error", text: formatAuthError(error, "login") };
+    render();
+  } finally {
+    state.authSubmitting = false;
+    render();
+  }
+}
+
+async function sendPasswordResetEmail(email) {
+  state.authSubmitting = true;
+  state.authMessage = null;
+  render();
+
+  try {
+    if (!supabaseClient) throw new Error("Supabase client is not configured.");
+    const { error } = await supabaseClient.auth.resetPasswordForEmail(String(email || "").trim(), {
+      redirectTo: getPasswordResetRedirectUrl()
+    });
+    if (error) throw error;
+    state.authMessage = {
+      type: "success",
+      text: "If an account exists for this email, a reset link has been sent."
+    };
+  } catch (error) {
+    console.error("Password reset request failed:", error);
+    state.authMessage = {
+      type: "error",
+      text: "We could not send a reset link right now. Please try again."
+    };
+  } finally {
+    state.authSubmitting = false;
+    render();
+  }
+}
+
+async function updatePasswordFromReset(newPassword, confirmPassword) {
+  const password = String(newPassword || "");
+  const confirm = String(confirmPassword || "");
+
+  if (!password) {
+    state.authMessage = { type: "error", text: "Enter a new password." };
+    render();
+    return;
+  }
+  if (password.length < 8) {
+    state.authMessage = { type: "error", text: "Password must be at least 8 characters." };
+    render();
+    return;
+  }
+  if (password !== confirm) {
+    state.authMessage = { type: "error", text: "Passwords do not match." };
+    render();
+    return;
+  }
+
+  state.authSubmitting = true;
+  state.authMessage = null;
+  render();
+
+  try {
+    if (!supabaseClient) throw new Error("Supabase client is not configured.");
+    const { error } = await supabaseClient.auth.updateUser({ password });
+    if (error) throw error;
+    clearResetPasswordFields();
+    navigate("/login");
+    state.authMessage = { type: "success", text: "Password updated. You can now log in." };
+    render();
+  } catch (error) {
+    console.error("Password update failed:", error);
+    state.authMessage = {
+      type: "error",
+      text: "This reset link may be expired or invalid. Request a new reset link and try again."
+    };
     render();
   } finally {
     state.authSubmitting = false;
@@ -1976,6 +2082,14 @@ function registerAuthListener() {
     state.currentUser = state.user;
 
     if (state.user) {
+      if (event === "PASSWORD_RECOVERY") {
+        state.authLoaded = true;
+        state.adminLoaded = true;
+        state.profileLoaded = true;
+        state.authMessage = null;
+        navigate("/reset-password");
+        return;
+      }
       try {
         await checkAdminStatus();
         if (!(state.route === "/settings" && state.profileDraftDirty)) {
@@ -2053,7 +2167,8 @@ async function bootApp() {
     state.authLoading = false;
     state.isBooting = false;
     hasBooted = true;
-    redirectAuthenticatedPublicRoute({ replace: true });
+    if (isPasswordRecoveryRoute()) replaceHashRoute("/reset-password");
+    else redirectAuthenticatedPublicRoute({ replace: true });
     render();
     afterRouteRender();
   }
@@ -3721,6 +3836,8 @@ function render() {
   else if (route === "/") html = renderLanding();
   else if (route === "/login") html = renderLogin();
   else if (route === "/signup") html = renderSignup();
+  else if (route === "/forgot-password") html = renderForgotPassword();
+  else if (route === "/reset-password") html = renderResetPassword();
   else if (route === "/onboarding") html = renderOnboarding();
   else if (route === "/dashboard") html = state.user ? renderDashboard() : requireAuthPage();
   else if (route === "/report") html = state.user ? renderReport() : requireAuthPage();
@@ -4306,12 +4423,71 @@ function renderLogin() {
           <form id="login-form" class="auth-card">
             <label class="form-group">Email <input type="email" name="email" data-auth-field="email" value="${escapeHtml(state.authForm.email)}" autocomplete="email" required /></label>
             <label class="form-group">Password <input type="password" name="password" data-auth-field="password" value="${escapeHtml(state.authForm.password)}" autocomplete="current-password" required /></label>
+            <p class="auth-help-link"><button type="button" data-action="go" data-href="/forgot-password">Forgot password?</button></p>
             <div class="auth-actions">
               <button class="btn btn-primary btn-large" type="submit" ${state.authSubmitting ? "disabled" : ""}>
                 ${state.authSubmitting ? "Logging in..." : "Login"}
               </button>
             </div>
             <p class="auth-switch">New to VerkRadar? <button type="button" data-action="go" data-href="/signup">Create account</button></p>
+          </form>
+        </div>
+      </div>
+    </section>
+  `);
+}
+
+function renderForgotPassword() {
+  if (state.user) return requireProfilePage("Already logged in", "Open your dashboard or edit your company profile.");
+
+  return renderShell(`
+    <section class="auth-page">
+      <div class="auth-layout">
+        <div class="auth-copy">
+          <p class="eyebrow">Password reset</p>
+          <h1>Reset your password</h1>
+          <p>Enter your email and VerkRadar will send a secure reset link if the account exists.</p>
+        </div>
+
+        <div class="auth-form-column">
+          ${renderAuthMessage()}
+          <form id="forgot-password-form" class="auth-card">
+            <label class="form-group">Email <input type="email" name="email" data-auth-field="email" value="${escapeHtml(state.authForm.email)}" autocomplete="email" required /></label>
+            <div class="auth-actions">
+              <button class="btn btn-primary btn-large" type="submit" ${state.authSubmitting ? "disabled" : ""}>
+                ${state.authSubmitting ? "Sending..." : "Send reset link"}
+              </button>
+            </div>
+            <p class="auth-switch">Remembered your password? <button type="button" data-action="go" data-href="/login">Back to login</button></p>
+          </form>
+        </div>
+      </div>
+    </section>
+  `);
+}
+
+function renderResetPassword() {
+  return renderShell(`
+    <section class="auth-page">
+      <div class="auth-layout">
+        <div class="auth-copy">
+          <p class="eyebrow">New password</p>
+          <h1>Choose a new password</h1>
+          <p>Set a new password for your VerkRadar account. If the link has expired, request a new reset link.</p>
+        </div>
+
+        <div class="auth-form-column">
+          ${renderAuthMessage()}
+          <form id="reset-password-form" class="auth-card">
+            <label class="form-group">New password <input type="password" name="newPassword" data-auth-field="newPassword" value="${escapeHtml(state.authForm.newPassword)}" autocomplete="new-password" minlength="8" required /></label>
+            <label class="form-group">Confirm new password <input type="password" name="confirmPassword" data-auth-field="confirmPassword" value="${escapeHtml(state.authForm.confirmPassword)}" autocomplete="new-password" minlength="8" required /></label>
+            <div class="auth-actions">
+              <button class="btn btn-primary btn-large" type="submit" ${state.authSubmitting ? "disabled" : ""}>
+                ${state.authSubmitting ? "Updating..." : "Update password"}
+              </button>
+            </div>
+            <p class="auth-switch">Need a new link? <button type="button" data-action="go" data-href="/forgot-password">Send another reset link</button></p>
+            <p class="auth-switch">Back to <button type="button" data-action="go" data-href="/login">Login</button></p>
           </form>
         </div>
       </div>
