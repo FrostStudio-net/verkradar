@@ -6891,16 +6891,12 @@ function getSafeExternalUrl(value) {
 
 function getReportMatches() {
   const matches = getMatchedOpportunities()
-    .filter((opp) => opp.matchScore >= 50 || isSavedOrWatchedOpportunity(opp))
-    .filter(isReportEligibleOpportunity);
+    .filter((opp) => opp.matchScore >= 50)
+    .filter(isStrictCustomerReportEligible);
   const sections = getReportSections(matches);
   return [
-    ...sections.awarded,
     ...sections.confirmed,
     ...sections.early,
-    ...sections.saved,
-    ...sections.review,
-    ...sections.additional,
   ];
 }
 
@@ -6912,8 +6908,8 @@ function buildReportContent(profile, matches) {
   const periodStart = start.toISOString().slice(0, 10);
   const title = `Weekly Opportunity Report for ${profile.companyName}`;
   const sections = getReportSections(matches);
-  const coreCount = sections.awarded.length + sections.confirmed.length + sections.early.length;
-  const summary = `${coreCount} actionable tenders and project signals shortlisted for ${profile.companyName}.`;
+  const coreCount = sections.confirmed.length + sections.early.length;
+  const summary = `${coreCount} relevant tender/quote-request ${coreCount === 1 ? "item" : "items"} found for ${profile.companyName}.`;
   const textContent = generateWeeklyReport(profile, matches);
   const htmlContent = `
     <div class="report-cover">
@@ -6921,22 +6917,16 @@ function buildReportContent(profile, matches) {
       <p class="eyebrow">Weekly opportunity report</p>
       <h2>${escapeHtml(title)}</h2>
       <p>${escapeHtml(formatReportDateRange(periodStart, periodEnd))}</p>
-      <p>${escapeHtml(summary)} ${matches[0] ? `The highest-ranked item is ${escapeHtml(matches[0].title)}.` : "No report-ready matches were found for this period."}</p>
+      <p>${escapeHtml(summary)} ${matches[0] ? `The strongest visible item is ${escapeHtml(matches[0].title)}.` : "No strict report-ready tenders or quote requests were found for this period."}</p>
     </div>
 
     <div class="report-summary-grid">
-      ${renderReportSummaryCard("Actionable tenders", sections.confirmed.length)}
-      ${renderReportSummaryCard("Upcoming project signals", sections.early.length)}
-      ${renderReportSummaryCard("Already announced/awarded", sections.awarded.length)}
-      ${renderReportSummaryCard("Needs review", sections.review.length)}
+      ${renderReportSummaryCard("Open tenders / quote requests", sections.confirmed.length)}
+      ${renderReportSummaryCard("Possible upcoming opportunities", sections.early.length)}
     </div>
 
-    ${renderReportOpportunitySection("Already announced/awarded", "Tender activity is already visible in the source. Verify status before spending bid time.", sections.awarded)}
-    ${renderReportOpportunitySection("Actionable tenders", "Clear procurement intent. Review source documents and decide whether to pursue.", sections.confirmed)}
-    ${renderReportOpportunitySection("Early signals", "Planned work or upcoming procurement signals. Useful for pipeline planning before a tender is published.", sections.early)}
-    ${renderReportOpportunitySection("Saved", "Opportunities your team has already marked for follow-up.", sections.saved)}
-    ${renderReportOpportunitySection("Needs review / verify source", "Lower-confidence signals that may be useful, but should not be treated as confirmed tenders.", sections.review)}
-    ${renderReportOpportunitySection("Additional lower-confidence signals", "Hidden from the main shortlist to keep the report focused. Review only if you want broader market context.", sections.additional)}
+    ${renderReportOpportunitySection("Open tenders / quote requests", "Clear procurement intent. Review source documents and decide whether to pursue.", sections.confirmed)}
+    ${renderReportOpportunitySection("Possible upcoming opportunities", "Upcoming procurement signals with clear tender or quote-request intent.", sections.early)}
 
     <p class="report-footer-note">VerkRadar helps prioritise public opportunity review. Always check the original source documents, deadlines, requirements and eligibility before acting.</p>
   `;
@@ -6957,94 +6947,62 @@ function formatReportDateRange(start, end) {
 
 function getReportSections(matches) {
   const buckets = {
-    awarded: [],
     confirmed: [],
     early: [],
-    review: [],
-    saved: [],
-    additional: [],
   };
   const seen = new Set();
 
-  sortDashboardMatches(matches).forEach((opp) => {
-    const savedOrWatched = isSavedOrWatchedOpportunity(opp);
-    if (savedOrWatched && !seen.has(opp.id)) {
-      buckets.saved.push(opp);
-      seen.add(opp.id);
-      return;
-    }
-
+  sortCustomerReportMatches(matches).forEach((opp) => {
     const placement = getReportOpportunityPlacement(opp);
     if (placement === "excluded") return;
     if (seen.has(opp.id)) return;
     seen.add(opp.id);
 
-    if (placement === "awarded") buckets.awarded.push(opp);
-    else if (placement === "confirmed") buckets.confirmed.push(opp);
+    if (placement === "confirmed") buckets.confirmed.push(opp);
     else if (placement === "early") buckets.early.push(opp);
-    else if (placement === "review") buckets.review.push(opp);
-    else buckets.additional.push(opp);
   });
 
   const mainBudget = 8;
   let remainingMain = mainBudget;
-  for (const key of ["awarded", "confirmed", "early", "saved"]) {
+  for (const key of ["confirmed", "early"]) {
     const kept = buckets[key].slice(0, remainingMain);
-    const overflow = buckets[key].slice(remainingMain);
     buckets[key] = kept;
-    buckets.additional.push(...overflow);
     remainingMain = Math.max(0, remainingMain - kept.length);
   }
-
-  const reviewKept = buckets.review.slice(0, 2);
-  buckets.additional.push(...buckets.review.slice(2));
-  buckets.review = reviewKept;
-  buckets.additional = buckets.additional.slice(0, 6);
 
   return buckets;
 }
 
 function getReportOpportunityPlacement(opp) {
-  if (!isReportEligibleOpportunity(opp)) return "excluded";
+  if (!isStrictCustomerReportEligible(opp)) return "excluded";
   const intent = getOpportunityIntent(opp);
-  if (intent === "confirmed_tender") {
-    const tenderState = isVegagerdinExtractedProject(opp) ? getVegagerdinExtractedTenderState(opp) : "";
-    if (["tender_awarded", "awarded", "already_tendered", "announced"].includes(tenderState)) return "awarded";
-    return "confirmed";
-  }
+  if (intent === "confirmed_tender") return "confirmed";
   if (intent === "early_opportunity") return "early";
-  if (intent === "market_signal") return "review";
-  if (isVegagerdinNoiseOpportunity(opp) && !hasStrongTenderIntentForReport(opp)) return "review";
-  const tenderState = isVegagerdinExtractedProject(opp) ? getVegagerdinExtractedTenderState(opp) : "";
-  if (["tender_awarded", "awarded", "already_tendered", "announced"].includes(tenderState)) return "awarded";
-  if (tenderState === "upcoming_tender") return "early";
-
   const quality = normalizeOpportunityQualityStatus(opp.qualityStatus, opp);
   if (quality === "confirmed_tender") return "confirmed";
   if (quality === "early_signal") return "early";
-  if (quality === "needs_review") return "review";
-  return "additional";
+  return "excluded";
 }
 
 function isReportEligibleOpportunity(opp) {
+  return isStrictCustomerReportEligible(opp);
+}
+
+function isStrictCustomerReportEligible(opp) {
   if (!opp || isDemoTestOpportunity(opp)) return false;
   if (!isDashboardVisibleOpportunity(opp)) return false;
   if (isCustomerReportExcludedIntent(opp)) return false;
-  if (isSavedOrWatchedOpportunity(opp)) return true;
+  if (isAlreadyAwardedOrTenderedReportItem(opp)) return false;
+  if (isDesignConsultingOnlyForCurrentProfile(opp)) return false;
+  if (containsTitleNewsIntent(opp.title || "") && !hasOpenTenderOrQuoteIntent(opp)) return false;
+
   const intent = getOpportunityIntent(opp);
-  if (intent === "confirmed_tender" || intent === "early_opportunity") return true;
-  if (intent === "market_signal") {
-    return opp.matchScore >= 75 && isTrustedReportSource(opp) && hasClearConstructionProjectTerms(opp) && !isReportNoiseWithoutTenderIntent(opp);
-  }
-  const placementQuality = normalizeOpportunityQualityStatus(opp.qualityStatus, opp);
-  const tenderState = isVegagerdinExtractedProject(opp) ? getVegagerdinExtractedTenderState(opp) : "";
-  if (["tender_awarded", "awarded", "already_tendered", "announced", "upcoming_tender"].includes(tenderState)) return true;
-  if (placementQuality === "confirmed_tender" || placementQuality === "early_signal") return !isReportNoiseWithoutTenderIntent(opp);
-  if (placementQuality === "needs_review") {
-    if (opp.matchScore >= 75) return true;
-    if (isTrustedReportSource(opp) && hasClearConstructionProjectTerms(opp) && !isReportNoiseWithoutTenderIntent(opp)) return true;
-    return false;
-  }
+  if (intent === "confirmed_tender") return hasOpenTenderOrQuoteIntent(opp) || isProcurementSource(opp);
+  if (intent === "early_opportunity") return hasUpcomingTenderIntent(opp);
+
+  const quality = normalizeOpportunityQualityStatus(opp.qualityStatus, opp);
+  if (quality === "confirmed_tender") return hasOpenTenderOrQuoteIntent(opp) || isProcurementSource(opp);
+  if (quality === "early_signal") return hasUpcomingTenderIntent(opp);
   return false;
 }
 
@@ -7056,6 +7014,128 @@ function isCustomerReportExcludedIntent(opp) {
   if (["hidden", "hide", "noise", "deleted"].includes(adminStatus)) return true;
   const intent = getOpportunityIntent(opp);
   return intent === "news_context" || intent === "not_opportunity";
+}
+
+function sortCustomerReportMatches(matches) {
+  return [...matches].sort((a, b) => {
+    const placementDiff = getStrictReportRank(a) - getStrictReportRank(b);
+    if (placementDiff) return placementDiff;
+    const procurementDiff = Number(isProcurementSource(b)) - Number(isProcurementSource(a));
+    if (procurementDiff) return procurementDiff;
+    const intentDiff = Number(hasOpenTenderOrQuoteIntent(b)) - Number(hasOpenTenderOrQuoteIntent(a));
+    if (intentDiff) return intentDiff;
+    return b.matchScore - a.matchScore || daysUntilDeadline(a.deadline) - daysUntilDeadline(b.deadline);
+  });
+}
+
+function getStrictReportRank(opp) {
+  if (isAlreadyAwardedOrTenderedReportItem(opp)) return 99;
+  const intent = getOpportunityIntent(opp);
+  if (intent === "confirmed_tender") return 0;
+  if (intent === "early_opportunity") return 1;
+  return 10;
+}
+
+function isAlreadyAwardedOrTenderedReportItem(opp) {
+  const tenderState = isVegagerdinExtractedProject(opp) ? getVegagerdinExtractedTenderState(opp) : String(opp?.rawPayload?.tender_state || "").toLowerCase();
+  if (["tender_awarded", "awarded", "already_tendered"].includes(tenderState)) return true;
+  return containsAnyNormalizedPhrase(getOpportunityQualityText(opp), [
+    "lægstbjóðandi",
+    "laegstbjodandi",
+    "samningur gerður",
+    "samningur gerdur",
+    "samningur var",
+    "samið var",
+    "samid var",
+    "útboð hefur farið fram",
+    "utbod hefur farid fram",
+    "útboð var auglýst",
+    "utbod var auglyst",
+  ]);
+}
+
+function hasOpenTenderOrQuoteIntent(opp) {
+  return containsAnyNormalizedPhrase(getOpportunityQualityText(opp), [
+    "útboð",
+    "utbod",
+    "útboðsauglýsing",
+    "utbodsauglysing",
+    "tilboð",
+    "tilbod",
+    "tilboðum",
+    "tilbodum",
+    "óskað eftir tilboðum",
+    "oskad eftir tilbodum",
+    "verðfyrirspurn",
+    "verdfyrirspurn",
+    "forval",
+    "skilafrestur",
+    "útboðsgögn",
+    "utbodsgogn",
+    "quote request",
+    "request for quote",
+    "tender",
+    "procurement",
+  ]);
+}
+
+function hasUpcomingTenderIntent(opp) {
+  return containsAnyNormalizedPhrase(getOpportunityQualityText(opp), [
+    "senn í útboð",
+    "senn i utbod",
+    "áætlað útboð",
+    "aaetlad utbod",
+    "áætlað er að bjóða út",
+    "aaetlad er ad bjoda ut",
+    "fyrirhugað útboð",
+    "fyrirhugad utbod",
+  ]);
+}
+
+function isProcurementSource(opp) {
+  const source = normalizeLocationText(opp?.source || "");
+  return [
+    "rikiskaup",
+    "ríkiskaup",
+    "utbodsvefur",
+    "útboðsvefur",
+    "ted",
+    "tenders electronic daily",
+    "procurement",
+    "tender portal",
+  ].some((trusted) => source.includes(normalizeLocationText(trusted)));
+}
+
+function isDesignConsultingOnlyForCurrentProfile(opp) {
+  const text = getOpportunityQualityText(opp);
+  if (!containsAnyNormalizedPhrase(text, [
+    "for og verkhönnun",
+    "for og verkhonnun",
+    "verkhönnun",
+    "verkhonnun",
+    "hönnun",
+    "honnun",
+    "ráðgjöf",
+    "radgjof",
+    "verkfræðiráðgjöf",
+    "verkfraediradgjof",
+  ])) return false;
+
+  const profile = state.profile || {};
+  const profileText = normalizeLocationText([
+    profile.industry,
+    ...(Array.isArray(profile.services) ? profile.services : []),
+    ...(Array.isArray(profile.includeKeywords) ? profile.includeKeywords : []),
+  ].filter(Boolean).join(" "));
+  return !containsAnyNormalizedPhrase(profileText, [
+    "hönnun",
+    "honnun",
+    "ráðgjöf",
+    "radgjof",
+    "engineering",
+    "design",
+    "consulting",
+  ]);
 }
 
 function isCustomerMatchEligibleOpportunity(opp) {
@@ -7238,23 +7318,15 @@ function getReportRisks(opp) {
 function generateWeeklyReport(profile, matches) {
   const sections = getReportSections(matches);
   const orderedMatches = [
-    ...sections.awarded,
     ...sections.confirmed,
     ...sections.early,
-    ...sections.saved,
-    ...sections.review,
-    ...sections.additional,
   ];
   return `Weekly Opportunity Report for ${profile.companyName}
 Date range: ${formatReportDateRange(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10), new Date().toISOString().slice(0, 10))}
 
 Summary:
-- Actionable tenders: ${sections.confirmed.length}
-- Upcoming project signals: ${sections.early.length}
-- Already announced/awarded: ${sections.awarded.length}
-- Needs review / verify source: ${sections.review.length}
-- Saved opportunities: ${sections.saved.length}
-- Additional lower-confidence signals: ${sections.additional.length}
+- Open tenders / quote requests: ${sections.confirmed.length}
+- Possible upcoming opportunities: ${sections.early.length}
 
 ${orderedMatches.length ? orderedMatches.map((opp, i) => `${i + 1}. ${opp.title}
 Quality: ${getOpportunityQualityLabel(opp)}
