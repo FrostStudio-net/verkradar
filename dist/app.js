@@ -7376,7 +7376,7 @@ function downloadReportPdf() {
     const reportTitle = metaBar.querySelector("div:first-child strong")?.textContent?.trim() || "Weekly Opportunity Report";
     const companyName = metaBar.querySelector("div:last-child span")?.textContent?.trim() || profile.companyName || "Company";
     const reportRange = metaBar.querySelector("div:last-child strong")?.textContent?.trim() || "";
-    const logoSrc = document.querySelector('link[rel="icon"]')?.href || "";
+    const logoSrc = document.querySelector(".brand-logo")?.src || document.querySelector('link[rel="icon"]')?.href || "";
     metaBar.innerHTML = "";
 
     const headerText = document.createElement("div");
@@ -7444,9 +7444,13 @@ function downloadReportPdf() {
       border-bottom: 1px solid #d1d5db !important;
       color: #374151 !important;
       display: flex !important;
-      justify-content: space-between !important;
+      justify-content: flex-start !important;
       gap: 12px !important;
-      padding: 0 0 5px !important;
+      min-height: 39px !important;
+      padding: 0 58px 5px 0 !important;
+      position: relative !important;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
     }
     .pdf-report-header-text {
       display: grid !important;
@@ -7465,10 +7469,15 @@ function downloadReportPdf() {
     }
     .pdf-report-logo {
       display: block !important;
-      height: 28px !important;
-      max-height: 28px !important;
+      height: 38px !important;
+      max-height: 38px !important;
       object-fit: contain !important;
-      opacity: 0.9 !important;
+      opacity: 1 !important;
+      position: absolute !important;
+      right: 0 !important;
+      top: 0 !important;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
       width: auto !important;
     }
     .report-body { padding: 0 !important; }
