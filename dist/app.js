@@ -7368,6 +7368,7 @@ function downloadReportPdf() {
   }
 
   const reportClone = reportNode.cloneNode(true);
+  reportClone.classList.add("pdf-compact-report");
   reportClone.querySelectorAll("textarea, .report-close-btn").forEach((node) => node.remove());
 
   const profile = state.profile || getEmptyProfile();
@@ -7392,15 +7393,116 @@ function downloadReportPdf() {
   <title>${escapeHtml(fileName)}</title>
   ${stylesheetLinks}
   <style>
-    @page { size: A4; margin: 14mm; }
+    @page { size: A4; margin: 10mm; }
     html, body { background: #ffffff !important; }
-    body { margin: 0; color: #111827; }
-    .pdf-export-shell { max-width: 1120px; margin: 0 auto; }
+    body { margin: 0; color: #111827; font-size: 11px; }
+    .pdf-export-shell { max-width: 100%; margin: 0 auto; }
     .report-preview { border: 0 !important; border-radius: 0 !important; box-shadow: none !important; margin: 0 !important; max-width: none !important; }
-    .report-meta-bar { background: #ffffff !important; border-bottom: 1px solid #d1d5db !important; color: #374151 !important; }
+    .report-meta-bar {
+      align-items: flex-start !important;
+      background: #ffffff !important;
+      border-bottom: 1px solid #d1d5db !important;
+      color: #374151 !important;
+      display: flex !important;
+      gap: 12px !important;
+      padding: 0 0 8px !important;
+    }
+    .report-meta-bar span { font-size: 9px !important; }
     .report-meta-bar strong { color: #111827 !important; }
+    .report-meta-bar strong { font-size: 11px !important; }
     .report-body { padding: 0 !important; }
+    .report-cover {
+      background: #ffffff !important;
+      border: 0 !important;
+      margin: 0 !important;
+      padding: 10px 0 8px !important;
+    }
+    .report-cover .report-kicker,
+    .report-cover .eyebrow { display: none !important; }
+    .report-cover h2 {
+      font-size: 18px !important;
+      letter-spacing: 0 !important;
+      line-height: 1.15 !important;
+      margin: 0 0 4px !important;
+    }
+    .report-cover p {
+      color: #334155 !important;
+      font-size: 10px !important;
+      line-height: 1.35 !important;
+      margin: 2px 0 !important;
+      max-width: none !important;
+    }
+    .report-summary-grid {
+      display: grid !important;
+      gap: 8px !important;
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+      margin: 6px 0 10px !important;
+    }
+    .report-summary-card {
+      border-radius: 8px !important;
+      min-height: auto !important;
+      padding: 8px 10px !important;
+    }
+    .report-summary-card span { font-size: 8px !important; }
+    .report-summary-card strong { font-size: 18px !important; }
+    .report-section { margin: 10px 0 0 !important; }
+    .report-section-head {
+      margin-bottom: 6px !important;
+      padding-bottom: 5px !important;
+    }
+    .report-section-head h3 { font-size: 13px !important; margin: 0 !important; }
+    .report-section-head p { font-size: 9px !important; margin: 2px 0 0 !important; }
+    .report-empty { display: none !important; }
+    .report-item {
+      break-inside: avoid !important;
+      border-radius: 10px !important;
+      margin: 0 0 8px !important;
+      padding: 10px !important;
+    }
+    .report-item-top { margin-bottom: 5px !important; }
+    .report-quality,
+    .report-item .badge {
+      font-size: 8px !important;
+      padding: 4px 7px !important;
+    }
+    .report-item h4 {
+      font-size: 13px !important;
+      line-height: 1.2 !important;
+      margin: 0 0 7px !important;
+    }
+    .report-facts {
+      gap: 5px !important;
+      grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+      margin: 0 0 7px !important;
+    }
+    .report-facts span {
+      border-radius: 7px !important;
+      font-size: 8px !important;
+      min-height: auto !important;
+      padding: 6px !important;
+    }
+    .report-facts strong { font-size: 7px !important; margin-bottom: 2px !important; }
+    .report-facts em { font-size: 8px !important; }
+    .report-detail-grid {
+      gap: 8px !important;
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+      margin-top: 7px !important;
+    }
+    .report-detail-grid h5 { font-size: 8px !important; margin: 0 0 4px !important; }
+    .report-detail-grid ul { gap: 4px !important; }
+    .report-detail-grid li {
+      border-radius: 7px !important;
+      font-size: 8px !important;
+      line-height: 1.25 !important;
+      padding: 4px 6px !important;
+    }
     .report-source-link { break-inside: avoid; }
+    .report-footer-note {
+      border-top: 1px solid #d1d5db !important;
+      font-size: 8px !important;
+      margin-top: 10px !important;
+      padding-top: 6px !important;
+    }
     .hidden-textarea, .report-close-btn { display: none !important; }
   </style>
 </head>
