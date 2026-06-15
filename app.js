@@ -424,6 +424,7 @@ document.addEventListener("click", (event) => {
   if (name === "unignore") unignoreOpportunity(id);
   if (name === "details") openDetails(id);
   if (name === "copy-report") copyReport();
+  if (name === "download-report-pdf") downloadReportPdf();
   if (name === "save-report") saveCurrentReport();
   if (name === "view-report") {
     state.selectedReportId = id;
@@ -6491,6 +6492,7 @@ function renderReport() {
         <button class="btn btn-primary" data-action="save-report" ${state.reportSaveLoading ? "disabled" : ""}>
           ${state.reportSaveLoading ? "Saving..." : "Save report"}
         </button>
+        <button class="btn btn-secondary" data-action="download-report-pdf">Download PDF</button>
         <button class="btn btn-secondary" data-action="copy-report">Copy report</button>
       </div>
     </section>
@@ -6996,6 +6998,83 @@ async function copyReport() {
     console.error("Failed to copy report:", error);
     showToast("Could not copy report", "error");
   }
+}
+
+function downloadReportPdf() {
+  const reportNode = document.getElementById("report-preview");
+  if (!reportNode) {
+    showToast("No report available to export", "error");
+    return;
+  }
+
+  const reportClone = reportNode.cloneNode(true);
+  reportClone.querySelectorAll("textarea, .report-close-btn").forEach((node) => node.remove());
+
+  const profile = state.profile || getEmptyProfile();
+  const dateRange = reportNode.querySelector(".report-meta-bar div:last-child strong")?.textContent || new Date().toISOString().slice(0, 10);
+  const fileName = makeReportPdfFileName(profile.companyName || "company", dateRange);
+  const stylesheetLinks = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
+    .map((link) => `<link rel="stylesheet" href="${escapeHtml(link.href)}">`)
+    .join("");
+  const pdfWindow = window.open("", "_blank", "width=1100,height=900");
+
+  if (!pdfWindow) {
+    showToast("Allow popups to download the report PDF", "error");
+    return;
+  }
+
+  pdfWindow.document.open();
+  pdfWindow.document.write(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(fileName)}</title>
+  ${stylesheetLinks}
+  <style>
+    @page { size: A4; margin: 14mm; }
+    html, body { background: #ffffff !important; }
+    body { margin: 0; color: #111827; }
+    .pdf-export-shell { max-width: 1120px; margin: 0 auto; }
+    .report-preview { border: 0 !important; border-radius: 0 !important; box-shadow: none !important; margin: 0 !important; max-width: none !important; }
+    .report-meta-bar { background: #ffffff !important; border-bottom: 1px solid #d1d5db !important; color: #374151 !important; }
+    .report-meta-bar strong { color: #111827 !important; }
+    .report-body { padding: 0 !important; }
+    .report-source-link { break-inside: avoid; }
+    .hidden-textarea, .report-close-btn { display: none !important; }
+  </style>
+</head>
+<body>
+  <main class="pdf-export-shell">
+    ${reportClone.outerHTML}
+  </main>
+  <script>
+    window.addEventListener("load", () => {
+      document.title = ${JSON.stringify(fileName)};
+      setTimeout(() => {
+        window.focus();
+        window.print();
+      }, 250);
+    });
+  <\/script>
+</body>
+</html>`);
+  pdfWindow.document.close();
+}
+
+function makeReportPdfFileName(companyName, dateRange) {
+  const company = slugifyFilePart(companyName) || "company";
+  const range = slugifyFilePart(String(dateRange || "").replace(/\s+to\s+/i, "-")) || new Date().toISOString().slice(0, 10);
+  return `VerkRadar-report-${company}-${range}.pdf`;
+}
+
+function slugifyFilePart(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
 }
 
 function renderPricing() {
