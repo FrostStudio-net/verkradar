@@ -7437,9 +7437,12 @@ function downloadReportPdf() {
     .report-summary-grid { display: none !important; }
     .report-section { margin: 6px 0 0 !important; }
     .report-section-head {
+      border-bottom: 0 !important;
+      box-shadow: none !important;
       margin-bottom: 3px !important;
       padding-bottom: 2px !important;
     }
+    .report-section-head::after { display: none !important; }
     .report-section-head h3 { font-size: 11px !important; margin: 0 !important; }
     .report-section-head p { display: none !important; }
     .report-empty { display: none !important; }
