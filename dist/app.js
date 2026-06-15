@@ -7411,27 +7411,7 @@ function downloadReportPdf() {
     .report-meta-bar strong { color: #111827 !important; }
     .report-meta-bar strong { font-size: 11px !important; }
     .report-body { padding: 0 !important; }
-    .report-cover {
-      background: #ffffff !important;
-      border: 0 !important;
-      margin: 0 !important;
-      padding: 10px 0 8px !important;
-    }
-    .report-cover .report-kicker,
-    .report-cover .eyebrow { display: none !important; }
-    .report-cover h2 {
-      font-size: 18px !important;
-      letter-spacing: 0 !important;
-      line-height: 1.15 !important;
-      margin: 0 0 4px !important;
-    }
-    .report-cover p {
-      color: #334155 !important;
-      font-size: 10px !important;
-      line-height: 1.35 !important;
-      margin: 2px 0 !important;
-      max-width: none !important;
-    }
+    .report-cover { display: none !important; }
     .report-summary-grid {
       display: grid !important;
       gap: 8px !important;
