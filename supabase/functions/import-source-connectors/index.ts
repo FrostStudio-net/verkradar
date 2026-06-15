@@ -1048,6 +1048,7 @@ function normalizeConnectorItem(
   const deadline = String(item.deadline || "") || extractedDeadline.date;
   const isExpired = deadline ? daysUntil(deadline) < 0 : false;
   const qualityStatus = getConnectorOpportunityQuality(searchText);
+  const opportunityIntent = getConnectorOpportunityIntent(searchText, title);
   const buyer = getConnectorItemBuyer(item, connector.connector_type, source.name, title) || "Unknown buyer";
 
   return {
@@ -1081,6 +1082,8 @@ function normalizeConnectorItem(
       source_name: source.name,
       buyer,
       quality_status: qualityStatus,
+      opportunity_intent: opportunityIntent,
+      hidden_from_reports: opportunityIntent === "news_context" || opportunityIntent === "not_opportunity",
       extracted_deadline_text: extractedDeadline.rawText,
       deadline_warning: deadline ? null : MISSING_DEADLINE_RISK,
       item,
@@ -1164,6 +1167,11 @@ async function extractVegagerdinArticleProjects(
         source_name: source.name,
         buyer: VEGAGERDIN_SOURCE_NAME,
         quality_status: project.qualityStatus,
+        opportunity_intent: project.qualityStatus === "confirmed_tender"
+          ? "confirmed_tender"
+          : project.qualityStatus === "early_signal"
+            ? "early_opportunity"
+            : "market_signal",
         tender_state: project.tenderState,
         deadline_warning: deadlineWarning,
         extracted_deadline_text: extractedDeadline.rawText,
@@ -1509,6 +1517,9 @@ function cleanBuyerName(value: string) {
 }
 
 function getConnectorOpportunityQuality(text: string) {
+  const intent = getConnectorOpportunityIntent(text, text);
+  if (intent === "confirmed_tender") return "confirmed_tender";
+  if (intent === "early_opportunity") return "early_signal";
   const normalized = normalizeSearchText(text);
   if (normalized.includes("senn i utbod")) return "early_signal";
 
@@ -1560,6 +1571,73 @@ function getConnectorOpportunityQuality(text: string) {
   if (earlySignalPhrases.some((phrase) => normalized.includes(phrase))) return "early_signal";
 
   return "needs_review";
+}
+
+function getConnectorOpportunityIntent(text: string, title = "") {
+  const normalized = normalizeSearchText(text);
+  const normalizedTitle = normalizeSearchText(title);
+  const confirmedTenderPhrases = [
+    "útboð",
+    "utbod",
+    "útboðsauglýsing",
+    "utbodsauglysing",
+    "tilboð",
+    "tilbod",
+    "tilboðum",
+    "tilbodum",
+    "óskað eftir tilboðum",
+    "oskad eftir tilbodum",
+    "verðfyrirspurn",
+    "verdfyrirspurn",
+    "forval",
+    "tender",
+    "procurement",
+    "skilafrestur",
+    "útboðsgögn",
+    "utbodsgogn",
+  ].map(normalizeSearchText);
+  if (confirmedTenderPhrases.some((phrase) => normalized.includes(phrase))) return "confirmed_tender";
+
+  const negativeTitlePhrases = [
+    "lokun",
+    "lokad",
+    "lokanir",
+    "umferd",
+    "tafir",
+    "hjaleid",
+    "akstursleid",
+    "vegfarendur",
+    "frett",
+    "myndband",
+    "tekur a sig mynd",
+    "opid aftur",
+  ].map(normalizeSearchText);
+  if (negativeTitlePhrases.some((phrase) => normalizedTitle.includes(phrase))) return "news_context";
+
+  const earlyOpportunityPhrases = [
+    "senn i utbod",
+    "aaetlad utbod",
+    "aaetlad er ad bjoda ut",
+    "fyrirhugad utbod",
+    "markadskonnun",
+    "rfi",
+  ].map(normalizeSearchText);
+  if (earlyOpportunityPhrases.some((phrase) => normalized.includes(phrase))) return "early_opportunity";
+
+  const marketSignalPhrases = [
+    "aaetladar framkvaemdir",
+    "fyrirhugadar framkvaemdir",
+    "framkvaemdir hefjast",
+    "malbikunarframkvaemdir",
+    "vegaframkvaemdir",
+    "bruargerd",
+    "jardvinna",
+    "gatnagerd",
+    "fraesing",
+  ].map(normalizeSearchText);
+  if (marketSignalPhrases.some((phrase) => normalized.includes(phrase))) return "market_signal";
+
+  return "market_signal";
 }
 
 async function getExistingExternalIds(supabase: ReturnType<typeof createClient>, sourceId: string, externalIds: string[]) {
@@ -2125,14 +2203,17 @@ async function generateWeeklyReports(supabase: ReturnType<typeof createClient>) 
 
     const { data: matches, error: matchesError } = await supabase
       .from("opportunity_matches")
-      .select("match_score, opportunities(id, title, buyer, deadline)")
+      .select("match_score, opportunities(id, title, buyer, description, deadline, status, raw_payload, sources(name))")
       .eq("company_id", company.id)
       .gte("match_score", MIN_MATCH_SCORE)
       .order("match_score", { ascending: false })
-      .limit(5);
+      .limit(30);
 
     if (matchesError) throw matchesError;
-    if (!matches?.length) continue;
+    const reportMatches = (matches || [])
+      .filter((match) => isCustomerReportMatch(match))
+      .slice(0, 8);
+    if (!reportMatches.length) continue;
 
     const { data: report, error: reportError } = await supabase
       .from("reports")
@@ -2141,9 +2222,9 @@ async function generateWeeklyReports(supabase: ReturnType<typeof createClient>) 
         title: `Weekly opportunity report - ${company.company_name || "Company"}`,
         period_start: periodStart,
         period_end: periodEnd,
-        summary: `${matches.length} relevant opportunities found.`,
-        text_content: `${matches.length} relevant opportunities found for this week.`,
-        html_content: `<p>${matches.length} relevant opportunities found for this week.</p>`,
+        summary: `${reportMatches.length} report-ready opportunities found.`,
+        text_content: `${reportMatches.length} report-ready opportunities found for this week.`,
+        html_content: `<p>${reportMatches.length} report-ready opportunities found for this week.</p>`,
         status: "generated",
       })
       .select("id")
@@ -2151,7 +2232,7 @@ async function generateWeeklyReports(supabase: ReturnType<typeof createClient>) 
 
     if (reportError) throw reportError;
 
-    const items = matches
+    const items = reportMatches
       .filter((match) => match.opportunities?.id)
       .map((match, index) => ({
         report_id: report.id,
@@ -2168,6 +2249,53 @@ async function generateWeeklyReports(supabase: ReturnType<typeof createClient>) 
   }
 
   return created;
+}
+
+function isCustomerReportMatch(match: Record<string, unknown>) {
+  const opportunity = match.opportunities as Record<string, unknown> | undefined;
+  if (!opportunity?.id) return false;
+  if (String(opportunity.status || "open") !== "open") return false;
+  const payload = (opportunity.raw_payload && typeof opportunity.raw_payload === "object")
+    ? opportunity.raw_payload as Record<string, unknown>
+    : {};
+  const adminStatus = String(payload.admin_report_status || "").toLowerCase();
+  if (adminStatus === "include") return true;
+  if (payload.hidden_from_reports === true) return false;
+  if (["hidden", "hide", "noise", "deleted"].includes(adminStatus)) return false;
+  const intent = getReportOpportunityIntent(opportunity);
+  return intent === "confirmed_tender" || intent === "early_opportunity";
+}
+
+function getReportOpportunityIntent(opportunity: Record<string, unknown>) {
+  const payload = (opportunity.raw_payload && typeof opportunity.raw_payload === "object")
+    ? opportunity.raw_payload as Record<string, unknown>
+    : {};
+  const override = normalizeReportIntent(String(payload.opportunity_intent || payload.intent || ""));
+  if (override) return override;
+  const sourceName = String((opportunity.sources as Record<string, unknown> | undefined)?.name || payload.source_name || "");
+  if (/ted|tenders electronic daily/i.test(sourceName)) return "confirmed_tender";
+  return getConnectorOpportunityIntent(`${opportunity.title || ""} ${opportunity.description || ""} ${sourceName}`, String(opportunity.title || ""));
+}
+
+function normalizeReportIntent(value: string) {
+  const normalized = String(value || "").toLowerCase().trim();
+  const aliases: Record<string, string> = {
+    confirmed: "confirmed_tender",
+    confirmed_tender: "confirmed_tender",
+    likely_opportunity: "confirmed_tender",
+    verified: "confirmed_tender",
+    early_signal: "early_opportunity",
+    early_opportunity: "early_opportunity",
+    upcoming_tender: "early_opportunity",
+    market_signal: "market_signal",
+    project_signal: "market_signal",
+    needs_review: "market_signal",
+    news_context: "news_context",
+    news: "news_context",
+    noise: "not_opportunity",
+    not_opportunity: "not_opportunity",
+  };
+  return aliases[normalized] || "";
 }
 
 function extractWordPressTerms(item: Record<string, unknown>) {

@@ -423,6 +423,10 @@ document.addEventListener("click", (event) => {
   if (name === "ignore") ignoreOpportunity(id);
   if (name === "unignore") unignoreOpportunity(id);
   if (name === "details") openDetails(id);
+  if (name === "admin-report-override") {
+    updateOpportunityReportOverride(id, action.dataset.override || "");
+    return;
+  }
   if (name === "copy-report") copyReport();
   if (name === "download-report-pdf") downloadReportPdf();
   if (name === "save-report") saveCurrentReport();
@@ -1281,7 +1285,18 @@ function mapSupabaseOpportunity(row) {
     source: row.sources?.name || "",
     sourceType: row.sources?.source_type || "",
     title: row.title || "",
-    description: row.description || ""
+    description: row.description || "",
+    rawPayload
+  });
+  const intent = getOpportunityIntent({
+    source: row.sources?.name || "",
+    sourceType: row.sources?.source_type || "",
+    title: row.title || "",
+    description: row.description || "",
+    category: row.category || "",
+    keywords: Array.isArray(row.keywords) ? row.keywords : [],
+    qualityStatus,
+    rawPayload
   });
   return {
     id: row.id,
@@ -1307,6 +1322,7 @@ function mapSupabaseOpportunity(row) {
     difficulty: row.difficulty || "medium",
     status: row.status || "open",
     qualityStatus,
+    intent,
     rawPayload
   };
 }
@@ -1354,6 +1370,10 @@ function isDemoTestOpportunity(opp) {
 
 function normalizeOpportunityQualityStatus(status, opp = {}) {
   const value = String(status || "").toLowerCase();
+  const intentOverride = normalizeOpportunityIntent(opp?.rawPayload?.opportunity_intent || opp?.rawPayload?.intent);
+  if (intentOverride === "confirmed_tender") return "confirmed_tender";
+  if (intentOverride === "early_opportunity" || intentOverride === "market_signal") return "early_signal";
+  if (intentOverride === "news_context" || intentOverride === "not_opportunity") return "needs_review";
   if (isTedOpportunity(opp)) return "confirmed_tender";
   if (isVegagerdinExtractedProject(opp)) {
     const tenderState = getVegagerdinExtractedTenderState(opp);
@@ -1365,10 +1385,55 @@ function normalizeOpportunityQualityStatus(status, opp = {}) {
   const text = getOpportunityQualityText(opp);
   if (containsAnyNormalizedPhrase(text, ["senn í útboð", "senn i utbod"])) return "early_signal";
   if (containsConfirmedTenderIntent(text)) return "confirmed_tender";
+  if (containsTitleNewsIntent(opp?.title || "") && !containsConfirmedTenderIntent(text)) return "needs_review";
   if (containsEarlySignalIntent(text)) return "early_signal";
   if (containsObviousNewsIntent(text)) return "needs_review";
   if (value === "confirmed_tender" || value === "likely_opportunity" || value === "verified") return "needs_review";
   return "needs_review";
+}
+
+function normalizeOpportunityIntent(value) {
+  const normalized = String(value || "").toLowerCase().trim();
+  const aliases = {
+    confirmed: "confirmed_tender",
+    confirmed_tender: "confirmed_tender",
+    likely_opportunity: "confirmed_tender",
+    verified: "confirmed_tender",
+    early_signal: "early_opportunity",
+    early_opportunity: "early_opportunity",
+    upcoming_tender: "early_opportunity",
+    market_signal: "market_signal",
+    project_signal: "market_signal",
+    needs_review: "market_signal",
+    news_context: "news_context",
+    news: "news_context",
+    noise: "not_opportunity",
+    not_opportunity: "not_opportunity",
+  };
+  return aliases[normalized] || "";
+}
+
+function getOpportunityIntent(opp = {}) {
+  const override = normalizeOpportunityIntent(opp?.rawPayload?.opportunity_intent || opp?.rawPayload?.intent);
+  const adminStatus = String(opp?.rawPayload?.admin_report_status || "").toLowerCase();
+  if (adminStatus === "include") return "confirmed_tender";
+  if (["hidden", "hide", "noise", "deleted"].includes(adminStatus)) return override || "not_opportunity";
+  if (override) return override;
+  if (isTedOpportunity(opp)) return "confirmed_tender";
+
+  const text = getOpportunityQualityText(opp);
+  const title = opp?.title || "";
+  if (isVegagerdinExtractedProject(opp)) {
+    const tenderState = getVegagerdinExtractedTenderState(opp);
+    if (["tender_awarded", "awarded", "already_tendered", "announced"].includes(tenderState)) return "confirmed_tender";
+    if (tenderState === "upcoming_tender") return "early_opportunity";
+    return "market_signal";
+  }
+  if (containsConfirmedTenderIntent(text)) return "confirmed_tender";
+  if (containsTitleNewsIntent(title) || containsObviousNewsIntent(text)) return "news_context";
+  if (containsEarlyOpportunityIntent(text)) return "early_opportunity";
+  if (containsMarketSignalIntent(text)) return "market_signal";
+  return "market_signal";
 }
 
 function isVegagerdinExtractedProject(opp) {
@@ -1487,14 +1552,34 @@ function containsConfirmedTenderIntent(text) {
     "verdfyrirspurn",
     "innkaup",
     "rammasamningur",
-    "forval"
+    "forval",
+    "tender",
+    "procurement",
+    "skilafrestur",
+    "útboðsgögn",
+    "utbodsgogn"
+  ]);
+}
+
+function containsEarlyOpportunityIntent(text) {
+  return containsAnyNormalizedPhrase(text, [
+    "senn í útboð",
+    "senn i utbod",
+    "áætlað útboð",
+    "aaetlad utbod",
+    "áætlað er að bjóða út",
+    "aaetlad er ad bjoda ut",
+    "fyrirhugað útboð",
+    "fyrirhugad utbod",
+    "markaðskönnun",
+    "markadskonnun",
+    "rfi"
   ]);
 }
 
 function containsEarlySignalIntent(text) {
+  if (containsEarlyOpportunityIntent(text)) return true;
   return containsAnyNormalizedPhrase(text, [
-    "senn í útboð",
-    "senn i utbod",
     "áætlaðar framkvæmdir",
     "aaetladar framkvaemdir",
     "fyrirhugaðar framkvæmdir",
@@ -1511,6 +1596,53 @@ function containsEarlySignalIntent(text) {
     "jardvinna",
     "gatnagerð",
     "gatnagerd"
+  ]);
+}
+
+function containsMarketSignalIntent(text) {
+  return containsAnyNormalizedPhrase(text, [
+    "áætlaðar framkvæmdir",
+    "aaetladar framkvaemdir",
+    "fyrirhugaðar framkvæmdir",
+    "fyrirhugadar framkvaemdir",
+    "framkvæmdir hefjast",
+    "framkvaemdir hefjast",
+    "malbikunarframkvæmdir",
+    "malbikunarframkvaemdir",
+    "vegaframkvæmdir",
+    "vegaframkvaemdir",
+    "brúargerð",
+    "bruargerd",
+    "jarðvinna",
+    "jardvinna",
+    "gatnagerð",
+    "gatnagerd",
+    "fræsing",
+    "fraesing"
+  ]);
+}
+
+function containsTitleNewsIntent(title) {
+  return containsAnyNormalizedPhrase(title, [
+    "lokun",
+    "lokað",
+    "lokad",
+    "lokanir",
+    "umferð",
+    "umferd",
+    "tafir",
+    "hjáleið",
+    "hjaleid",
+    "akstursleið",
+    "akstursleid",
+    "vegfarendur",
+    "frétt",
+    "frett",
+    "myndband",
+    "tekur á sig mynd",
+    "tekur a sig mynd",
+    "opið aftur",
+    "opid aftur"
   ]);
 }
 
@@ -2800,6 +2932,83 @@ async function updateOpportunityStatus(id, status) {
   }
 }
 
+async function updateOpportunityReportOverride(id, override) {
+  if (!state.isAdmin) {
+    state.adminMessage = { type: "error", text: "You do not have access to this page." };
+    render();
+    return;
+  }
+
+  const opp = state.opportunities.find((item) => item.id === id);
+  if (!opp) return;
+
+  const overrideMap = {
+    include: {
+      opportunity_intent: "confirmed_tender",
+      quality_status: "confirmed_tender",
+      hidden_from_reports: false,
+      admin_report_status: "include"
+    },
+    hide: {
+      hidden_from_reports: true,
+      admin_report_status: "hidden"
+    },
+    noise: {
+      opportunity_intent: "not_opportunity",
+      quality_status: "needs_review",
+      hidden_from_reports: true,
+      admin_report_status: "noise"
+    },
+    confirmed_tender: {
+      opportunity_intent: "confirmed_tender",
+      quality_status: "confirmed_tender",
+      hidden_from_reports: false,
+      admin_report_status: "include"
+    },
+    early_opportunity: {
+      opportunity_intent: "early_opportunity",
+      quality_status: "early_signal",
+      hidden_from_reports: false,
+      admin_report_status: "include"
+    }
+  };
+  const patch = overrideMap[override];
+  if (!patch) return;
+
+  state.adminUpdatingId = id;
+  state.adminMessage = null;
+  render();
+
+  try {
+    if (!supabaseClient) {
+      throw new Error("Supabase client is not configured.");
+    }
+
+    const rawPayload = {
+      ...(opp.rawPayload || {}),
+      ...patch,
+      admin_reviewed_at: new Date().toISOString()
+    };
+    const { error } = await supabaseClient
+      .from("opportunities")
+      .update({ raw_payload: rawPayload })
+      .eq("id", id);
+    if (error) throw error;
+
+    state.adminMessage = { type: "success", text: "Report visibility updated." };
+    await loadOpportunities();
+    showToast("Report visibility updated", "success");
+  } catch (error) {
+    const message = formatSupabaseError(error);
+    console.error("Failed to update report visibility:", error);
+    state.adminMessage = { type: "error", text: `Failed to update report visibility. ${message}` };
+    render();
+  } finally {
+    state.adminUpdatingId = null;
+    render();
+  }
+}
+
 async function getOrCreateSource(sourceName) {
   if (!supabaseClient) {
     throw new Error("Supabase client is not configured");
@@ -3507,6 +3716,7 @@ function matchesSelectedLabelFilter(opp) {
 
 function isRecommendedDashboardMatch(opp) {
   if (!isRecommendedScore(opp)) return false;
+  if (isCustomerReportExcludedIntent(opp)) return false;
   if (opp.matchScore >= 85 || opp.matchLabel === "Strong match") return true;
   if (normalizeOpportunityQualityStatus(opp.qualityStatus, opp) === "needs_review") return false;
   if (containsObviousNewsIntent(getOpportunityQualityText(opp))) return false;
@@ -3515,6 +3725,7 @@ function isRecommendedDashboardMatch(opp) {
 
 function isFallbackDashboardMatch(opp) {
   if (!isRecommendedScore(opp)) return false;
+  if (isCustomerReportExcludedIntent(opp)) return false;
   if (opp.matchScore >= 85 || opp.matchLabel === "Strong match") return true;
   if (normalizeOpportunityQualityStatus(opp.qualityStatus, opp) === "needs_review") return false;
   if (containsObviousNewsIntent(getOpportunityQualityText(opp))) return false;
@@ -3534,6 +3745,12 @@ function sortDashboardMatches(matches) {
 }
 
 function getOpportunityQualityRank(opp) {
+  const intent = getOpportunityIntent(opp);
+  if (intent === "confirmed_tender") return 0;
+  if (intent === "early_opportunity") return 1;
+  if (intent === "market_signal") return 2;
+  if (intent === "news_context") return 8;
+  if (intent === "not_opportunity") return 9;
   const status = normalizeOpportunityQualityStatus(opp.qualityStatus, opp);
   if (status === "confirmed_tender") return 0;
   if (status === "early_signal") return 1;
@@ -5968,7 +6185,22 @@ function formatQualityStatus(status) {
   return labels[value] || capitalize(value.replace(/_/g, " "));
 }
 
+function formatOpportunityIntent(intent) {
+  const labels = {
+    confirmed_tender: "Confirmed tender",
+    early_opportunity: "Early opportunity",
+    market_signal: "Market signal",
+    news_context: "News context",
+    not_opportunity: "Not an opportunity"
+  };
+  return labels[normalizeOpportunityIntent(intent) || intent] || capitalize(String(intent || "market_signal").replace(/_/g, " "));
+}
+
 function getOpportunityQualityLabel(opp) {
+  const intent = getOpportunityIntent(opp);
+  if (intent === "news_context" || intent === "not_opportunity" || intent === "market_signal") {
+    return formatOpportunityIntent(intent);
+  }
   if (isVegagerdinExtractedProject(opp)) {
     return formatTenderState(getVegagerdinExtractedTenderState(opp));
   }
@@ -5976,7 +6208,7 @@ function getOpportunityQualityLabel(opp) {
 }
 
 function renderQualityBadge(opp) {
-  const status = normalizeOpportunityQualityStatus(opp.qualityStatus, opp);
+  const status = getOpportunityIntent(opp) || normalizeOpportunityQualityStatus(opp.qualityStatus, opp);
   return `<span class="source-pill source-badge quality-badge ${escapeHtml(status)}">${escapeHtml(getOpportunityQualityLabel(opp))}</span>`;
 }
 
@@ -6017,6 +6249,10 @@ function formatTenderState(value) {
 }
 
 function renderQualityWarning(opp) {
+  const intent = getOpportunityIntent(opp);
+  if (intent === "news_context" || intent === "not_opportunity") {
+    return `<div class="note-panel quality-warning">This looks like news or traffic context, not a customer-facing opportunity.</div>`;
+  }
   if (normalizeOpportunityQualityStatus(opp.qualityStatus, opp) !== "needs_review") return "";
   if (isVegagerdinExtractedProject(opp)) {
     return `<div class="note-panel quality-warning">Extracted project signal — verify tender timing in the source article.</div>`;
@@ -6437,21 +6673,32 @@ function renderAdminTagList(values, emptyText) {
 }
 
 function renderAdminOpportunityRow(opp) {
+  const isUpdating = state.adminUpdatingId === opp.id;
+  const intent = getOpportunityIntent(opp);
+  const hiddenFromReports = opp.rawPayload?.hidden_from_reports === true ||
+    ["hidden", "noise", "deleted"].includes(String(opp.rawPayload?.admin_report_status || "").toLowerCase());
   return `
     <div class="admin-row">
       <div>
         <h3>${escapeHtml(opp.title)}</h3>
         <p>${escapeHtml(opp.buyer)} · ${escapeHtml(opp.source)} · ${escapeHtml(opp.location)} · ${escapeHtml(opp.status)}</p>
-        <p>Quality: ${escapeHtml(getOpportunityQualityLabel(opp))}</p>
+        <p>Quality: ${escapeHtml(getOpportunityQualityLabel(opp))} · Intent: ${escapeHtml(formatOpportunityIntent(intent))}${hiddenFromReports ? " · Hidden from reports" : ""}</p>
       </div>
-      <button
-        class="btn btn-ghost"
-        data-action="delete-opportunity"
-        data-id="${escapeHtml(opp.id)}"
-        ${state.adminDeletingId === opp.id ? "disabled" : ""}
-      >
-        ${state.adminDeletingId === opp.id ? "Deleting..." : "Delete"}
-      </button>
+      <div class="admin-row-actions">
+        <button class="btn btn-ghost btn-small" data-action="admin-report-override" data-override="confirmed_tender" data-id="${escapeHtml(opp.id)}" ${isUpdating ? "disabled" : ""}>Confirmed tender</button>
+        <button class="btn btn-ghost btn-small" data-action="admin-report-override" data-override="early_opportunity" data-id="${escapeHtml(opp.id)}" ${isUpdating ? "disabled" : ""}>Early opportunity</button>
+        <button class="btn btn-ghost btn-small" data-action="admin-report-override" data-override="include" data-id="${escapeHtml(opp.id)}" ${isUpdating ? "disabled" : ""}>Include in reports</button>
+        <button class="btn btn-ghost btn-small" data-action="admin-report-override" data-override="noise" data-id="${escapeHtml(opp.id)}" ${isUpdating ? "disabled" : ""}>News/noise</button>
+        <button class="btn btn-ghost btn-small" data-action="admin-report-override" data-override="hide" data-id="${escapeHtml(opp.id)}" ${isUpdating ? "disabled" : ""}>Hide from reports</button>
+        <button
+          class="btn btn-ghost btn-small"
+          data-action="delete-opportunity"
+          data-id="${escapeHtml(opp.id)}"
+          ${state.adminDeletingId === opp.id ? "disabled" : ""}
+        >
+          ${state.adminDeletingId === opp.id ? "Deleting..." : "Delete"}
+        </button>
+      </div>
     </div>
   `;
 }
@@ -6754,6 +7001,14 @@ function getReportSections(matches) {
 
 function getReportOpportunityPlacement(opp) {
   if (!isReportEligibleOpportunity(opp)) return "excluded";
+  const intent = getOpportunityIntent(opp);
+  if (intent === "confirmed_tender") {
+    const tenderState = isVegagerdinExtractedProject(opp) ? getVegagerdinExtractedTenderState(opp) : "";
+    if (["tender_awarded", "awarded", "already_tendered", "announced"].includes(tenderState)) return "awarded";
+    return "confirmed";
+  }
+  if (intent === "early_opportunity") return "early";
+  if (intent === "market_signal") return "review";
   if (isVegagerdinNoiseOpportunity(opp) && !hasStrongTenderIntentForReport(opp)) return "review";
   const tenderState = isVegagerdinExtractedProject(opp) ? getVegagerdinExtractedTenderState(opp) : "";
   if (["tender_awarded", "awarded", "already_tendered", "announced"].includes(tenderState)) return "awarded";
@@ -6769,7 +7024,13 @@ function getReportOpportunityPlacement(opp) {
 function isReportEligibleOpportunity(opp) {
   if (!opp || isDemoTestOpportunity(opp)) return false;
   if (!isDashboardVisibleOpportunity(opp)) return false;
+  if (isCustomerReportExcludedIntent(opp)) return false;
   if (isSavedOrWatchedOpportunity(opp)) return true;
+  const intent = getOpportunityIntent(opp);
+  if (intent === "confirmed_tender" || intent === "early_opportunity") return true;
+  if (intent === "market_signal") {
+    return opp.matchScore >= 75 && isTrustedReportSource(opp) && hasClearConstructionProjectTerms(opp) && !isReportNoiseWithoutTenderIntent(opp);
+  }
   const placementQuality = normalizeOpportunityQualityStatus(opp.qualityStatus, opp);
   const tenderState = isVegagerdinExtractedProject(opp) ? getVegagerdinExtractedTenderState(opp) : "";
   if (["tender_awarded", "awarded", "already_tendered", "announced", "upcoming_tender"].includes(tenderState)) return true;
@@ -6780,6 +7041,16 @@ function isReportEligibleOpportunity(opp) {
     return false;
   }
   return false;
+}
+
+function isCustomerReportExcludedIntent(opp) {
+  const payload = opp?.rawPayload || {};
+  const adminStatus = String(payload.admin_report_status || "").toLowerCase();
+  if (adminStatus === "include") return false;
+  if (payload.hidden_from_reports === true) return true;
+  if (["hidden", "hide", "noise", "deleted"].includes(adminStatus)) return true;
+  const intent = getOpportunityIntent(opp);
+  return intent === "news_context" || intent === "not_opportunity";
 }
 
 function isSavedOrWatchedOpportunity(opp) {

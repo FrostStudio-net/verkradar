@@ -2168,10 +2168,29 @@ button:disabled,
   border-color: rgba(215,255,63,0.28);
 }
 
+.quality-badge.early_opportunity {
+  color: #d7ff3f;
+  background: rgba(215,255,63,0.10);
+  border-color: rgba(215,255,63,0.24);
+}
+
+.quality-badge.market_signal {
+  color: #ffd166;
+  background: rgba(255,209,102,0.10);
+  border-color: rgba(255,209,102,0.24);
+}
+
 .quality-badge.early_signal {
   color: #ffd166;
   background: rgba(255,209,102,0.10);
   border-color: rgba(255,209,102,0.26);
+}
+
+.quality-badge.news_context,
+.quality-badge.not_opportunity {
+  color: #ff8a8a;
+  background: rgba(255,107,107,0.10);
+  border-color: rgba(255,107,107,0.24);
 }
 
 .quality-badge.needs_review {
@@ -2692,9 +2711,25 @@ body.modal-open {
   color: #203000;
 }
 
+.report-quality.early_opportunity {
+  background: #eefab6;
+  color: #263800;
+}
+
+.report-quality.market_signal {
+  background: #fff1c2;
+  color: #7a4a00;
+}
+
 .report-quality.early_signal {
   background: #fff1c2;
   color: #7a4a00;
+}
+
+.report-quality.news_context,
+.report-quality.not_opportunity {
+  background: #fee2e2;
+  color: #991b1b;
 }
 
 .report-quality.needs_review {
