@@ -501,7 +501,10 @@ async function refreshMatchesForAllCompanies(supabase: ReturnType<typeof createC
       ...opportunity,
       country_code: opportunity.country_code || null,
     }))
-    .filter((opportunity) => isVisibleOpportunity(opportunity, (opportunity.sources as Record<string, unknown> | undefined)?.name || ""));
+    .filter((opportunity) =>
+      isVisibleOpportunity(opportunity, (opportunity.sources as Record<string, unknown> | undefined)?.name || "") &&
+      isCustomerMatchEligibleOpportunity(opportunity, (opportunity.sources as Record<string, unknown> | undefined)?.name || "")
+    );
 
   let totalMatches = 0;
   for (const company of companies || []) {
@@ -603,6 +606,7 @@ async function generateWeeklyReports(supabase: ReturnType<typeof createClient>) 
 
     const matches = (matchesResult.data || [])
       .filter((row) => row.opportunities)
+      .filter((row) => isCustomerMatchEligibleOpportunity(row.opportunities as Record<string, unknown>, TED_SOURCE_NAME))
       .map((row) => {
         const opportunity = row.opportunities as Record<string, unknown>;
         return {
@@ -928,6 +932,94 @@ function isVisibleOpportunity(opportunity: Record<string, unknown>, sourceName =
   if (!/ted/i.test(String(sourceName || ""))) return true;
   const country = getOpportunityCountryCode(opportunity);
   return ["IS", "NO", "DK", "SE", "FI"].includes(country);
+}
+
+function isCustomerMatchEligibleOpportunity(opportunity: Record<string, unknown>, sourceName = "") {
+  const payload = opportunity.raw_payload && typeof opportunity.raw_payload === "object"
+    ? opportunity.raw_payload as Record<string, unknown>
+    : {};
+  const adminStatus = String(payload.admin_report_status || "").toLowerCase();
+  if (adminStatus === "include") return true;
+  if (payload.hidden_from_reports === true) return false;
+  if (["hidden", "hide", "noise", "deleted"].includes(adminStatus)) return false;
+  const tenderState = String(payload.tender_state || "").toLowerCase();
+  if (["tender_awarded", "awarded", "already_tendered"].includes(tenderState)) return false;
+  const explicitIntent = normalizeReportIntent(String(payload.opportunity_intent || payload.intent || payload.quality_status || ""));
+  if (explicitIntent === "news_context" || explicitIntent === "not_opportunity") return false;
+  if (explicitIntent === "confirmed_tender" || explicitIntent === "early_opportunity") return true;
+  if (/ted|tenders electronic daily/i.test(sourceName)) return true;
+  const inferredIntent = inferOpportunityIntent(opportunity);
+  if (inferredIntent === "news_context" || inferredIntent === "not_opportunity") return false;
+  if (inferredIntent === "confirmed_tender" || inferredIntent === "early_opportunity") return true;
+  return !hasObviousNewsTitleIntent(String(opportunity.title || ""));
+}
+
+function inferOpportunityIntent(opportunity: Record<string, unknown>) {
+  const text = normalizeText(`${String(opportunity.title || "")} ${String(opportunity.description || "")} ${String(opportunity.category || "")}`);
+  if (containsAnyPhrase(text, [
+    "utbod",
+    "utbodsauglysing",
+    "tilbod",
+    "oskad eftir tilbodum",
+    "verdfyrirspurn",
+    "forval",
+    "tender",
+    "procurement",
+    "skilafrestur",
+    "utbodsgogn",
+  ])) return "confirmed_tender";
+  if (hasObviousNewsTitleIntent(String(opportunity.title || ""))) return "news_context";
+  if (containsAnyPhrase(text, [
+    "senn i utbod",
+    "aaetlad utbod",
+    "aaetlad er ad bjoda ut",
+    "fyrirhugad utbod",
+    "markadskonnun",
+  ])) return "early_opportunity";
+  return "market_signal";
+}
+
+function normalizeReportIntent(value: string) {
+  const normalized = String(value || "").toLowerCase().trim();
+  const aliases: Record<string, string> = {
+    confirmed: "confirmed_tender",
+    confirmed_tender: "confirmed_tender",
+    likely_opportunity: "confirmed_tender",
+    verified: "confirmed_tender",
+    early_signal: "early_opportunity",
+    early_opportunity: "early_opportunity",
+    upcoming_tender: "early_opportunity",
+    market_signal: "market_signal",
+    project_signal: "market_signal",
+    needs_review: "market_signal",
+    news_context: "news_context",
+    news: "news_context",
+    noise: "not_opportunity",
+    not_opportunity: "not_opportunity",
+  };
+  return aliases[normalized] || "";
+}
+
+function hasObviousNewsTitleIntent(title: string) {
+  const normalizedTitle = normalizeText(title);
+  return containsAnyPhrase(normalizedTitle, [
+    "lokun",
+    "lokad",
+    "lokanir",
+    "umferd",
+    "tafir",
+    "hjaleid",
+    "akstursleid",
+    "vegfarendur",
+    "frett",
+    "myndband",
+    "tekur a sig mynd",
+    "opid aftur",
+  ]);
+}
+
+function containsAnyPhrase(text: string, phrases: string[]) {
+  return phrases.some((phrase) => text.includes(normalizeText(phrase)));
 }
 
 function daysUntilDeadline(dateString: string) {

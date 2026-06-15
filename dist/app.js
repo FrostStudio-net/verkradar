@@ -2574,6 +2574,7 @@ async function loadStoredMatchesForCurrentCompany() {
     state.storedMatches = (data || [])
       .filter((row) => row.opportunities)
       .map(mapStoredMatch)
+      .filter(isCustomerMatchEligibleOpportunity)
       .filter(isDashboardVisibleOpportunity);
   } catch (error) {
     console.error("Failed to load stored opportunity matches. Falling back to frontend matching:", error);
@@ -3634,6 +3635,7 @@ function getMatchLabel(score) {
 function getMatchedOpportunities() {
   if (state.storedMatches.length) {
     return state.storedMatches
+      .filter(isCustomerMatchEligibleOpportunity)
       .filter(isDashboardVisibleOpportunity)
       .filter((opp) => !state.ignored.includes(opp.id))
       .sort((a, b) => b.matchScore - a.matchScore || daysUntilDeadline(a.deadline) - daysUntilDeadline(b.deadline));
@@ -3642,6 +3644,7 @@ function getMatchedOpportunities() {
   const profile = state.profile || (state.user ? null : defaultProfile);
   if (!profile) return [];
   return state.opportunities
+    .filter(isCustomerMatchEligibleOpportunity)
     .map((opp) => calculateMatch(profile, opp))
     .filter(isDashboardVisibleOpportunity)
     .filter((opp) => !state.ignored.includes(opp.id))
@@ -3650,6 +3653,7 @@ function getMatchedOpportunities() {
 
 function getStoredDashboardMatches() {
   return state.storedMatches
+    .filter(isCustomerMatchEligibleOpportunity)
     .filter(isDashboardVisibleOpportunity)
     .filter((opp) => !state.ignored.includes(opp.id))
     .sort((a, b) => b.matchScore - a.matchScore || daysUntilDeadline(a.deadline) - daysUntilDeadline(b.deadline));
@@ -3659,6 +3663,7 @@ function getAvailableDashboardOpportunities() {
   const profile = state.profile || (state.user ? null : defaultProfile);
   if (!profile) return [];
   return state.opportunities
+    .filter(isCustomerMatchEligibleOpportunity)
     .map((opp) => calculateMatch(profile, opp))
     .filter(isDashboardVisibleOpportunity)
     .filter((opp) => !state.ignored.includes(opp.id))
@@ -7051,6 +7056,18 @@ function isCustomerReportExcludedIntent(opp) {
   if (["hidden", "hide", "noise", "deleted"].includes(adminStatus)) return true;
   const intent = getOpportunityIntent(opp);
   return intent === "news_context" || intent === "not_opportunity";
+}
+
+function isCustomerMatchEligibleOpportunity(opp) {
+  if (!opp) return false;
+  const payload = opp.rawPayload || {};
+  const adminStatus = String(payload.admin_report_status || "").toLowerCase();
+  if (adminStatus === "include") return true;
+  if (isCustomerReportExcludedIntent(opp)) return false;
+  const tenderState = String(payload.tender_state || "").toLowerCase();
+  if (["tender_awarded", "awarded", "already_tendered"].includes(tenderState)) return false;
+  if (containsTitleNewsIntent(opp.title || "") && !containsConfirmedTenderIntent(getOpportunityQualityText(opp))) return false;
+  return true;
 }
 
 function isSavedOrWatchedOpportunity(opp) {

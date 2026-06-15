@@ -36,7 +36,7 @@ with_flags as (
       when classified.payload->>'admin_report_status' = 'include' then false
       when classified.payload->>'admin_report_status' in ('hidden', 'hide', 'noise', 'deleted') then true
       when intent.opportunity_intent in ('news_context', 'not_opportunity') then true
-      else coalesce((classified.payload->>'hidden_from_reports')::boolean, false)
+      else lower(coalesce(classified.payload->>'hidden_from_reports', 'false')) in ('true', '1', 'yes')
     end as hidden_from_reports,
     case
       when intent.opportunity_intent = 'confirmed_tender' then 'confirmed_tender'

@@ -1792,12 +1792,24 @@ async function refreshMatchesForAllCompanies(
     skipped_samples: [],
   };
 
+  const ineligibleOpportunityIds: string[] = [];
   const visibleOpportunities = (opportunities || []).filter((opportunity) => {
-    const visible = isVisibleOpportunity(opportunity);
-    if (!visible) details.skipped_not_visible += 1;
+    const visible = isVisibleOpportunity(opportunity) && isCustomerMatchEligibleOpportunity(opportunity);
+    if (!visible) {
+      details.skipped_not_visible += 1;
+      if (opportunity.id) ineligibleOpportunityIds.push(String(opportunity.id));
+    }
     return visible;
   });
   details.opportunities_checked = visibleOpportunities.length;
+
+  if (ineligibleOpportunityIds.length) {
+    const { error: deleteIneligibleError } = await supabase
+      .from("opportunity_matches")
+      .delete()
+      .in("opportunity_id", ineligibleOpportunityIds);
+    if (deleteIneligibleError) throw deleteIneligibleError;
+  }
 
   for (const company of companies || []) {
     const [servicesResult, locationsResult, keywordsResult] = await Promise.all([
@@ -2033,6 +2045,25 @@ function isVisibleOpportunity(opportunity: Record<string, unknown>) {
   if (!url || url === "#") return false;
   if (deadline && daysUntil(deadline) < 0) return false;
   return true;
+}
+
+function isCustomerMatchEligibleOpportunity(opportunity: Record<string, unknown>) {
+  const payload = opportunity.raw_payload && typeof opportunity.raw_payload === "object"
+    ? opportunity.raw_payload as Record<string, unknown>
+    : {};
+  const adminStatus = String(payload.admin_report_status || "").toLowerCase();
+  if (adminStatus === "include") return true;
+  if (payload.hidden_from_reports === true) return false;
+  if (["hidden", "hide", "noise", "deleted"].includes(adminStatus)) return false;
+  const tenderState = String(payload.tender_state || "").toLowerCase();
+  if (["tender_awarded", "awarded", "already_tendered"].includes(tenderState)) return false;
+  const explicitIntent = normalizeReportIntent(String(payload.opportunity_intent || payload.intent || payload.quality_status || ""));
+  if (explicitIntent === "news_context" || explicitIntent === "not_opportunity") return false;
+  if (explicitIntent === "confirmed_tender" || explicitIntent === "early_opportunity") return true;
+  const intent = getReportOpportunityIntent(opportunity);
+  if (intent === "news_context" || intent === "not_opportunity") return false;
+  if (intent === "confirmed_tender" || intent === "early_opportunity") return true;
+  return !hasObviousNewsTitleIntent(String(opportunity.title || ""));
 }
 
 function selectedProfileLocations(profile: Record<string, unknown>) {
@@ -2296,6 +2327,25 @@ function normalizeReportIntent(value: string) {
     not_opportunity: "not_opportunity",
   };
   return aliases[normalized] || "";
+}
+
+function hasObviousNewsTitleIntent(title: string) {
+  const normalizedTitle = normalizeSearchText(title);
+  const negativeTitlePhrases = [
+    "lokun",
+    "lokad",
+    "lokanir",
+    "umferd",
+    "tafir",
+    "hjaleid",
+    "akstursleid",
+    "vegfarendur",
+    "frett",
+    "myndband",
+    "tekur a sig mynd",
+    "opid aftur",
+  ].map(normalizeSearchText);
+  return negativeTitlePhrases.some((phrase) => normalizedTitle.includes(phrase));
 }
 
 function extractWordPressTerms(item: Record<string, unknown>) {
