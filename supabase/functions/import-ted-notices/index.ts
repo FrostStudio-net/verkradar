@@ -367,9 +367,26 @@ async function refreshMatches(supabase: ReturnType<typeof createClient>, opportu
   if (companiesError) throw companiesError;
   if (opportunitiesError) throw opportunitiesError;
 
+  const visibleOpportunities = (opportunities || []).filter((opportunity) =>
+    isVisibleOpportunity(opportunity) && isCustomerMatchEligibleOpportunity(opportunity)
+  );
+
+  const ineligibleOpportunityIds = (opportunities || [])
+    .filter((opportunity) => !visibleOpportunities.some((visible) => visible.id === opportunity.id))
+    .map((opportunity) => opportunity.id)
+    .filter(Boolean);
+
+  if (ineligibleOpportunityIds.length) {
+    const { error: deleteError } = await supabase
+      .from("opportunity_matches")
+      .delete()
+      .in("opportunity_id", ineligibleOpportunityIds);
+    if (deleteError) throw deleteError;
+  }
+
   const rows = [];
   for (const company of companies || []) {
-    for (const opportunity of opportunities || []) {
+    for (const opportunity of visibleOpportunities) {
       const match = calculateMatch(company, opportunity);
       rows.push({
         company_id: company.id,
@@ -392,6 +409,88 @@ async function refreshMatches(supabase: ReturnType<typeof createClient>, opportu
 
   if (error) throw error;
   return rows.length;
+}
+
+function isVisibleOpportunity(opportunity: Record<string, unknown>) {
+  const status = String(opportunity.status || "").toLowerCase();
+  const url = String(opportunity.url || "").trim();
+  const deadline = String(opportunity.deadline || "");
+  if (status && status !== "open") return false;
+  if (!url || url === "#") return false;
+  if (deadline && daysUntil(deadline) < 0) return false;
+  return true;
+}
+
+function isCustomerMatchEligibleOpportunity(opportunity: Record<string, unknown>) {
+  const payload = opportunity.raw_payload && typeof opportunity.raw_payload === "object"
+    ? opportunity.raw_payload as Record<string, unknown>
+    : {};
+  const adminStatus = String(payload.admin_report_status || "").toLowerCase();
+  if (adminStatus === "include") return true;
+  if (payload.hidden_from_reports === true) return false;
+  if (["hidden", "hide", "noise", "deleted"].includes(adminStatus)) return false;
+  const tenderState = String(payload.tender_state || "").toLowerCase();
+  if (["tender_awarded", "awarded", "already_awarded", "already_tendered"].includes(tenderState)) return false;
+  const intent = normalizeReportIntent(String(payload.opportunity_intent || payload.intent || payload.quality_status || ""));
+  if (["news_context", "not_opportunity"].includes(intent)) return false;
+  return !hasObviousNewsTitleIntent(String(opportunity.title || ""));
+}
+
+function normalizeReportIntent(value: string) {
+  const normalized = String(value || "").toLowerCase().trim();
+  const aliases: Record<string, string> = {
+    confirmed: "confirmed_tender",
+    confirmed_tender: "confirmed_tender",
+    likely_opportunity: "confirmed_tender",
+    verified: "confirmed_tender",
+    early_signal: "early_opportunity",
+    early_opportunity: "early_opportunity",
+    market_signal: "market_signal",
+    project_signal: "market_signal",
+    needs_review: "market_signal",
+    news_context: "news_context",
+    news: "news_context",
+    noise: "not_opportunity",
+    not_opportunity: "not_opportunity",
+  };
+  return aliases[normalized] || "";
+}
+
+function hasObviousNewsTitleIntent(title: string) {
+  const normalized = normalizeText(title);
+  return [
+    "lokun",
+    "lokad",
+    "lokanir",
+    "umferd",
+    "tafir",
+    "hjaleid",
+    "vegfarendur",
+    "akstursleid",
+    "opid aftur",
+    "breytt umferd",
+    "framkvaemdir valda tofum",
+    "frett",
+    "myndband",
+    "tekur a sig mynd",
+  ].some((phrase) => normalized.includes(phrase));
+}
+
+function normalizeText(value: string) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ð/g, "d")
+    .replace(/þ/g, "th")
+    .replace(/æ/g, "ae")
+    .replace(/ö/g, "o");
+}
+
+function daysUntil(value: string) {
+  const date = new Date(`${String(value).slice(0, 10)}T23:59:59Z`);
+  if (Number.isNaN(date.getTime())) return 9999;
+  return Math.ceil((date.getTime() - Date.now()) / 86400000);
 }
 
 function calculateMatch(profile: Record<string, unknown>, opportunity: Record<string, unknown>) {

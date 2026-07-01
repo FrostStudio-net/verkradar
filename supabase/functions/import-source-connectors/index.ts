@@ -207,6 +207,50 @@ const WEAK_EXCLUDE_KEYWORDS = [
   "tilkynning",
   "fundur",
 ];
+const CLEAR_PROCUREMENT_INTENT_PHRASES = [
+  "útboð",
+  "utbod",
+  "útboðsauglýsing",
+  "utbodsauglysing",
+  "óskað eftir tilboðum",
+  "oskad eftir tilbodum",
+  "verðfyrirspurn",
+  "verdfyrirspurn",
+  "tilboðsbeiðni",
+  "tilbodsbeidni",
+  "tilboðsfrestur",
+  "tilbodsfrestur",
+  "skilafrestur",
+  "útboðsgögn",
+  "utbodsgogn",
+  "forval",
+  "rammasamningur",
+];
+const NEWS_TRAFFIC_PROGRESS_PHRASES = [
+  "lokun",
+  "lokað",
+  "lokad",
+  "lokanir",
+  "umferð",
+  "umferd",
+  "tafir",
+  "hjáleið",
+  "hjaleid",
+  "vegfarendur",
+  "akstursleið",
+  "akstursleid",
+  "opið aftur",
+  "opid aftur",
+  "breytt umferð",
+  "breytt umferd",
+  "framkvæmdir valda töfum",
+  "framkvaemdir valda tofum",
+  "frétt",
+  "frett",
+  "myndband",
+  "tekur á sig mynd",
+  "tekur a sig mynd",
+];
 const DEFAULT_TENDER_INCLUDE_KEYWORDS = [
   "útboð",
   "utbod",
@@ -1520,6 +1564,7 @@ function getConnectorOpportunityQuality(text: string) {
   const intent = getConnectorOpportunityIntent(text, text);
   if (intent === "confirmed_tender") return "confirmed_tender";
   if (intent === "early_opportunity") return "early_signal";
+  if (intent === "news_context" || intent === "not_opportunity") return "not_opportunity";
   const normalized = normalizeSearchText(text);
   if (normalized.includes("senn i utbod")) return "early_signal";
 
@@ -1577,48 +1622,28 @@ function getConnectorOpportunityIntent(text: string, title = "") {
   const normalized = normalizeSearchText(text);
   const normalizedTitle = normalizeSearchText(title);
   const confirmedTenderPhrases = [
-    "útboð",
-    "utbod",
-    "útboðsauglýsing",
-    "utbodsauglysing",
+    ...CLEAR_PROCUREMENT_INTENT_PHRASES,
     "tilboð",
     "tilbod",
     "tilboðum",
     "tilbodum",
-    "óskað eftir tilboðum",
-    "oskad eftir tilbodum",
-    "verðfyrirspurn",
-    "verdfyrirspurn",
-    "forval",
     "tender",
     "procurement",
-    "skilafrestur",
-    "útboðsgögn",
-    "utbodsgogn",
   ].map(normalizeSearchText);
   if (confirmedTenderPhrases.some((phrase) => normalized.includes(phrase))) return "confirmed_tender";
 
-  const negativeTitlePhrases = [
-    "lokun",
-    "lokad",
-    "lokanir",
-    "umferd",
-    "tafir",
-    "hjaleid",
-    "akstursleid",
-    "vegfarendur",
-    "frett",
-    "myndband",
-    "tekur a sig mynd",
-    "opid aftur",
-  ].map(normalizeSearchText);
-  if (negativeTitlePhrases.some((phrase) => normalizedTitle.includes(phrase))) return "news_context";
-
-  const earlyOpportunityPhrases = [
+  const earlyProcurementPhrases = [
     "senn i utbod",
     "aaetlad utbod",
     "aaetlad er ad bjoda ut",
     "fyrirhugad utbod",
+  ].map(normalizeSearchText);
+  if (earlyProcurementPhrases.some((phrase) => normalized.includes(phrase))) return "early_opportunity";
+
+  const negativeTitlePhrases = NEWS_TRAFFIC_PROGRESS_PHRASES.map(normalizeSearchText);
+  if (negativeTitlePhrases.some((phrase) => normalizedTitle.includes(phrase))) return "news_context";
+
+  const earlyOpportunityPhrases = [
     "markadskonnun",
     "rfi",
   ].map(normalizeSearchText);
@@ -2056,7 +2081,7 @@ function isCustomerMatchEligibleOpportunity(opportunity: Record<string, unknown>
   if (payload.hidden_from_reports === true) return false;
   if (["hidden", "hide", "noise", "deleted"].includes(adminStatus)) return false;
   const tenderState = String(payload.tender_state || "").toLowerCase();
-  if (["tender_awarded", "awarded", "already_tendered"].includes(tenderState)) return false;
+  if (["tender_awarded", "awarded", "already_awarded", "already_tendered"].includes(tenderState)) return false;
   const explicitIntent = normalizeReportIntent(String(payload.opportunity_intent || payload.intent || payload.quality_status || ""));
   if (explicitIntent === "news_context" || explicitIntent === "not_opportunity") return false;
   if (explicitIntent === "confirmed_tender" || explicitIntent === "early_opportunity") return true;

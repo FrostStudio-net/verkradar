@@ -943,7 +943,7 @@ function isCustomerMatchEligibleOpportunity(opportunity: Record<string, unknown>
   if (payload.hidden_from_reports === true) return false;
   if (["hidden", "hide", "noise", "deleted"].includes(adminStatus)) return false;
   const tenderState = String(payload.tender_state || "").toLowerCase();
-  if (["tender_awarded", "awarded", "already_tendered"].includes(tenderState)) return false;
+  if (["tender_awarded", "awarded", "already_awarded", "already_tendered"].includes(tenderState)) return false;
   const explicitIntent = normalizeReportIntent(String(payload.opportunity_intent || payload.intent || payload.quality_status || ""));
   if (explicitIntent === "news_context" || explicitIntent === "not_opportunity") return false;
   if (explicitIntent === "confirmed_tender" || explicitIntent === "early_opportunity") return true;

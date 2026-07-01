@@ -17,8 +17,427 @@ const EXTRACTED_PROJECT_DEADLINE_RISK = "No formal tender deadline extracted —
 const STORAGE_KEYS = {
   profile: "verkradar_profile",
   saved: "verkradar_saved_opportunities",
-  ignored: "verkradar_ignored_opportunities"
+  ignored: "verkradar_ignored_opportunities",
+  language: "verkradar_language"
 };
+
+const translations = {
+  is: {
+    navDashboard: "Mælaborð",
+    navReport: "Yfirlit",
+    navPricing: "Verð",
+    navSettings: "Stillingar",
+    navHowItWorks: "Hvernig virkar þetta",
+    navSampleReport: "Sýnishorn",
+    login: "Innskráning",
+    logout: "Skrá út",
+    getStarted: "Byrja",
+    createProfile: "Stofna prófíl",
+    companyProfile: "Fyrirtækjaprófíll",
+    noCompanyProfile: "Enginn fyrirtækjaprófíll",
+    openMenu: "Opna valmynd",
+    closeMenu: "Loka valmynd",
+    privacyPolicy: "Persónuvernd",
+    termsOfService: "Skilmálar",
+    dataSources: "Gagnaheimildir",
+    cookies: "Vafrakökur",
+    security: "Öryggi",
+    footerText: "Vöktun útboða og viðskiptatækifæra fyrir fyrirtæki. VerkRadar hjálpar ykkur að finna og yfirfara opinber tækifæri, en frumgögn eru alltaf endanleg heimild.",
+    loadingLabel: "Hleð VerkRadar",
+    heroEyebrow: "Útboðsgreind fyrir verktaka og þjónustufyrirtæki",
+    heroTitle: "Finnið verðmæt útboð áður en skilafresturinn rennur út.",
+    heroText: "VerkRadar vaktar útboðsvefi, sveitarfélög og opinberar heimildir og raðar tækifærum eftir því hvað skiptir ykkar fyrirtæki máli.",
+    createFreeDemoProfile: "Stofna ókeypis sýniprófíl",
+    viewSampleReport: "Skoða sýnishorn",
+    proofStrong: "Verktakar finna viðeigandi tækifæri hraðar.",
+    proofText: "Meðal efstu samsvarana er oft að finna útboð utan helstu gagnagrunna.",
+    bestOpenMatch: "Besta opna samsvörun",
+    tender: "Útboð",
+    deadlineRisk: "Áhætta vegna frests",
+    daysLeft: "{count} dagar eftir",
+    problemEyebrow: "Vandinn",
+    problemTitle: "Útboð tapast oft áður en tilboðsgerðin byrjar.",
+    problemOneTitle: "Skilafrestir birtast þegar starfsfólkið er þegar bókað.",
+    problemOneText: "Stuttur svarfrestur verður að helgarvinnu, eða verðmætur samningur fer fram hjá ykkur.",
+    problemTwoTitle: "Leitin tekur lengri tíma en ákvörðunin.",
+    problemTwoText: "Eigendur eyða klukkutímum í að opna illa viðeigandi útboð í stað þess að sjá verðmæti, svæði, kröfur og ástæður á einum stað.",
+    solutionEyebrow: "Lausnin",
+    solutionTitle: "Eitt skýrt yfirlit í stað dreifðrar leitar.",
+    solutionText: "VerkRadar breytir útboðshávaða í forgangsraðaðan lista yfir tækifæri sem fyrirtækið ætti að skoða.",
+    createProfileStep: "1. Stofnið prófíl",
+    createProfileStepText: "Segið VerkRadar hvaða þjónustu, svæði, lykilorð og verkefnastærðir henta ykkur.",
+    matchProjectsStep: "2. Samsvara verkefnum",
+    matchProjectsStepText: "Kerfið metur hvert tækifæri gagnvart fyrirtækjaprófílnum.",
+    getReportStep: "3. Fáið yfirlit",
+    getReportStepText: "Fáið skýrt vikuyfirlit með frestum og næstu skrefum.",
+    sampleReportEyebrow: "Sýnishorn",
+    sampleReportTitle: "Vikulegur stuttlisti sem hægt er að bregðast við.",
+    sampleReportText: "Sjáið hvernig VerkRadar pakkar saman samsvörunum, frestaáhættu og næstu skrefum án innskráningar.",
+    tryDemoTitle: "Prófið sýnimælaborðið.",
+    tryDemoText: "Hlaðið sýnifyrirtæki og sjáið hvernig samsvörunin virkar.",
+    loadDemoCompany: "Hlaða sýnifyrirtæki",
+    authLoginTitle: "Skrá inn í VerkRadar",
+    authLoginSubtitle: "Fáið aðgang að mælaborði, vistuðum tækifærum og vikuyfirlitum.",
+    email: "Netfang",
+    password: "Lykilorð",
+    forgotPassword: "Gleymt lykilorð?",
+    loggingIn: "Skrái inn...",
+    newToVerkRadar: "Ný hjá VerkRadar?",
+    createAccount: "Stofna aðgang",
+    createAccountTitle: "Stofna VerkRadar aðgang",
+    createAccountSubtitle: "Byrjið á að stofna aðgang. Síðan stofnið þið fyrirtækjaprófíl.",
+    creating: "Stofna...",
+    alreadyHaveAccount: "Ertu þegar með aðgang?",
+    passwordReset: "Endurstilla lykilorð",
+    resetPasswordTitle: "Endurstilla lykilorð",
+    resetPasswordSubtitle: "Sláið inn netfang og VerkRadar sendir öruggan hlekk ef aðgangur er til.",
+    sending: "Sendi...",
+    sendResetLink: "Senda hlekk",
+    rememberedPassword: "Manstu lykilorðið?",
+    backToLogin: "Til baka í innskráningu",
+    newPassword: "Nýtt lykilorð",
+    chooseNewPassword: "Veldu nýtt lykilorð",
+    resetPasswordHelp: "Settu nýtt lykilorð fyrir VerkRadar aðganginn. Ef hlekkurinn er útrunninn skaltu biðja um nýjan.",
+    confirmNewPassword: "Staðfesta nýtt lykilorð",
+    updating: "Uppfæri...",
+    updatePassword: "Uppfæra lykilorð",
+    needNewLink: "Þarftu nýjan hlekk?",
+    sendAnotherResetLink: "Senda annan hlekk",
+    onboarding: "Uppsetning",
+    onboardingTitle: "Stofna fyrirtækjaprófíl",
+    onboardingText: "Þetta notar samsvörunarkerfið til að finna viðeigandi tækifæri.",
+    companyBasics: "1. Grunnupplýsingar",
+    companyName: "Fyrirtækisnafn",
+    contactEmail: "Tengiliðanetfang",
+    website: "Vefsíða",
+    industry: "Atvinnugrein",
+    servicesAndKeywords: "2. Þjónusta og leitarorð",
+    servicesHint: "Byrjið á þjónustunni sem þið viljið raunverulega bjóða í.",
+    servicesLabel: "Hvaða þjónustu bjóðið þið? Veljið tillögur eða sláið inn eigin, aðskildar með kommu.",
+    servicesHelper: "Skráið þjónustuna sem fyrirtækið selur. Nákvæmari þjónusta gefur betri samsvaranir.",
+    extraWords: "Aukaorð sem VerkRadar á að leita að í útboðum.",
+    includeKeywordsHelper: "Notið orð sem birtast oft í tækifærum sem þið viljið fá.",
+    excludeWords: "Orð sem ættu að lækka eða fjarlægja slæmar samsvaranir.",
+    excludeKeywordsHelper: "Orð sem ættu að lækka eða fjarlægja slæmar samsvaranir.",
+    suggestedServicesFor: "Tillögur að þjónustu fyrir {industry}",
+    suggestedKeywordsFor: "Tillögur að leitarorðum fyrir {industry}",
+    selectIndustryForServices: "Veljið atvinnugrein til að sjá þjónustutillögur",
+    selectIndustryForKeywords: "Veljið atvinnugrein til að sjá leitarorðatillögur",
+    locationsTitle: "3. Svæði",
+    locationsHint: "Notið Allt landið fyrir landsdekkandi útboð. Notið ferðastillingar ef þið getið boðið utan heimasvæðis fyrir rétt verkefni.",
+    baseLocation: "Heimasvæði",
+    baseLocationPlaceholder: "Dæmi: Austurland",
+    serviceAreas: "Þjónustusvæði, aðskilin með kommu",
+    serviceAreasPlaceholder: "Dæmi: Austurland, Allt landið",
+    travelScope: "Ferðir og umfang",
+    willingToTravel: "Tilbúin að ferðast fyrir rétt verkefni",
+    includeNational: "Sýna landsdekkandi tækifæri",
+    includeRemote: "Sýna fjarvinnu / netverkefni",
+    minimumTravelValue: "Lágmarksverðmæti fyrir ferðalög",
+    projectSize: "4. Verkefnastærð",
+    minimumValue: "Lágmarksverðmæti",
+    maximumValue: "Hámarksverðmæti",
+    showUnknownValue: "Sýna tækifæri þó verðmæti vanti",
+    reportPreferences: "5. Yfirlitsstillingar",
+    frequency: "Tíðni",
+    weekly: "Vikulega",
+    daily: "Daglega",
+    reportDay: "Dagur yfirlits",
+    deadlineReminders: "Áminningar um skilafresti",
+    includeLowConfidence: "Sýna óvissar samsvaranir",
+    saveProfile: "Vista prófíl",
+    saving: "Vista...",
+    saved: "Vistað",
+    dashboard: "Mælaborð",
+    welcomeCompany: "Velkomin, {company}",
+    dashboardIntro: "Forgangsraðaðar tækifærasamsvaranir út frá þjónustu, svæðum og leitarorðum. {refresh}",
+    matchesLastRefreshed: "Síðast uppfært {time}.",
+    matchesAutoRefresh: "Samsvaranir uppfærast sjálfkrafa eftir vistun prófíls.",
+    refreshMatches: "Uppfæra samsvaranir",
+    refreshing: "Uppfæri...",
+    viewWeeklyReport: "Skoða vikuyfirlit",
+    strongMatches: "Sterkar samsvaranir",
+    closingSoon: "Styttist í frest",
+    savedLabel: "Vistað",
+    totalPotentialValue: "Áætlað heildarverðmæti",
+    searchOpportunities: "Leita í tækifærum...",
+    savedOnly: "Aðeins vistað",
+    improveProfile: "Bæta prófíl",
+    includeNationalOpportunities: "Sýna landsdekkandi tækifæri",
+    showAllStoredMatches: "Sýna allar vistaðar samsvaranir",
+    inspectAllOpportunities: "Skoða öll tækifæri",
+    details: "Nánar",
+    save: "Vista",
+    ignore: "Hunsa",
+    originalLanguage: "Upprunalegt tungumál",
+    extractedProject: "Útdregið verkefni",
+    reportTitle: "Útboðs- og verkefnayfirlit",
+    weeklyReport: "Vikuyfirlit",
+    saveReport: "Vista yfirlit",
+    savingReport: "Vista...",
+    downloadPdf: "Sækja PDF",
+    copyReport: "Afrita yfirlit",
+    reportArchive: "Yfirlitssafn",
+    savedReports: "Vistuð yfirlit",
+    loadingSavedReports: "Hleð vistuð yfirlit...",
+    noSavedReports: "Engin vistuð yfirlit enn.",
+    viewReport: "Skoða yfirlit",
+    closeReport: "Loka yfirliti",
+    generatedBy: "Útbúið af VerkRadar",
+    reportForCompany: "Útboðs- og verkefnayfirlit fyrir {company}",
+    openTenders: "Opin útboð / verðfyrirspurnir",
+    upcomingOpportunities: "Möguleg væntanleg tækifæri",
+    openTendersDescription: "Skýr útboðs- eða verðfyrirspurnarmerki. Yfirfarið frumgögn áður en brugðist er við.",
+    upcomingDescription: "Væntanleg útboðs- eða verkefnamerki með skýrum vísbendingum.",
+    reportFooter: "VerkRadar hjálpar til við að forgangsraða yfirferð opinberra tækifæra. Staðfestið alltaf útboðsgögn, skilafresti, kröfur og hæfi á upprunalegri heimild áður en brugðist er við.",
+    buyer: "Kaupandi",
+    source: "Heimild",
+    area: "Svæði",
+    deadline: "Skilafrestur",
+    estimatedValue: "Áætlað verðmæti",
+    notFound: "Fannst ekki",
+    notListed: "Ekki gefið upp",
+    unknownBuyer: "Óþekktur kaupandi",
+    allIceland: "Allt landið",
+    whyThisMatters: "Af hverju þetta gæti skipt máli",
+    risksToCheck: "Atriði til að staðfesta",
+    openSource: "Opna heimild",
+    sourceLinkMissing: "Heimildartengil vantar",
+    strongMatch: "Sterk samsvörun",
+    goodMatch: "Góð samsvörun",
+    possibleMatch: "Möguleg samsvörun",
+    weakMatch: "Veik samsvörun",
+    confirmedTender: "Staðfest útboð",
+    likelyOpportunity: "Líklegt tækifæri",
+    earlySignal: "Væntanlegt tækifæri",
+    needsReview: "Þarfnast staðfestingar",
+    tenderAwarded: "Útboði lokið / samið",
+    tenderAlreadyAnnounced: "Útboð þegar auglýst",
+    upcomingTender: "Væntanlegt útboð",
+    projectSignal: "Verkefnavísbending",
+    nationalOpportunity: "Landsdekkandi tækifæri",
+    localMatch: "Staðbundin samsvörun",
+    mentionsService: "Nefnir þjónustu ykkar: {value}",
+    containsKeyword: "Inniheldur leitarorð: {value}",
+    procurement: "innkaup"
+  },
+  en: {
+    navDashboard: "Dashboard",
+    navReport: "Report",
+    navPricing: "Pricing",
+    navSettings: "Settings",
+    navHowItWorks: "How it works",
+    navSampleReport: "Sample report",
+    login: "Login",
+    logout: "Logout",
+    getStarted: "Get started",
+    createProfile: "Create profile",
+    companyProfile: "Company profile",
+    noCompanyProfile: "No company profile",
+    openMenu: "Open menu",
+    closeMenu: "Close menu",
+    privacyPolicy: "Privacy Policy",
+    termsOfService: "Terms of Service",
+    dataSources: "Data Sources",
+    cookies: "Cookies",
+    security: "Security",
+    footerText: "Tender and opportunity monitoring for businesses. VerkRadar helps you find and review public opportunities, but source documents remain the authority.",
+    loadingLabel: "Loading VerkRadar",
+    heroEyebrow: "Tender intelligence for working contractors",
+    heroTitle: "Stop losing valuable jobs to tabs you never opened.",
+    heroText: "VerkRadar checks tender portals, municipal pages and public sources, then ranks the jobs worth pricing before the deadline moves on.",
+    createFreeDemoProfile: "Create free demo profile",
+    viewSampleReport: "View sample report",
+    proofStrong: "Contractors find relevant opportunities faster.",
+    proofText: "Top matches often include tenders outside the main databases.",
+    bestOpenMatch: "Best open match",
+    tender: "Tender",
+    deadlineRisk: "Deadline risk",
+    daysLeft: "{count} days left",
+    problemEyebrow: "The problem",
+    problemTitle: "Opportunities are often lost before bidding starts.",
+    problemOneTitle: "Deadlines show up after your crew is already booked.",
+    problemOneText: "A short response window becomes a scramble, or a valuable contract never gets priced.",
+    problemTwoTitle: "The search takes longer than the go/no-go call.",
+    problemTwoText: "Owners spend hours opening low-fit tenders instead of seeing value, location, requirements and match reasons in one view.",
+    solutionEyebrow: "The solution",
+    solutionTitle: "One clear report instead of scattered searching.",
+    solutionText: "VerkRadar turns tender noise into a ranked list of opportunities your business should actually check.",
+    createProfileStep: "1. Create profile",
+    createProfileStepText: "Tell VerkRadar your services, locations, keywords and project size.",
+    matchProjectsStep: "2. Match projects",
+    matchProjectsStepText: "The system scores each opportunity against your business profile.",
+    getReportStep: "3. Get report",
+    getReportStepText: "Receive a clear weekly report with deadlines and next steps.",
+    sampleReportEyebrow: "Sample report",
+    sampleReportTitle: "A weekly shortlist your team can act on.",
+    sampleReportText: "Preview how VerkRadar packages matched opportunities, deadline risk and next steps without requiring a login.",
+    tryDemoTitle: "Try the demo dashboard now.",
+    tryDemoText: "Load a sample company profile and see how the matching works.",
+    loadDemoCompany: "Load demo company",
+    authLoginTitle: "Login to VerkRadar",
+    authLoginSubtitle: "Access your company dashboard, saved opportunities and weekly reports.",
+    email: "Email",
+    password: "Password",
+    forgotPassword: "Forgot password?",
+    loggingIn: "Logging in...",
+    newToVerkRadar: "New to VerkRadar?",
+    createAccount: "Create account",
+    createAccountTitle: "Create your VerkRadar account",
+    createAccountSubtitle: "Start by creating an account. Then you’ll create your company profile.",
+    creating: "Creating...",
+    alreadyHaveAccount: "Already have an account?",
+    passwordReset: "Password reset",
+    resetPasswordTitle: "Reset your password",
+    resetPasswordSubtitle: "Enter your email and VerkRadar will send a secure reset link if the account exists.",
+    sending: "Sending...",
+    sendResetLink: "Send reset link",
+    rememberedPassword: "Remembered your password?",
+    backToLogin: "Back to login",
+    newPassword: "New password",
+    chooseNewPassword: "Choose a new password",
+    resetPasswordHelp: "Set a new password for your VerkRadar account. If the link has expired, request a new reset link.",
+    confirmNewPassword: "Confirm new password",
+    updating: "Updating...",
+    updatePassword: "Update password",
+    needNewLink: "Need a new link?",
+    sendAnotherResetLink: "Send another reset link",
+    onboarding: "Onboarding",
+    onboardingTitle: "Create your company profile",
+    onboardingText: "This is what the matching system uses to find relevant opportunities.",
+    companyBasics: "1. Company basics",
+    companyName: "Company name",
+    contactEmail: "Contact email",
+    website: "Website",
+    industry: "Industry",
+    servicesAndKeywords: "2. Services and keywords",
+    servicesHint: "Start with the services you would actually want to bid on.",
+    servicesLabel: "What services do you offer? Choose suggestions or type your own, separated by commas.",
+    servicesHelper: "Add the services your company actually sells. More specific services create better matches.",
+    extraWords: "Extra words VerkRadar should look for in notices.",
+    includeKeywordsHelper: "Use words that often appear in opportunities you want.",
+    excludeWords: "Words that should lower or remove bad matches.",
+    excludeKeywordsHelper: "Words that should lower or remove bad matches.",
+    suggestedServicesFor: "Suggested services for {industry}",
+    suggestedKeywordsFor: "Suggested keywords for {industry}",
+    selectIndustryForServices: "Select an industry to see service suggestions",
+    selectIndustryForKeywords: "Select an industry to see keyword suggestions",
+    locationsTitle: "3. Locations",
+    locationsHint: "Use All Iceland for national tenders. Use travel settings when you can bid outside your base area for the right project size.",
+    baseLocation: "Base location",
+    baseLocationPlaceholder: "Example: East Iceland",
+    serviceAreas: "Service areas, comma separated",
+    serviceAreasPlaceholder: "Example: East Iceland, All Iceland",
+    travelScope: "Travel and scope",
+    willingToTravel: "Willing to travel for the right project",
+    includeNational: "Include national / All Iceland opportunities",
+    includeRemote: "Include remote / online opportunities",
+    minimumTravelValue: "Minimum project value for travel",
+    projectSize: "4. Project size",
+    minimumValue: "Minimum value",
+    maximumValue: "Maximum value",
+    showUnknownValue: "Show opportunities even if value is unknown",
+    reportPreferences: "5. Report preferences",
+    frequency: "Frequency",
+    weekly: "Weekly",
+    daily: "Daily",
+    reportDay: "Report day",
+    deadlineReminders: "Deadline reminders",
+    includeLowConfidence: "Include low-confidence matches",
+    saveProfile: "Save profile",
+    saving: "Saving...",
+    saved: "Saved",
+    dashboard: "Dashboard",
+    welcomeCompany: "Welcome, {company}",
+    dashboardIntro: "Ranked project opportunities based on your services, locations and keywords. {refresh}",
+    matchesLastRefreshed: "Last refreshed {time}.",
+    matchesAutoRefresh: "Matches refresh automatically after profile saves.",
+    refreshMatches: "Refresh matches",
+    refreshing: "Refreshing...",
+    viewWeeklyReport: "View weekly report",
+    strongMatches: "Strong matches",
+    closingSoon: "Closing soon",
+    savedLabel: "Saved",
+    totalPotentialValue: "Total potential value",
+    searchOpportunities: "Search opportunities...",
+    savedOnly: "Saved only",
+    improveProfile: "Improve profile",
+    includeNationalOpportunities: "Include national opportunities",
+    showAllStoredMatches: "Show all stored matches",
+    inspectAllOpportunities: "Inspect all opportunities",
+    details: "Details",
+    save: "Save",
+    ignore: "Ignore",
+    originalLanguage: "Original language",
+    extractedProject: "Extracted project",
+    reportTitle: "Tender and opportunity report",
+    weeklyReport: "Weekly report",
+    saveReport: "Save report",
+    savingReport: "Saving...",
+    downloadPdf: "Download PDF",
+    copyReport: "Copy report",
+    reportArchive: "Report archive",
+    savedReports: "Saved reports",
+    loadingSavedReports: "Loading saved reports...",
+    noSavedReports: "No saved reports yet.",
+    viewReport: "View report",
+    closeReport: "Close report",
+    generatedBy: "Generated by VerkRadar",
+    reportForCompany: "Tender and opportunity report for {company}",
+    openTenders: "Open tenders / quote requests",
+    upcomingOpportunities: "Possible upcoming opportunities",
+    openTendersDescription: "Clear procurement intent. Review source documents before acting.",
+    upcomingDescription: "Upcoming procurement or project signals with clear evidence.",
+    reportFooter: "VerkRadar helps prioritise public opportunity review. Always check the original source documents, deadlines, requirements and eligibility before acting.",
+    buyer: "Buyer",
+    source: "Source",
+    area: "Location",
+    deadline: "Deadline",
+    estimatedValue: "Estimated value",
+    notFound: "Not found",
+    notListed: "Not listed",
+    unknownBuyer: "Unknown buyer",
+    allIceland: "All Iceland",
+    whyThisMatters: "Why this matters",
+    risksToCheck: "Risks / things to check",
+    openSource: "Open source",
+    sourceLinkMissing: "Source link missing",
+    strongMatch: "Strong match",
+    goodMatch: "Good match",
+    possibleMatch: "Possible match",
+    weakMatch: "Weak match",
+    confirmedTender: "Confirmed tender",
+    likelyOpportunity: "Likely opportunity",
+    earlySignal: "Early signal",
+    needsReview: "Needs review",
+    tenderAwarded: "Tender awarded",
+    tenderAlreadyAnnounced: "Tender already announced",
+    upcomingTender: "Upcoming tender",
+    projectSignal: "Project signal",
+    nationalOpportunity: "National opportunity",
+    localMatch: "Local match",
+    mentionsService: "Mentions your service: {value}",
+    containsKeyword: "Contains your keyword: {value}",
+    procurement: "procurement"
+  }
+};
+
+function getInitialLanguage() {
+  const stored = localStorage.getItem(STORAGE_KEYS.language);
+  return stored === "en" || stored === "is" ? stored : "is";
+}
+
+function t(key, params = {}) {
+  const dictionary = translations[state?.language || "is"] || translations.is;
+  const fallback = translations.en[key] || translations.is[key] || key;
+  return String(dictionary[key] || fallback).replace(/\{(\w+)\}/g, (_, name) => params[name] ?? "");
+}
+
+function setLanguage(language) {
+  state.language = language === "en" ? "en" : "is";
+  localStorage.setItem(STORAGE_KEYS.language, state.language);
+  render();
+}
 
 const defaultProfile = {
   companyName: "RafFix ehf.",
@@ -68,6 +487,7 @@ function getEmptyProfile() {
 
 let state = {
   route: location.hash.replace("#", "") || "/",
+  language: getInitialLanguage(),
   user: null,
   currentUser: null,
   isAdmin: false,
@@ -139,6 +559,7 @@ let state = {
   adminCompaniesLoading: false,
   adminCompaniesLoaded: false,
   adminCompaniesError: null,
+  adminCompanyActions: {},
   selectedAdminCompanyId: null,
   adminActiveTab: "overview",
   adminCompanyFilters: {
@@ -360,6 +781,12 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (name === "toggle-language") {
+    event.preventDefault();
+    setLanguage(state.language === "is" ? "en" : "is");
+    return;
+  }
+
   if (name === "toggle-dropdown") {
     event.preventDefault();
     const key = action.dataset.key;
@@ -452,12 +879,12 @@ document.addEventListener("click", (event) => {
     render();
   }
   if (name === "admin-refresh-company-matches") {
-    state.adminMessage = { type: "success", text: "Company matching refresh is handled by the automatic pipeline. Use source imports or profile save to refresh matches." };
-    render();
+    refreshAdminCompanyMatches(id);
+    return;
   }
   if (name === "admin-generate-company-report") {
-    state.adminMessage = { type: "success", text: "Report generation is handled by the automatic weekly report pipeline. Manual per-company generation is not enabled yet." };
-    render();
+    generateAdminCompanyReport(id);
+    return;
   }
   if (name === "import-ted") importTedNotices();
   if (name === "import-source-connectors") importSourceConnectors();
@@ -1266,6 +1693,137 @@ function mapAdminCompany(company, related) {
   };
 }
 
+function setAdminCompanyAction(companyId, action) {
+  state.adminCompanyActions = {
+    ...(state.adminCompanyActions || {}),
+    [companyId]: action
+  };
+}
+
+function clearAdminCompanyAction(companyId) {
+  const next = { ...(state.adminCompanyActions || {}) };
+  delete next[companyId];
+  state.adminCompanyActions = next;
+}
+
+async function refreshAdminCompanyMatches(companyId, options = {}) {
+  if (!state.isAdmin) {
+    state.adminMessage = { type: "error", text: "You do not have access to this action." };
+    render();
+    return [];
+  }
+
+  const company = (state.adminCompanies || []).find((item) => item.id === companyId);
+  if (!company) {
+    state.adminMessage = { type: "error", text: "Company not found. Refresh Admin companies and try again." };
+    render();
+    return [];
+  }
+
+  if (!options.skipAction) setAdminCompanyAction(companyId, "refresh");
+  if (!options.silent) {
+    state.adminMessage = null;
+    render();
+  }
+
+  try {
+    const payload = await runAdminCompanyAction(companyId, "refresh_matches");
+    const refreshedCount = Number(payload.matches_refreshed || 0);
+
+    await loadAdminCompanies();
+    if (state.companyId === companyId) await loadStoredMatchesForCurrentCompany();
+    if (!options.silent) {
+      state.adminMessage = {
+        type: "success",
+        text: `Refreshed ${refreshedCount} eligible matches for ${company.companyName}.`
+      };
+      showToast("Company matches refreshed", "success");
+      render();
+    }
+    return payload;
+  } catch (error) {
+    console.error("Failed to refresh admin company matches:", error);
+    state.adminMessage = {
+      type: "error",
+      text: `Failed to refresh matches for ${company.companyName}. ${formatSupabaseError(error)}`
+    };
+    render();
+    if (options.throwOnError) throw error;
+    return [];
+  } finally {
+    if (!options.skipAction) {
+      clearAdminCompanyAction(companyId);
+      render();
+    }
+  }
+}
+
+async function generateAdminCompanyReport(companyId) {
+  if (!state.isAdmin) {
+    state.adminMessage = { type: "error", text: "You do not have access to this action." };
+    render();
+    return;
+  }
+
+  const company = (state.adminCompanies || []).find((item) => item.id === companyId);
+  if (!company) {
+    state.adminMessage = { type: "error", text: "Company not found. Refresh Admin companies and try again." };
+    render();
+    return;
+  }
+
+  setAdminCompanyAction(companyId, "report");
+  state.adminMessage = null;
+  render();
+
+  try {
+    const payload = await runAdminCompanyAction(companyId, "generate_report");
+    if (!payload.report_created) {
+      state.adminMessage = {
+        type: "error",
+        text: payload.message || `No customer-report-ready matches found for ${company.companyName}.`
+      };
+      render();
+      return;
+    }
+
+    await Promise.all([loadAdminReports(), loadAdminCompanies()]);
+    if (state.companyId === companyId) await loadReportsForCurrentCompany();
+    state.adminMessage = {
+      type: "success",
+      text: `Generated report for ${company.companyName} with ${Number(payload.report_items || 0)} item${Number(payload.report_items || 0) === 1 ? "" : "s"}. Open the Reports tab to review it.`
+    };
+    showToast("Company report generated", "success");
+  } catch (error) {
+    console.error("Failed to generate admin company report:", error);
+    state.adminMessage = {
+      type: "error",
+      text: `Failed to generate report for ${company.companyName}. ${formatSupabaseError(error)}`
+    };
+  } finally {
+    clearAdminCompanyAction(companyId);
+    render();
+  }
+}
+
+async function runAdminCompanyAction(companyId, action) {
+  const endpoint = getAdminCompanyActionsEndpoint();
+  if (!endpoint) {
+    throw new Error("Admin company actions are not configured. Set window.VERKRADAR_ADMIN_COMPANY_ACTIONS_URL or window.VERKRADAR_SUPABASE_URL.");
+  }
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: await getTedImportHeaders(),
+    body: JSON.stringify({ companyId, action })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error || `Admin company action failed with status ${response.status}`);
+  }
+  return payload;
+}
+
 async function refreshAdminOperationsData() {
   if (!state.isAdmin) return;
   await Promise.all([
@@ -1755,6 +2313,13 @@ function getSourceConnectorImportEndpoint() {
   return null;
 }
 
+function getAdminCompanyActionsEndpoint() {
+  if (window.VERKRADAR_ADMIN_COMPANY_ACTIONS_URL) return window.VERKRADAR_ADMIN_COMPANY_ACTIONS_URL;
+  if (window.VERKRADAR_SUPABASE_URL) return `${window.VERKRADAR_SUPABASE_URL}/functions/v1/admin-company-actions`;
+  if (SUPABASE_URL) return `${SUPABASE_URL}/functions/v1/admin-company-actions`;
+  return null;
+}
+
 async function importTedNotices() {
   if (!state.isAdmin) {
     state.importStatus = { errors: ["You do not have access to import TED notices."] };
@@ -1902,7 +2467,7 @@ async function getTedImportHeaders() {
   if (error) throw error;
   const accessToken = data.session?.access_token;
   if (!accessToken) {
-    throw new Error("You must be logged in to import TED notices.");
+    throw new Error("You must be logged in to run this admin action.");
   }
 
   headers.authorization = `Bearer ${accessToken}`;
@@ -3764,6 +4329,22 @@ function getOpportunityQualityRank(opp) {
 
 function getDashboardFilterSummary({ visibleCount, storedMatchCount, filteredStoredCount, availableCount, recommendedCount, strongCount, companyName }) {
   const selected = state.filters.label;
+  if (state.language === "is") {
+    if (selected === "all_opportunities") return `${availableCount} tækifæri eru til í kerfinu. Sýni ${visibleCount} sýnileg tækifæri til yfirferðar.`;
+    if (selected === "needs_review") return `${availableCount} tækifæri eru til í kerfinu. Sýni ${visibleCount} atriði sem þarf að staðfesta.`;
+    if (selected === "all") return `${storedMatchCount} vistaðar samsvaranir fyrir ${companyName}. Sýni ${visibleCount}.`;
+    if (selected === "strong") return `${storedMatchCount} vistaðar samsvaranir fyrir ${companyName}. Sýni ${visibleCount} sterkar samsvaranir.`;
+    if (selected === "recommended") {
+      if (!visibleCount) {
+        if (strongCount > 0) return `${strongCount} sterkar samsvaranir eru til fyrir ${companyName}, en þær eru faldar af núverandi síum.`;
+        if (filteredStoredCount > 0) return `${filteredStoredCount} vistaðar samsvaranir eru faldar af gæðasíum. Notið Allar samsvaranir eða Þarfnast staðfestingar til að skoða þær.`;
+        return `Engar ráðlagðar samsvaranir fyrir ${companyName} enn. ${availableCount} tækifæri eru til í kerfinu, en ekkert passar nógu sterkt við þennan prófíl.`;
+      }
+      return `${storedMatchCount} vistaðar samsvaranir fyrir ${companyName}. Sýni ${visibleCount} ráðlagðar eða mögulegar samsvaranir.`;
+    }
+    if (selected === "possible") return `${storedMatchCount} vistaðar samsvaranir fyrir ${companyName}. Sýni ${visibleCount} mögulegar eða veikar samsvaranir.`;
+    return `${storedMatchCount} vistaðar samsvaranir fyrir ${companyName}. Sýni ${visibleCount} tækifæri.`;
+  }
   if (selected === "all_opportunities") {
     return `${availableCount} opportunities are available in the system. Showing ${visibleCount} visible opportunities for inspection.`;
   }
@@ -4093,7 +4674,7 @@ function render() {
 function renderLoadingPage() {
   return renderShell(`
     <div class="app-loader">
-      <div class="loader-mark" aria-label="Loading VerkRadar">
+      <div class="loader-mark" aria-label="${escapeHtml(t("loadingLabel"))}">
         <span></span>
       </div>
     </div>
@@ -4105,15 +4686,15 @@ function renderShell(content) {
   const hasProfile = Boolean(state.profile);
   const navItems = isLoggedIn
     ? [
-        ["Dashboard", "/dashboard"],
-        ["Report", "/report"],
-        ["Pricing", "/pricing"],
-        ["Settings", "/settings"]
+        [t("navDashboard"), "/dashboard"],
+        [t("navReport"), "/report"],
+        [t("navPricing"), "/pricing"],
+        [t("navSettings"), "/settings"]
       ]
     : [
-        ["How it works", "#how-it-works"],
-        ["Sample report", "#sample-report"],
-        ["Pricing", "/pricing"]
+        [t("navHowItWorks"), "#how-it-works"],
+        [t("navSampleReport"), "#sample-report"],
+        [t("navPricing"), "/pricing"]
       ];
   const headerCta = getHeaderCta(isLoggedIn, hasProfile);
 
@@ -4127,7 +4708,7 @@ function renderShell(content) {
           class="menu-toggle"
           type="button"
           data-action="toggle-mobile-menu"
-          aria-label="${state.isMobileMenuOpen ? "Close menu" : "Open menu"}"
+          aria-label="${state.isMobileMenuOpen ? t("closeMenu") : t("openMenu")}"
           aria-expanded="${state.isMobileMenuOpen ? "true" : "false"}"
           aria-controls="mobile-menu"
         >
@@ -4144,7 +4725,11 @@ function renderShell(content) {
           ).join("")}
         </nav>
         <div class="header-actions">
-          ${!isLoggedIn ? `<button class="btn btn-secondary header-login-btn btn-login" data-action="go" data-href="/login">Login</button>` : ""}
+          <button class="language-toggle" type="button" data-action="toggle-language" aria-label="Switch language">
+            <span class="${state.language === "is" ? "active" : ""}">IS</span>
+            <span class="${state.language === "en" ? "active" : ""}">EN</span>
+          </button>
+          ${!isLoggedIn ? `<button class="btn btn-secondary header-login-btn btn-login" data-action="go" data-href="/login">${t("login")}</button>` : ""}
           ${headerCta ? `<button class="btn btn-primary" data-action="go" data-href="${headerCta.href}">${headerCta.label}</button>` : ""}
           ${isLoggedIn && !state.isMobileMenuOpen ? renderProfileMenu() : ""}
         </div>
@@ -4164,17 +4749,17 @@ function renderShell(content) {
 
 function renderFooter() {
   const links = [
-    ["Privacy Policy", "/privacy"],
-    ["Terms of Service", "/terms"],
-    ["Data Sources", "/data-sources"],
-    ["Cookies", "/cookies"],
-    ["Security", "/security"]
+    [t("privacyPolicy"), "/privacy"],
+    [t("termsOfService"), "/terms"],
+    [t("dataSources"), "/data-sources"],
+    [t("cookies"), "/cookies"],
+    [t("security"), "/security"]
   ];
   return `
     <footer class="site-footer">
       <div>
         <strong>VerkRadar</strong>
-        <p>Tender and opportunity monitoring for businesses. VerkRadar helps you find and review public opportunities, but source documents remain the authority.</p>
+        <p>${escapeHtml(t("footerText"))}</p>
       </div>
       <nav aria-label="Legal and trust pages">
         ${links.map(([label, href]) => `<button type="button" data-action="go" data-href="${href}">${label}</button>`).join("")}
@@ -4502,10 +5087,10 @@ function renderSecurityPage() {
 function renderMobileMenuPanel(navItems, headerCta, isLoggedIn) {
   const mobileNavItems = isLoggedIn
     ? [
-        ["Dashboard", "/dashboard"],
-        ["Report", "/report"],
-        ["Pricing", "/pricing"],
-        ["Settings", "/settings"]
+        [t("navDashboard"), "/dashboard"],
+        [t("navReport"), "/report"],
+        [t("navPricing"), "/pricing"],
+        [t("navSettings"), "/settings"]
       ]
     : navItems;
   const linkItems = mobileNavItems.map(([label, href]) => href.startsWith("#")
@@ -4516,6 +5101,7 @@ function renderMobileMenuPanel(navItems, headerCta, isLoggedIn) {
   return `
     <nav class="mobile-menu-panel" id="mobile-menu">
       <div class="mobile-menu-links">
+        <button type="button" data-action="toggle-language">${state.language === "is" ? "English" : "Íslenska"}</button>
         ${linkItems}
         ${isLoggedIn && state.isAdmin ? `<button type="button" data-action="mobile-nav" data-href="/admin">Admin</button>` : ""}
       </div>
@@ -4529,12 +5115,12 @@ function renderMobileAccountSection(headerCta, isLoggedIn) {
     return `
       <div class="mobile-account-section">
         ${headerCta ? `<button class="btn btn-primary mobile-cta" type="button" data-action="mobile-nav" data-href="${headerCta.href}">${headerCta.label}</button>` : ""}
-        <button class="btn btn-secondary" type="button" data-action="mobile-nav" data-href="/login">Login</button>
+        <button class="btn btn-secondary" type="button" data-action="mobile-nav" data-href="/login">${t("login")}</button>
       </div>
     `;
   }
 
-  const companyName = state.profile?.companyName || "No company profile";
+  const companyName = state.profile?.companyName || t("noCompanyProfile");
   const email = state.user?.email || "";
   const initials = getProfileInitials(companyName, email);
 
@@ -4549,23 +5135,23 @@ function renderMobileAccountSection(headerCta, isLoggedIn) {
       </div>
       <div class="mobile-account-actions">
         ${state.profile
-          ? `<button type="button" data-action="mobile-nav" data-href="/settings">Company profile</button>`
-          : `<button type="button" data-action="mobile-nav" data-href="/onboarding">Create profile</button>`
+          ? `<button type="button" data-action="mobile-nav" data-href="/settings">${t("companyProfile")}</button>`
+          : `<button type="button" data-action="mobile-nav" data-href="/onboarding">${t("createProfile")}</button>`
         }
-        <button type="button" class="mobile-logout" data-action="logout">Logout</button>
+        <button type="button" class="mobile-logout" data-action="logout">${t("logout")}</button>
       </div>
     </div>
   `;
 }
 
 function getHeaderCta(isLoggedIn, hasProfile) {
-  if (!isLoggedIn) return { href: "/signup", label: "Get started" };
-  if (!hasProfile) return { href: "/onboarding", label: "Create profile" };
+  if (!isLoggedIn) return { href: "/signup", label: t("getStarted") };
+  if (!hasProfile) return { href: "/onboarding", label: t("createProfile") };
   return null;
 }
 
 function renderProfileMenu() {
-  const companyName = state.profile?.companyName || "No company profile";
+  const companyName = state.profile?.companyName || t("noCompanyProfile");
   const email = state.user?.email || "";
   const initials = getProfileInitials(companyName, email);
 
@@ -4585,15 +5171,15 @@ function renderProfileMenu() {
           </div>
           <div class="profile-dropdown-divider"></div>
           ${state.profile ? `
-            <button type="button" data-action="go" data-href="/dashboard" role="menuitem">Dashboard</button>
-            <button type="button" data-action="go" data-href="/settings" role="menuitem">Settings</button>
+            <button type="button" data-action="go" data-href="/dashboard" role="menuitem">${t("navDashboard")}</button>
+            <button type="button" data-action="go" data-href="/settings" role="menuitem">${t("navSettings")}</button>
             ${state.isAdmin ? `<button type="button" data-action="go" data-href="/admin" role="menuitem">Admin</button>` : ""}
           ` : `
-            <button type="button" data-action="go" data-href="/onboarding" role="menuitem">Create profile</button>
+            <button type="button" data-action="go" data-href="/onboarding" role="menuitem">${t("createProfile")}</button>
             ${state.isAdmin ? `<button type="button" data-action="go" data-href="/admin" role="menuitem">Admin</button>` : ""}
           `}
           <div class="profile-dropdown-divider"></div>
-          <button type="button" class="danger" data-action="logout" role="menuitem">Logout</button>
+          <button type="button" class="danger" data-action="logout" role="menuitem">${t("logout")}</button>
         </div>
       ` : ""}
     </div>
@@ -4601,7 +5187,7 @@ function renderProfileMenu() {
 }
 
 function getProfileInitials(companyName, email) {
-  const source = companyName && companyName !== "No company profile" ? companyName : email || "VR";
+  const source = companyName && !["No company profile", t("noCompanyProfile")].includes(companyName) ? companyName : email || "VR";
   return source
     .split(/[^a-zA-Z0-9áéíóúýþæöðÁÉÍÓÚÝÞÆÖÐ]+/)
     .filter(Boolean)
@@ -4616,8 +5202,8 @@ function requireProfilePage(title, message) {
     <section class="empty-state">
       <h1>${escapeHtml(title)}</h1>
       <p>${escapeHtml(message)}</p>
-      <button class="btn btn-primary" data-action="go" data-href="/onboarding">Create profile</button>
-      <button class="btn btn-secondary" data-action="load-demo">Load demo profile</button>
+      <button class="btn btn-primary" data-action="go" data-href="/onboarding">${escapeHtml(t("createProfile"))}</button>
+      <button class="btn btn-secondary" data-action="load-demo">${escapeHtml(t("loadDemoCompany"))}</button>
     </section>
   `);
 }
@@ -4632,29 +5218,29 @@ function renderAuthMessage() {
 }
 
 function renderLogin() {
-  if (state.user) return requireProfilePage("Already logged in", "Open your dashboard or edit your company profile.");
+  if (state.user) return requireProfilePage(state.language === "is" ? "Þú ert þegar skráð(ur) inn" : "Already logged in", state.language === "is" ? "Opnaðu mælaborðið eða breyttu fyrirtækjaprófílnum." : "Open your dashboard or edit your company profile.");
 
   return renderShell(`
     <section class="auth-page">
       <div class="auth-layout">
         <div class="auth-copy">
-          <p class="eyebrow">Login</p>
-          <h1>Login to VerkRadar</h1>
-          <p>Access your company dashboard, saved opportunities and weekly reports.</p>
+          <p class="eyebrow">${escapeHtml(t("login"))}</p>
+          <h1>${escapeHtml(t("authLoginTitle"))}</h1>
+          <p>${escapeHtml(t("authLoginSubtitle"))}</p>
         </div>
 
         <div class="auth-form-column">
           ${renderAuthMessage()}
           <form id="login-form" class="auth-card">
-            <label class="form-group">Email <input type="email" name="email" data-auth-field="email" value="${escapeHtml(state.authForm.email)}" autocomplete="email" required /></label>
-            <label class="form-group">Password <input type="password" name="password" data-auth-field="password" value="${escapeHtml(state.authForm.password)}" autocomplete="current-password" required /></label>
-            <p class="auth-help-link"><button type="button" data-action="go" data-href="/forgot-password">Forgot password?</button></p>
+            <label class="form-group">${escapeHtml(t("email"))} <input type="email" name="email" data-auth-field="email" value="${escapeHtml(state.authForm.email)}" autocomplete="email" required /></label>
+            <label class="form-group">${escapeHtml(t("password"))} <input type="password" name="password" data-auth-field="password" value="${escapeHtml(state.authForm.password)}" autocomplete="current-password" required /></label>
+            <p class="auth-help-link"><button type="button" data-action="go" data-href="/forgot-password">${escapeHtml(t("forgotPassword"))}</button></p>
             <div class="auth-actions">
               <button class="btn btn-primary btn-large" type="submit" ${state.authSubmitting ? "disabled" : ""}>
-                ${state.authSubmitting ? "Logging in..." : "Login"}
+                ${state.authSubmitting ? escapeHtml(t("loggingIn")) : escapeHtml(t("login"))}
               </button>
             </div>
-            <p class="auth-switch">New to VerkRadar? <button type="button" data-action="go" data-href="/signup">Create account</button></p>
+            <p class="auth-switch">${escapeHtml(t("newToVerkRadar"))} <button type="button" data-action="go" data-href="/signup">${escapeHtml(t("createAccount"))}</button></p>
           </form>
         </div>
       </div>
@@ -4663,27 +5249,27 @@ function renderLogin() {
 }
 
 function renderForgotPassword() {
-  if (state.user) return requireProfilePage("Already logged in", "Open your dashboard or edit your company profile.");
+  if (state.user) return requireProfilePage(state.language === "is" ? "Þú ert þegar skráð(ur) inn" : "Already logged in", state.language === "is" ? "Opnaðu mælaborðið eða breyttu fyrirtækjaprófílnum." : "Open your dashboard or edit your company profile.");
 
   return renderShell(`
     <section class="auth-page">
       <div class="auth-layout">
         <div class="auth-copy">
-          <p class="eyebrow">Password reset</p>
-          <h1>Reset your password</h1>
-          <p>Enter your email and VerkRadar will send a secure reset link if the account exists.</p>
+          <p class="eyebrow">${escapeHtml(t("passwordReset"))}</p>
+          <h1>${escapeHtml(t("resetPasswordTitle"))}</h1>
+          <p>${escapeHtml(t("resetPasswordSubtitle"))}</p>
         </div>
 
         <div class="auth-form-column">
           ${renderAuthMessage()}
           <form id="forgot-password-form" class="auth-card">
-            <label class="form-group">Email <input type="email" name="email" data-auth-field="email" value="${escapeHtml(state.authForm.email)}" autocomplete="email" required /></label>
+            <label class="form-group">${escapeHtml(t("email"))} <input type="email" name="email" data-auth-field="email" value="${escapeHtml(state.authForm.email)}" autocomplete="email" required /></label>
             <div class="auth-actions">
               <button class="btn btn-primary btn-large" type="submit" ${state.authSubmitting ? "disabled" : ""}>
-                ${state.authSubmitting ? "Sending..." : "Send reset link"}
+                ${state.authSubmitting ? escapeHtml(t("sending")) : escapeHtml(t("sendResetLink"))}
               </button>
             </div>
-            <p class="auth-switch">Remembered your password? <button type="button" data-action="go" data-href="/login">Back to login</button></p>
+            <p class="auth-switch">${escapeHtml(t("rememberedPassword"))} <button type="button" data-action="go" data-href="/login">${escapeHtml(t("backToLogin"))}</button></p>
           </form>
         </div>
       </div>
@@ -4696,23 +5282,23 @@ function renderResetPassword() {
     <section class="auth-page">
       <div class="auth-layout">
         <div class="auth-copy">
-          <p class="eyebrow">New password</p>
-          <h1>Choose a new password</h1>
-          <p>Set a new password for your VerkRadar account. If the link has expired, request a new reset link.</p>
+          <p class="eyebrow">${escapeHtml(t("newPassword"))}</p>
+          <h1>${escapeHtml(t("chooseNewPassword"))}</h1>
+          <p>${escapeHtml(t("resetPasswordHelp"))}</p>
         </div>
 
         <div class="auth-form-column">
           ${renderAuthMessage()}
           <form id="reset-password-form" class="auth-card">
-            <label class="form-group">New password <input type="password" name="newPassword" data-auth-field="newPassword" value="${escapeHtml(state.authForm.newPassword)}" autocomplete="new-password" minlength="8" required /></label>
-            <label class="form-group">Confirm new password <input type="password" name="confirmPassword" data-auth-field="confirmPassword" value="${escapeHtml(state.authForm.confirmPassword)}" autocomplete="new-password" minlength="8" required /></label>
+            <label class="form-group">${escapeHtml(t("newPassword"))} <input type="password" name="newPassword" data-auth-field="newPassword" value="${escapeHtml(state.authForm.newPassword)}" autocomplete="new-password" minlength="8" required /></label>
+            <label class="form-group">${escapeHtml(t("confirmNewPassword"))} <input type="password" name="confirmPassword" data-auth-field="confirmPassword" value="${escapeHtml(state.authForm.confirmPassword)}" autocomplete="new-password" minlength="8" required /></label>
             <div class="auth-actions">
               <button class="btn btn-primary btn-large" type="submit" ${state.authSubmitting ? "disabled" : ""}>
-                ${state.authSubmitting ? "Updating..." : "Update password"}
+                ${state.authSubmitting ? escapeHtml(t("updating")) : escapeHtml(t("updatePassword"))}
               </button>
             </div>
-            <p class="auth-switch">Need a new link? <button type="button" data-action="go" data-href="/forgot-password">Send another reset link</button></p>
-            <p class="auth-switch">Back to <button type="button" data-action="go" data-href="/login">Login</button></p>
+            <p class="auth-switch">${escapeHtml(t("needNewLink"))} <button type="button" data-action="go" data-href="/forgot-password">${escapeHtml(t("sendAnotherResetLink"))}</button></p>
+            <p class="auth-switch">${escapeHtml(t("backToLogin"))} <button type="button" data-action="go" data-href="/login">${escapeHtml(t("login"))}</button></p>
           </form>
         </div>
       </div>
@@ -4721,28 +5307,28 @@ function renderResetPassword() {
 }
 
 function renderSignup() {
-  if (state.user) return requireProfilePage("Already logged in", "Open your dashboard or edit your company profile.");
+  if (state.user) return requireProfilePage(state.language === "is" ? "Þú ert þegar skráð(ur) inn" : "Already logged in", state.language === "is" ? "Opnaðu mælaborðið eða breyttu fyrirtækjaprófílnum." : "Open your dashboard or edit your company profile.");
 
   return renderShell(`
     <section class="auth-page">
       <div class="auth-layout">
         <div class="auth-copy">
-          <p class="eyebrow">Create account</p>
-          <h1>Create your VerkRadar account</h1>
-          <p>Start by creating an account. Then you’ll create your company profile.</p>
+          <p class="eyebrow">${escapeHtml(t("createAccount"))}</p>
+          <h1>${escapeHtml(t("createAccountTitle"))}</h1>
+          <p>${escapeHtml(t("createAccountSubtitle"))}</p>
         </div>
 
         <div class="auth-form-column">
           ${renderAuthMessage()}
           <form id="signup-form" class="auth-card">
-            <label class="form-group">Email <input type="email" name="email" data-auth-field="email" value="${escapeHtml(state.authForm.email)}" autocomplete="email" required /></label>
-            <label class="form-group">Password <input type="password" name="password" data-auth-field="password" value="${escapeHtml(state.authForm.password)}" autocomplete="new-password" minlength="6" required /></label>
+            <label class="form-group">${escapeHtml(t("email"))} <input type="email" name="email" data-auth-field="email" value="${escapeHtml(state.authForm.email)}" autocomplete="email" required /></label>
+            <label class="form-group">${escapeHtml(t("password"))} <input type="password" name="password" data-auth-field="password" value="${escapeHtml(state.authForm.password)}" autocomplete="new-password" minlength="6" required /></label>
             <div class="auth-actions">
               <button class="btn btn-primary btn-large" type="submit" ${state.authSubmitting ? "disabled" : ""}>
-                ${state.authSubmitting ? "Creating..." : "Create account"}
+                ${state.authSubmitting ? escapeHtml(t("creating")) : escapeHtml(t("createAccount"))}
               </button>
             </div>
-            <p class="auth-switch">Already have an account? <button type="button" data-action="go" data-href="/login">Login</button></p>
+            <p class="auth-switch">${escapeHtml(t("alreadyHaveAccount"))} <button type="button" data-action="go" data-href="/login">${escapeHtml(t("login"))}</button></p>
           </form>
         </div>
       </div>
@@ -5465,18 +6051,18 @@ function renderLanding() {
   return renderShell(`
     <section class="hero">
       <div class="hero-copy">
-        <p class="eyebrow">Tender intelligence for working contractors</p>
-        <h1>Stop losing 15M kr jobs to tabs you never opened.</h1>
+        <p class="eyebrow">${escapeHtml(t("heroEyebrow"))}</p>
+        <h1>${escapeHtml(t("heroTitle"))}</h1>
         <p class="hero-text">
-          VerkRadar checks tender portals, municipal pages and private notices, then ranks the jobs worth pricing before the deadline moves on.
+          ${escapeHtml(t("heroText"))}
         </p>
         <div class="hero-actions">
-          <button class="btn btn-primary btn-large" data-action="go" data-href="/onboarding">Create free demo profile <span aria-hidden="true">&rarr;</span></button>
-          <button class="btn btn-secondary btn-large" data-action="scroll-to" data-target="sample-report">View sample report</button>
+          <button class="btn btn-primary btn-large" data-action="go" data-href="/onboarding">${escapeHtml(t("createFreeDemoProfile"))} <span aria-hidden="true">&rarr;</span></button>
+          <button class="btn btn-secondary btn-large" data-action="scroll-to" data-target="sample-report">${escapeHtml(t("viewSampleReport"))}</button>
         </div>
         <div class="proof-lines" aria-label="Product proof">
-          <strong>47 contractors found a match this week.</strong>
-          <span>Average top match value: 12.8M kr. Most were found outside the main tender database.</span>
+          <strong>${escapeHtml(t("proofStrong"))}</strong>
+          <span>${escapeHtml(t("proofText"))}</span>
         </div>
       </div>
       <div class="product-shot hero-card" aria-label="VerkRadar product preview">
@@ -5485,12 +6071,12 @@ function renderLanding() {
           <span>${new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}</span>
         </div>
         <div class="shot-metric">
-          <span>Best open match</span>
+          <span>${escapeHtml(t("bestOpenMatch"))}</span>
           <strong>${primaryMatch?.matchScore || 92}%</strong>
         </div>
         <div class="shot-row is-active">
           <div>
-            <span class="shot-label">Tender</span>
+            <span class="shot-label">${escapeHtml(t("tender"))}</span>
             <h3>${primaryMatch?.title || "Electrical maintenance for municipal buildings"}</h3>
           </div>
           <strong>${formatISK(primaryMatch?.estimatedValue || 15000000)}</strong>
@@ -5505,70 +6091,70 @@ function renderLanding() {
           </div>
         `).join("")}
         <div class="shot-footer">
-          <span>Deadline risk</span>
-          <strong>${primaryMatch ? daysUntilDeadline(primaryMatch.deadline) : 18} days left</strong>
+          <span>${escapeHtml(t("deadlineRisk"))}</span>
+          <strong>${escapeHtml(t("daysLeft", { count: primaryMatch ? daysUntilDeadline(primaryMatch.deadline) : 18 }))}</strong>
         </div>
       </div>
     </section>
 
     <section class="problem-section">
       <div class="section-copy">
-        <p class="eyebrow">The problem</p>
-        <h2>You are not losing bids. You are losing the week before the bid.</h2>
+        <p class="eyebrow">${escapeHtml(t("problemEyebrow"))}</p>
+        <h2>${escapeHtml(t("problemTitle"))}</h2>
       </div>
       <div class="problem-table">
         <div class="problem-row">
           <span>01</span>
-          <h3>Deadlines show up after your crew is already booked.</h3>
-          <p>A 14-day response window becomes a weekend scramble, or a 15M kr maintenance contract never gets priced.</p>
+          <h3>${escapeHtml(t("problemOneTitle"))}</h3>
+          <p>${escapeHtml(t("problemOneText"))}</p>
         </div>
         <div class="problem-row">
           <span>02</span>
-          <h3>The search takes longer than the go/no-go call.</h3>
-          <p>Owners burn 3-5 hours opening low-fit tenders instead of seeing value, location, requirements and match reasons in one view.</p>
+          <h3>${escapeHtml(t("problemTwoTitle"))}</h3>
+          <p>${escapeHtml(t("problemTwoText"))}</p>
         </div>
       </div>
     </section>
 
     <section id="how-it-works" class="section section-grid reversed how-it-works-section">
       <div class="feature-grid">
-        <div class="feature-card"><h3>1. Create profile</h3><p>Tell VerkRadar your services, locations, keywords and project size.</p></div>
-        <div class="feature-card"><h3>2. Match projects</h3><p>The system scores each opportunity against your business profile.</p></div>
-        <div class="feature-card"><h3>3. Get report</h3><p>Receive a clear weekly report with deadlines and next steps.</p></div>
+        <div class="feature-card"><h3>${escapeHtml(t("createProfileStep"))}</h3><p>${escapeHtml(t("createProfileStepText"))}</p></div>
+        <div class="feature-card"><h3>${escapeHtml(t("matchProjectsStep"))}</h3><p>${escapeHtml(t("matchProjectsStepText"))}</p></div>
+        <div class="feature-card"><h3>${escapeHtml(t("getReportStep"))}</h3><p>${escapeHtml(t("getReportStepText"))}</p></div>
       </div>
       <div class="section-copy">
-        <p class="eyebrow">The solution</p>
-        <h2>One clear report instead of scattered searching.</h2>
-        <p>VerkRadar turns tender noise into a ranked list of opportunities your business should actually check.</p>
+        <p class="eyebrow">${escapeHtml(t("solutionEyebrow"))}</p>
+        <h2>${escapeHtml(t("solutionTitle"))}</h2>
+        <p>${escapeHtml(t("solutionText"))}</p>
       </div>
     </section>
 
     <section id="sample-report" class="section sample-report-section public-sample-report-page">
       <div class="section-copy">
-        <p class="eyebrow">Sample report</p>
-        <h2>A weekly shortlist your team can act on.</h2>
-        <p>Preview how VerkRadar packages matched opportunities, deadline risk and next steps without requiring a login.</p>
+        <p class="eyebrow">${escapeHtml(t("sampleReportEyebrow"))}</p>
+        <h2>${escapeHtml(t("sampleReportTitle"))}</h2>
+        <p>${escapeHtml(t("sampleReportText"))}</p>
       </div>
       <div class="public-report-preview">
         <div class="report-topbar">
-          <span>Weekly Opportunity Report</span>
+          <span>${escapeHtml(t("reportTitle"))}</span>
           <span>RafFix ehf.</span>
         </div>
         <article class="report-item">
           <h3>Electrical maintenance for municipal buildings</h3>
-          <p><strong>Buyer:</strong> Reykjavík Municipality</p>
-          <p><strong>Deadline:</strong> 18 days left · <strong>Match:</strong> 92/100</p>
+          <p><strong>${escapeHtml(t("buyer"))}:</strong> Reykjavík Municipality</p>
+          <p><strong>${escapeHtml(t("deadline"))}:</strong> ${escapeHtml(t("daysLeft", { count: 18 }))} · <strong>${escapeHtml(t("possibleMatch"))}:</strong> 92/100</p>
           <ul>
             <li>Matches electrical installation and maintenance services.</li>
             <li>Located in selected Icelandic service area.</li>
             <li>Project value is inside the preferred range.</li>
           </ul>
-          <p><strong>Next step:</strong> Open source documents and confirm mandatory certifications.</p>
+          <p><strong>${escapeHtml(t("openSource"))}:</strong> ${state.language === "is" ? "Opnið frumgögn og staðfestið skyldukröfur." : "Open source documents and confirm mandatory certifications."}</p>
         </article>
         <article class="report-item">
           <h3>EV charger upgrade for public facilities</h3>
-          <p><strong>Buyer:</strong> Regional facilities office</p>
-          <p><strong>Deadline:</strong> 24 days left · <strong>Match:</strong> 81/100</p>
+          <p><strong>${escapeHtml(t("buyer"))}:</strong> Regional facilities office</p>
+          <p><strong>${escapeHtml(t("deadline"))}:</strong> ${escapeHtml(t("daysLeft", { count: 24 }))} · <strong>${escapeHtml(t("possibleMatch"))}:</strong> 81/100</p>
           <ul>
             <li>Mentions EV charging and inspection keywords.</li>
             <li>Unknown value, but allowed by the company profile.</li>
@@ -5578,9 +6164,9 @@ function renderLanding() {
     </section>
 
     <section class="cta-panel">
-      <h2>Try the demo dashboard now.</h2>
-      <p>Load a sample electrical company profile and see how the matching works.</p>
-      <button class="btn btn-primary" data-action="load-demo">Load demo company</button>
+      <h2>${escapeHtml(t("tryDemoTitle"))}</h2>
+      <p>${escapeHtml(t("tryDemoText"))}</p>
+      <button class="btn btn-primary" data-action="load-demo">${escapeHtml(t("loadDemoCompany"))}</button>
     </section>
   `);
 }
@@ -5591,9 +6177,9 @@ function renderOnboarding() {
   initializeProfileDraft();
   return renderShell(`
     <section class="page-head">
-      <p class="eyebrow">Onboarding</p>
-      <h1>Create your company profile</h1>
-      <p>This is what the matching system uses to find relevant opportunities.</p>
+      <p class="eyebrow">${escapeHtml(t("onboarding"))}</p>
+      <h1>${escapeHtml(t("onboardingTitle"))}</h1>
+      <p>${escapeHtml(t("onboardingText"))}</p>
     </section>
 
     ${renderProfileForm()}
@@ -5619,12 +6205,12 @@ function renderProfileBasicsSection() {
   const selectedIndustry = p.industry || "";
   return `
     <div class="form-section">
-      <h2>1. Company basics</h2>
+      <h2>${escapeHtml(t("companyBasics"))}</h2>
       <div class="form-grid">
-        <label>Company name<input name="companyName" data-profile-field="companyName" value="${escapeHtml(p.companyName || "")}" required /></label>
-        <label>Contact email<input name="contactEmail" type="email" data-profile-field="contactEmail" value="${escapeHtml(p.contactEmail || "")}" required /></label>
-        <label>Website<input name="website" data-profile-field="website" value="${escapeHtml(p.website || "")}" /></label>
-        <label class="custom-select-field">Industry
+        <label>${escapeHtml(t("companyName"))}<input name="companyName" data-profile-field="companyName" value="${escapeHtml(p.companyName || "")}" required /></label>
+        <label>${escapeHtml(t("contactEmail"))}<input name="contactEmail" type="email" data-profile-field="contactEmail" value="${escapeHtml(p.contactEmail || "")}" required /></label>
+        <label>${escapeHtml(t("website"))}<input name="website" data-profile-field="website" value="${escapeHtml(p.website || "")}" /></label>
+        <label class="custom-select-field">${escapeHtml(t("industry"))}
           <input id="industry-input" type="hidden" name="industry" value="${escapeHtml(selectedIndustry)}" required />
           ${renderCustomDropdown({
             key: "industry",
@@ -5645,31 +6231,31 @@ function renderProfileServicesSection() {
   const keywordSuggestions = getProfileSuggestions("includeKeywords", selectedIndustry);
   return `
     <div class="form-section">
-      <h2>2. Services and keywords</h2>
-      <p class="form-section-hint">Start with the services you would actually want to bid on.</p>
-      <label>What services do you offer? Choose suggestions or type your own, separated by commas.
+      <h2>${escapeHtml(t("servicesAndKeywords"))}</h2>
+      <p class="form-section-hint">${escapeHtml(t("servicesHint"))}</p>
+      <label>${escapeHtml(t("servicesLabel"))}
         <textarea name="services" data-profile-field="services" data-profile-array="true" rows="3">${escapeHtml(arrayFieldText(p.services))}</textarea>
       </label>
-      <p class="field-helper">Add the services your company actually sells. More specific services create better matches.</p>
+      <p class="field-helper">${escapeHtml(t("servicesHelper"))}</p>
       ${renderSuggestionChips({
         field: "services",
-        title: selectedIndustry ? `Suggested services for ${selectedIndustry}` : "Select an industry to see service suggestions",
+        title: selectedIndustry ? t("suggestedServicesFor", { industry: selectedIndustry }) : t("selectIndustryForServices"),
         values: serviceSuggestions,
         selectedValues: p.services || []
       })}
       <div class="form-grid keyword-grid">
-        <label class="profile-keyword-field">Extra words VerkRadar should look for in notices.
+        <label class="profile-keyword-field">${escapeHtml(t("extraWords"))}
           <input name="includeKeywords" data-profile-field="includeKeywords" data-profile-array="true" value="${escapeHtml(arrayFieldText(p.includeKeywords))}" />
-          <span class="field-helper inline-helper">Use words that often appear in opportunities you want.</span>
+          <span class="field-helper inline-helper">${escapeHtml(t("includeKeywordsHelper"))}</span>
         </label>
-        <label class="profile-keyword-field">Words that should lower or remove bad matches.
+        <label class="profile-keyword-field">${escapeHtml(t("excludeWords"))}
           <input name="excludeKeywords" data-profile-field="excludeKeywords" data-profile-array="true" value="${escapeHtml(arrayFieldText(p.excludeKeywords))}" />
-          <span class="field-helper inline-helper">Words that should lower or remove bad matches.</span>
+          <span class="field-helper inline-helper">${escapeHtml(t("excludeKeywordsHelper"))}</span>
         </label>
       </div>
       ${renderSuggestionChips({
         field: "includeKeywords",
-        title: selectedIndustry ? `Suggested keywords for ${selectedIndustry}` : "Select an industry to see keyword suggestions",
+        title: selectedIndustry ? t("suggestedKeywordsFor", { industry: selectedIndustry }) : t("selectIndustryForKeywords"),
         values: keywordSuggestions,
         selectedValues: p.includeKeywords || []
       })}
@@ -5682,31 +6268,31 @@ function renderProfileLocationsSection() {
   const locationOptions = ["Reykjavík", "Capital Area", "Suðurnes", "South Iceland", "West Iceland", "North Iceland", "East Iceland", "Westfjords", "All Iceland", "Remote / Online"];
   return `
     <div class="form-section">
-      <h2>3. Locations</h2>
-      <p class="form-section-hint">Use All Iceland for national tenders. Use travel settings when you can bid outside your base area for the right project size.</p>
+      <h2>${escapeHtml(t("locationsTitle"))}</h2>
+      <p class="form-section-hint">${escapeHtml(t("locationsHint"))}</p>
       <div class="form-grid">
-        <label>Base location
-          <input name="baseLocation" data-profile-field="baseLocation" value="${escapeHtml(p.baseLocation || "")}" placeholder="Example: East Iceland" />
+        <label>${escapeHtml(t("baseLocation"))}
+          <input name="baseLocation" data-profile-field="baseLocation" value="${escapeHtml(p.baseLocation || "")}" placeholder="${escapeHtml(t("baseLocationPlaceholder"))}" />
         </label>
-        <label>Service areas, comma separated
-          <input name="serviceAreas" data-profile-field="serviceAreas" data-profile-array="true" value="${escapeHtml(arrayFieldText(p.serviceAreas))}" placeholder="Example: East Iceland, All Iceland" />
+        <label>${escapeHtml(t("serviceAreas"))}
+          <input name="serviceAreas" data-profile-field="serviceAreas" data-profile-array="true" value="${escapeHtml(arrayFieldText(p.serviceAreas))}" placeholder="${escapeHtml(t("serviceAreasPlaceholder"))}" />
         </label>
       </div>
       <div class="checkbox-grid">
         ${locationOptions.map((loc) => `
           <label class="checkbox">
             <input type="checkbox" name="locations" value="${loc}" data-profile-location ${(p.locations || []).includes(loc) ? "checked" : ""} />
-            <span>${loc}</span>
+            <span>${escapeHtml(formatCustomerLocation(loc))}</span>
           </label>
         `).join("")}
       </div>
       <div class="profile-travel-panel">
-        <h3>Travel and scope</h3>
+        <h3>${escapeHtml(t("travelScope"))}</h3>
         <div class="profile-travel-grid">
-          <label class="checkbox inline"><input type="checkbox" name="willingToTravel" data-profile-field="willingToTravel" ${p.willingToTravel ? "checked" : ""} /><span>Willing to travel for the right project</span></label>
-          <label class="checkbox inline"><input type="checkbox" name="nationalProjects" data-profile-field="nationalProjects" ${p.nationalProjects ? "checked" : ""} /><span>Include national / All Iceland opportunities</span></label>
-          <label class="checkbox inline"><input type="checkbox" name="remoteProjects" data-profile-field="remoteProjects" ${p.remoteProjects ? "checked" : ""} /><span>Include remote / online opportunities</span></label>
-          <label>Minimum project value for travel
+          <label class="checkbox inline"><input type="checkbox" name="willingToTravel" data-profile-field="willingToTravel" ${p.willingToTravel ? "checked" : ""} /><span>${escapeHtml(t("willingToTravel"))}</span></label>
+          <label class="checkbox inline"><input type="checkbox" name="nationalProjects" data-profile-field="nationalProjects" ${p.nationalProjects ? "checked" : ""} /><span>${escapeHtml(t("includeNational"))}</span></label>
+          <label class="checkbox inline"><input type="checkbox" name="remoteProjects" data-profile-field="remoteProjects" ${p.remoteProjects ? "checked" : ""} /><span>${escapeHtml(t("includeRemote"))}</span></label>
+          <label>${escapeHtml(t("minimumTravelValue"))}
             <input name="minimumProjectValueForTravel" type="number" data-profile-field="minimumProjectValueForTravel" data-profile-number="true" value="${p.minimumProjectValueForTravel || ""}" />
           </label>
         </div>
@@ -5719,14 +6305,14 @@ function renderProfileValueSection() {
   const p = state.profileDraft || getEmptyProfile();
   return `
     <div class="form-section">
-      <h2>4. Project size</h2>
+      <h2>${escapeHtml(t("projectSize"))}</h2>
       <div class="form-grid">
-        <label>Minimum value<input name="minProjectValue" type="number" data-profile-field="minProjectValue" data-profile-number="true" value="${p.minProjectValue || ""}" /></label>
-        <label>Maximum value<input name="maxProjectValue" type="number" data-profile-field="maxProjectValue" data-profile-number="true" value="${p.maxProjectValue || ""}" /></label>
+        <label>${escapeHtml(t("minimumValue"))}<input name="minProjectValue" type="number" data-profile-field="minProjectValue" data-profile-number="true" value="${p.minProjectValue || ""}" /></label>
+        <label>${escapeHtml(t("maximumValue"))}<input name="maxProjectValue" type="number" data-profile-field="maxProjectValue" data-profile-number="true" value="${p.maxProjectValue || ""}" /></label>
       </div>
       <label class="checkbox inline">
         <input type="checkbox" name="allowUnknownValue" data-profile-field="allowUnknownValue" ${p.allowUnknownValue ? "checked" : ""} />
-        <span>Show opportunities even if value is unknown</span>
+        <span>${escapeHtml(t("showUnknownValue"))}</span>
       </label>
     </div>
   `;
@@ -5736,22 +6322,22 @@ function renderProfileReportsSection() {
   const p = state.profileDraft || getEmptyProfile();
   return `
     <div class="form-section">
-      <h2>5. Report preferences</h2>
+      <h2>${escapeHtml(t("reportPreferences"))}</h2>
       <div class="form-grid">
-        <label>Frequency
+        <label>${escapeHtml(t("frequency"))}
           <select name="reportFrequency" data-profile-field="reportFrequency">
-            <option ${p.reportFrequency === "weekly" ? "selected" : ""} value="weekly">Weekly</option>
-            <option ${p.reportFrequency === "daily" ? "selected" : ""} value="daily">Daily</option>
+            <option ${p.reportFrequency === "weekly" ? "selected" : ""} value="weekly">${escapeHtml(t("weekly"))}</option>
+            <option ${p.reportFrequency === "daily" ? "selected" : ""} value="daily">${escapeHtml(t("daily"))}</option>
           </select>
         </label>
-        <label>Report day
+        <label>${escapeHtml(t("reportDay"))}
           <select name="reportDay" data-profile-field="reportDay">
             ${["monday", "tuesday", "wednesday", "thursday", "friday"].map((x) => `<option ${p.reportDay === x ? "selected" : ""} value="${x}">${capitalize(x)}</option>`).join("")}
           </select>
         </label>
       </div>
-      <label class="checkbox inline"><input type="checkbox" name="deadlineReminders" data-profile-field="deadlineReminders" ${p.deadlineReminders ? "checked" : ""} /><span>Deadline reminders</span></label>
-      <label class="checkbox inline"><input type="checkbox" name="includeLowConfidence" data-profile-field="includeLowConfidence" ${p.includeLowConfidence ? "checked" : ""} /><span>Include low-confidence matches</span></label>
+      <label class="checkbox inline"><input type="checkbox" name="deadlineReminders" data-profile-field="deadlineReminders" ${p.deadlineReminders ? "checked" : ""} /><span>${escapeHtml(t("deadlineReminders"))}</span></label>
+      <label class="checkbox inline"><input type="checkbox" name="includeLowConfidence" data-profile-field="includeLowConfidence" ${p.includeLowConfidence ? "checked" : ""} /><span>${escapeHtml(t("includeLowConfidence"))}</span></label>
     </div>
   `;
 }
@@ -5764,7 +6350,7 @@ function renderProfileFormActions() {
         class="btn btn-primary btn-large"
         ${state.isSavingProfile ? "disabled" : ""}
       >
-        ${state.isSavingProfile ? "Saving..." : state.profileSaved ? "Saved" : "Save profile"}
+        ${state.isSavingProfile ? escapeHtml(t("saving")) : state.profileSaved ? escapeHtml(t("saved")) : escapeHtml(t("saveProfile"))}
       </button>
     </div>
     ${state.profileSaveMessage ? `
@@ -5799,33 +6385,34 @@ function getFilterOptions(key) {
 
   if (key === "label") {
     return [
-      { value: "strong", label: "Strong only" },
-      { value: "recommended", label: "Recommended" },
-      { value: "all", label: "All matches" },
-      { value: "all_opportunities", label: "All opportunities" },
-      { value: "needs_review", label: "Needs review" },
-      { value: "possible", label: "Possible matches" },
-      ...["Good match", "Weak match"].map((value) => ({ value, label: value }))
+      { value: "strong", label: state.language === "is" ? "Aðeins sterkar" : "Strong only" },
+      { value: "recommended", label: state.language === "is" ? "Mælt með" : "Recommended" },
+      { value: "all", label: state.language === "is" ? "Allar samsvaranir" : "All matches" },
+      { value: "all_opportunities", label: state.language === "is" ? "Öll tækifæri" : "All opportunities" },
+      { value: "needs_review", label: t("needsReview") },
+      { value: "possible", label: state.language === "is" ? "Mögulegar samsvaranir" : "Possible matches" },
+      { value: "Good match", label: t("goodMatch") },
+      { value: "Weak match", label: t("weakMatch") }
     ];
   }
 
   if (key === "category") {
     return [
-      { value: "all", label: "All categories" },
+      { value: "all", label: state.language === "is" ? "Allir flokkar" : "All categories" },
       ...categories().map((value) => ({ value, label: value }))
     ];
   }
 
   if (key === "location") {
     return [
-      { value: "all", label: "All locations" },
-      ...locations().map((value) => ({ value, label: value }))
+      { value: "all", label: state.language === "is" ? "Öll svæði" : "All locations" },
+      ...locations().map((value) => ({ value, label: formatCustomerLocation(value) }))
     ];
   }
 
   if (key === "type") {
     return [
-      { value: "all", label: "All types" },
+      { value: "all", label: state.language === "is" ? "Allar tegundir" : "All types" },
       ...types().map((value) => ({ value, label: capitalize(value.replace("-", " ")) }))
     ];
   }
@@ -5928,8 +6515,8 @@ function renderDashboard() {
 
   if (!state.profile) {
     return requireProfilePage(
-      "Create a profile first",
-      "The dashboard needs a company profile so it can calculate opportunity matches."
+      state.language === "is" ? "Stofnaðu prófíl fyrst" : "Create a profile first",
+      state.language === "is" ? "Mælaborðið þarf fyrirtækjaprófíl til að reikna samsvaranir." : "The dashboard needs a company profile so it can calculate opportunity matches."
     );
   }
 
@@ -5952,21 +6539,21 @@ function renderDashboard() {
     companyName: state.profile.companyName,
   });
   const matchRefreshText = state.lastMatchedAt
-    ? `Last refreshed ${formatDateTime(state.lastMatchedAt)}.`
-    : "Matches refresh automatically after profile saves.";
+    ? t("matchesLastRefreshed", { time: formatDateTime(state.lastMatchedAt) })
+    : t("matchesAutoRefresh");
 
   return renderShell(`
     <section class="dashboard-head">
       <div>
-        <p class="eyebrow">Dashboard</p>
-        <h1>Welcome, ${escapeHtml(state.profile.companyName)}</h1>
-        <p>Ranked project opportunities based on your services, locations and keywords. ${matchRefreshText}</p>
+        <p class="eyebrow">${escapeHtml(t("dashboard"))}</p>
+        <h1>${escapeHtml(t("welcomeCompany", { company: state.profile.companyName }))}</h1>
+        <p>${escapeHtml(t("dashboardIntro", { refresh: matchRefreshText }))}</p>
       </div>
       <div class="dashboard-actions">
         <button class="btn btn-primary" data-action="run-matching" ${state.matchingLoading ? "disabled" : ""}>
-          ${state.matchingLoading ? "Refreshing..." : "Refresh matches"}
+          ${state.matchingLoading ? escapeHtml(t("refreshing")) : escapeHtml(t("refreshMatches"))}
         </button>
-        <button class="btn btn-secondary" data-action="go" data-href="/report">View weekly report</button>
+        <button class="btn btn-secondary" data-action="go" data-href="/report">${escapeHtml(t("viewWeeklyReport"))}</button>
       </div>
     </section>
 
@@ -5983,19 +6570,19 @@ function renderDashboard() {
     ` : ""}
 
     <section class="stats-grid">
-      <div class="stat-card"><span>Strong matches</span><strong>${strong}</strong></div>
-      <div class="stat-card"><span>Closing soon</span><strong>${closingSoon}</strong></div>
-      <div class="stat-card"><span>Saved</span><strong>${savedCount}</strong></div>
-      <div class="stat-card"><span>Total potential value</span><strong>${formatISK(totalValue)}</strong></div>
+      <div class="stat-card"><span>${escapeHtml(t("strongMatches"))}</span><strong>${strong}</strong></div>
+      <div class="stat-card"><span>${escapeHtml(t("closingSoon"))}</span><strong>${closingSoon}</strong></div>
+      <div class="stat-card"><span>${escapeHtml(t("savedLabel"))}</span><strong>${savedCount}</strong></div>
+      <div class="stat-card"><span>${escapeHtml(t("totalPotentialValue"))}</span><strong>${formatISK(totalValue)}</strong></div>
     </section>
 
     <section class="filters">
-      <input data-filter="search" value="${escapeHtml(state.filters.search)}" placeholder="Search opportunities..." />
+      <input data-filter="search" value="${escapeHtml(state.filters.search)}" placeholder="${escapeHtml(t("searchOpportunities"))}" />
       ${renderFilterDropdown("label")}
       ${renderFilterDropdown("category")}
       ${renderFilterDropdown("location")}
       ${renderFilterDropdown("type")}
-      <label class="checkbox compact"><input type="checkbox" data-filter="savedOnly" ${state.filters.savedOnly ? "checked" : ""}/><span>Saved only</span></label>
+      <label class="checkbox compact"><input type="checkbox" data-filter="savedOnly" ${state.filters.savedOnly ? "checked" : ""}/><span>${escapeHtml(t("savedOnly"))}</span></label>
     </section>
 
     <div class="note-panel dashboard-filter-summary">
@@ -6027,29 +6614,47 @@ function getDashboardProfileSuggestions(profile) {
   });
 
   if (!hasAllIceland) {
-    suggestions.push("Add All Iceland to catch national tenders and framework agreements.");
+    suggestions.push(state.language === "is" ? "Bætið við Allt landið til að ná landsdekkandi útboðum og rammasamningum." : "Add All Iceland to catch national tenders and framework agreements.");
   }
   if (!profile?.nationalProjects) {
-    suggestions.push("Enable national projects so All Iceland opportunities appear as possible matches.");
+    suggestions.push(state.language === "is" ? "Kveikið á landsdekkandi verkefnum svo slík tækifæri birtist sem mögulegar samsvaranir." : "Enable national projects so All Iceland opportunities appear as possible matches.");
   }
   if (services.length < 5) {
-    suggestions.push("Add more specific services so VerkRadar can recognize notices that fit your work.");
+    suggestions.push(state.language === "is" ? "Bætið við nákvæmari þjónustu svo VerkRadar þekki betur útboð sem passa við ykkar vinnu." : "Add more specific services so VerkRadar can recognize notices that fit your work.");
   }
   if (excludesReykjavik) {
-    suggestions.push("Review exclude keywords for Reykjavík or Capital Area. They may hide tenders that companies outside Reykjavík can still bid on.");
+    suggestions.push(state.language === "is" ? "Yfirfarið útilokunarorð fyrir Reykjavík eða höfuðborgarsvæðið. Þau geta falið útboð sem fyrirtæki utan svæðisins geta samt boðið í." : "Review exclude keywords for Reykjavík or Capital Area. They may hide tenders that companies outside Reykjavík can still bid on.");
   }
   if (includeKeywords.length < 4) {
-    suggestions.push("Add more include keywords, including Icelandic terms buyers may use in notices.");
+    suggestions.push(state.language === "is" ? "Bætið við fleiri leitarorðum, sérstaklega íslenskum hugtökum sem kaupendur nota í útboðum." : "Add more include keywords, including Icelandic terms buyers may use in notices.");
   }
 
   if (!suggestions.length) {
-    suggestions.push("Review services, locations and keywords to make sure they describe the work you actually want to bid on.");
+    suggestions.push(state.language === "is" ? "Yfirfarið þjónustu, svæði og leitarorð svo þau lýsi verkefnunum sem þið viljið raunverulega bjóða í." : "Review services, locations and keywords to make sure they describe the work you actually want to bid on.");
   }
 
   return suggestions;
 }
 
 function getDashboardEmptyCopy(filter, context = {}) {
+  if (state.language === "is") {
+    if (filter === "all") {
+      return { eyebrow: "Engar samsvaranir", title: "Engar vistaðar samsvaranir enn.", body: "Uppfærið samsvaranir eða víkkið prófílinn til að búa til vistaðar samsvaranir." };
+    }
+    if (filter === "all_opportunities") {
+      return { eyebrow: "Engin tækifæri", title: "Engin tiltæk tækifæri enn.", body: "Flytjið inn fleiri heimildir eða skoðið heimildayfirlit í Admin." };
+    }
+    if (filter === "needs_review") {
+      return { eyebrow: "Ekkert þarf staðfestingu", title: "Engin tækifæri þarfnast staðfestingar núna.", body: "Tækifæri úr breiðum heimildum sem þarf að yfirfara birtast hér." };
+    }
+    if (filter === "strong") {
+      return { eyebrow: "Engar sterkar samsvaranir", title: "Engar sterkar samsvaranir enn.", body: "Þið gætuð samt átt gagnlegar mögulegar samsvaranir. Prófið Mælt með eða Allar samsvaranir." };
+    }
+    if (filter === "possible" || filter === "Possible match" || filter === "Weak match") {
+      return { eyebrow: "Engar mögulegar samsvaranir", title: "Engar mögulegar samsvaranir enn.", body: "Prófið að víkka þjónustu, svæði eða leitarorð til að finna óvissari tækifæri." };
+    }
+    return { eyebrow: "Engar ráðlagðar samsvaranir", title: getRecommendedEmptyTitle(context), body: getRecommendedEmptyBody(context) };
+  }
   if (filter === "all") {
     return {
       eyebrow: "No matches",
@@ -6093,10 +6698,12 @@ function getDashboardEmptyCopy(filter, context = {}) {
 }
 
 function getRecommendedEmptyTitle(context = {}) {
-  const companyName = context.companyName || "this profile";
+  const companyName = context.companyName || (state.language === "is" ? "þennan prófíl" : "this profile");
   if (Number(context.strongCount || 0) > 0) {
+    if (state.language === "is") return `${context.strongCount} sterkar samsvaranir eru faldar af síum.`;
     return `${context.strongCount} strong ${Number(context.strongCount) === 1 ? "match is" : "matches are"} hidden by filters.`;
   }
+  if (state.language === "is") return `Engar ráðlagðar samsvaranir fyrir ${companyName} enn.`;
   return `No recommended matches for ${companyName} yet.`;
 }
 
@@ -6105,11 +6712,14 @@ function getRecommendedEmptyBody(context = {}) {
   const filteredStoredCount = Number(context.filteredStoredCount || 0);
   const availableCount = Number(context.availableCount || 0);
   if (strongCount > 0) {
+    if (state.language === "is") return "Hreinsið leit/flokka/svæðissíur eða slökkvið á Aðeins vistað til að sjá sterku samsvaranirnar.";
     return "Clear search/category/location filters or turn off Saved only to see the strong matches.";
   }
   if (filteredStoredCount > 0) {
+    if (state.language === "is") return `${filteredStoredCount} vistaðar samsvaranir eru til, en faldar af gæðasíum. Notið Allar samsvaranir eða Þarfnast staðfestingar til að skoða þær.`;
     return `${filteredStoredCount} stored ${filteredStoredCount === 1 ? "match is" : "matches are"} available, but hidden from Recommended by quality checks. Use All matches or Needs review to inspect them.`;
   }
+  if (state.language === "is") return `${availableCount} tækifæri eru til í kerfinu, en ekkert passar nógu sterkt við þennan prófíl.`;
   return `${availableCount} opportunities are available in the system, but none match this profile strongly enough.`;
 }
 
@@ -6130,10 +6740,10 @@ function renderDashboardEmptyState(profile, filter = state.filters.label, contex
         ${suggestions.map((suggestion) => `<li>${escapeHtml(suggestion)}</li>`).join("")}
       </ul>
       <div class="dashboard-empty-actions">
-        <button class="btn btn-primary" type="button" data-action="go" data-href="/settings">Improve profile</button>
-        <button class="btn btn-secondary" type="button" data-action="include-national-opportunities">Include national opportunities</button>
-        <button class="btn btn-secondary" type="button" data-action="show-all-matches">Show all stored matches</button>
-        <button class="btn btn-secondary" type="button" data-action="show-all-opportunities">Inspect all opportunities</button>
+        <button class="btn btn-primary" type="button" data-action="go" data-href="/settings">${escapeHtml(t("improveProfile"))}</button>
+        <button class="btn btn-secondary" type="button" data-action="include-national-opportunities">${escapeHtml(t("includeNationalOpportunities"))}</button>
+        <button class="btn btn-secondary" type="button" data-action="show-all-matches">${escapeHtml(t("showAllStoredMatches"))}</button>
+        <button class="btn btn-secondary" type="button" data-action="show-all-opportunities">${escapeHtml(t("inspectAllOpportunities"))}</button>
       </div>
     </div>
   `;
@@ -6151,26 +6761,26 @@ function renderOpportunityCard(opp) {
             <span class="source-pill source-badge">${escapeHtml(opp.source)}</span>
             ${renderQualityBadge(opp)}
             ${renderExtractedArticleBadge(opp)}
-            ${isTedOpportunity(opp) ? `<span class="source-pill source-badge muted-badge">Original language</span>` : ""}
+            ${isTedOpportunity(opp) ? `<span class="source-pill source-badge muted-badge">${escapeHtml(t("originalLanguage"))}</span>` : ""}
           </div>
-          <span class="${badgeClass(opp.matchLabel)}">${opp.matchLabel} · ${opp.matchScore}</span>
+          <span class="${badgeClass(opp.matchLabel)}">${escapeHtml(formatReportMatchLabel(opp.matchLabel))} · ${opp.matchScore}</span>
         </div>
         <h3>${escapeHtml(opp.title)}</h3>
         <p>${escapeHtml(opp.description)}</p>
         <div class="meta-row">
-          <span>${escapeHtml(opp.buyer)}</span>
-          <span>${escapeHtml(opp.location)}</span>
+          <span>${escapeHtml(formatReportMetadataValue("buyer", opp.buyer))}</span>
+          <span>${escapeHtml(formatReportMetadataValue("location", opp.location))}</span>
           <span>${formatISK(opp.estimatedValue)}</span>
           <span class="${deadline.className}">${escapeHtml(deadline.label)}</span>
         </div>
         <div class="reason-row">
-          ${opp.matchReasons.slice(0, 3).map((r) => `<span>${escapeHtml(r)}</span>`).join("")}
+          ${opp.matchReasons.slice(0, 3).map((r) => `<span>${escapeHtml(formatReportReason(r))}</span>`).join("")}
         </div>
       </div>
       <div class="opp-actions">
-        <button class="btn btn-secondary" data-action="details" data-id="${opp.id}">Details</button>
-        <button class="btn ${saved ? "btn-primary" : "btn-secondary"}" data-action="save" data-id="${opp.id}">${saved ? "Saved" : "Save"}</button>
-        <button class="btn btn-ghost" data-action="ignore" data-id="${opp.id}">Ignore</button>
+        <button class="btn btn-secondary" data-action="details" data-id="${opp.id}">${escapeHtml(t("details"))}</button>
+        <button class="btn ${saved ? "btn-primary" : "btn-secondary"}" data-action="save" data-id="${opp.id}">${saved ? escapeHtml(t("saved")) : escapeHtml(t("save"))}</button>
+        <button class="btn btn-ghost" data-action="ignore" data-id="${opp.id}">${escapeHtml(t("ignore"))}</button>
       </div>
     </article>
   `;
@@ -6214,13 +6824,13 @@ function getOpportunityQualityLabel(opp) {
 
 function renderQualityBadge(opp) {
   const status = getOpportunityIntent(opp) || normalizeOpportunityQualityStatus(opp.qualityStatus, opp);
-  return `<span class="source-pill source-badge quality-badge ${escapeHtml(status)}">${escapeHtml(getOpportunityQualityLabel(opp))}</span>`;
+  return `<span class="source-pill source-badge quality-badge ${escapeHtml(status)}">${escapeHtml(formatReportQualityLabel(getOpportunityQualityLabel(opp)))}</span>`;
 }
 
 function renderExtractedArticleBadge(opp) {
   if (opp?.rawPayload?.extraction_method !== "vegagerdin_article_project_parser") return "";
   const region = opp.rawPayload?.region ? ` · ${opp.rawPayload.region}` : "";
-  return `<span class="source-pill source-badge muted-badge">Extracted project${escapeHtml(region)}</span>`;
+  return `<span class="source-pill source-badge muted-badge">${escapeHtml(t("extractedProject"))}${escapeHtml(region)}</span>`;
 }
 
 function renderTenderStateBadge(opp) {
@@ -6516,6 +7126,10 @@ function renderAdminCompanyFilters() {
 }
 
 function renderAdminCompanyRow(company) {
+  const actionState = state.adminCompanyActions?.[company.id] || "";
+  const refreshing = actionState === "refresh";
+  const generating = actionState === "report";
+  const busy = Boolean(actionState);
   return `
     <tr>
       <td><strong>${escapeHtml(company.companyName)}</strong><br><span>${escapeHtml(company.contactEmail || "No email")}</span></td>
@@ -6528,9 +7142,9 @@ function renderAdminCompanyRow(company) {
       <td>${company.latestReportDate ? escapeHtml(formatDateTime(company.latestReportDate)) : "No reports"}</td>
       <td>
         <div class="admin-row-actions">
-          <button class="btn btn-secondary btn-small" type="button" data-action="view-admin-company" data-id="${escapeHtml(company.id)}">View details</button>
-          <button class="btn btn-ghost btn-small" type="button" data-action="admin-refresh-company-matches" data-id="${escapeHtml(company.id)}">Refresh matches</button>
-          <button class="btn btn-ghost btn-small" type="button" data-action="admin-generate-company-report" data-id="${escapeHtml(company.id)}">Generate report</button>
+          <button class="btn btn-secondary btn-small" type="button" data-action="view-admin-company" data-id="${escapeHtml(company.id)}" ${busy ? "disabled" : ""}>View details</button>
+          <button class="btn btn-ghost btn-small" type="button" data-action="admin-refresh-company-matches" data-id="${escapeHtml(company.id)}" ${busy ? "disabled" : ""}>${refreshing ? "Refreshing..." : "Refresh matches"}</button>
+          <button class="btn btn-ghost btn-small" type="button" data-action="admin-generate-company-report" data-id="${escapeHtml(company.id)}" ${busy ? "disabled" : ""}>${generating ? "Generating..." : "Generate report"}</button>
         </div>
       </td>
     </tr>
@@ -6723,29 +7337,29 @@ function renderReport() {
   const report = buildReportContent(profile, matches);
   const selectedReport = state.reports.find((item) => item.id === state.selectedReportId);
   const archiveStatus = state.reportArchiveLoading
-    ? "Loading saved reports..."
-    : `${state.reports.length} saved report${state.reports.length === 1 ? "" : "s"}.`;
+    ? t("loadingSavedReports")
+    : state.language === "is" ? `${state.reports.length} vistuð yfirlit.` : `${state.reports.length} saved report${state.reports.length === 1 ? "" : "s"}.`;
   const archiveContent = state.reportArchiveLoading
-    ? `<div class="empty-card">Loading saved reports...</div>`
+    ? `<div class="empty-card">${escapeHtml(t("loadingSavedReports"))}</div>`
     : state.reportsLoadError
       ? `<div class="admin-message is-error">Failed to load reports. ${escapeHtml(state.reportsLoadError)}</div>`
       : state.reportsLoaded && state.reports.length === 0
-        ? `<div class="empty-card">No saved reports yet.</div>`
+        ? `<div class="empty-card">${escapeHtml(t("noSavedReports"))}</div>`
         : state.reports.map(renderReportArchiveRow).join("");
 
   return renderShell(`
     <section class="dashboard-head">
       <div>
-        <p class="eyebrow">Weekly report</p>
-        <h1>Weekly Opportunity Report</h1>
+        <p class="eyebrow">${escapeHtml(t("weeklyReport"))}</p>
+        <h1>${escapeHtml(t("reportTitle"))}</h1>
         <p>${escapeHtml(profile.companyName || "Your company")} · ${escapeHtml(formatReportDateRange(report.periodStart, report.periodEnd))}</p>
       </div>
       <div class="dashboard-actions">
         <button class="btn btn-primary" data-action="save-report" ${state.reportSaveLoading ? "disabled" : ""}>
-          ${state.reportSaveLoading ? "Saving..." : "Save report"}
+          ${state.reportSaveLoading ? escapeHtml(t("savingReport")) : escapeHtml(t("saveReport"))}
         </button>
-        <button class="btn btn-secondary" data-action="download-report-pdf">Download PDF</button>
-        <button class="btn btn-secondary" data-action="copy-report">Copy report</button>
+        <button class="btn btn-secondary" data-action="download-report-pdf">${escapeHtml(t("downloadPdf"))}</button>
+        <button class="btn btn-secondary" data-action="copy-report">${escapeHtml(t("copyReport"))}</button>
       </div>
     </section>
 
@@ -6764,8 +7378,8 @@ function renderReport() {
     <section class="report-archive">
       <div class="card-header">
         <div>
-          <p class="eyebrow">Report archive</p>
-          <h2>Saved reports</h2>
+          <p class="eyebrow">${escapeHtml(t("reportArchive"))}</p>
+          <h2>${escapeHtml(t("savedReports"))}</h2>
           <p>${archiveStatus}</p>
         </div>
       </div>
@@ -6784,7 +7398,7 @@ function renderReportArchiveRow(report) {
         <h3>${escapeHtml(report.title || "Untitled report")}</h3>
         <p>${formatDateTime(report.created_at)} · ${itemCount} item${itemCount === 1 ? "" : "s"} · ${escapeHtml(report.status || "draft")}</p>
       </div>
-      <button class="btn btn-secondary" data-action="view-report" data-id="${escapeHtml(report.id)}">View report</button>
+      <button class="btn btn-secondary" data-action="view-report" data-id="${escapeHtml(report.id)}">${escapeHtml(t("viewReport"))}</button>
     </div>
   `;
 }
@@ -6795,8 +7409,8 @@ function renderReportPreview(report, options = {}) {
     <section class="report-preview"${id}>
       <div class="report-meta-bar">
         <div>
-          <span>Generated by VerkRadar</span>
-          <strong>${escapeHtml(report.title || "Weekly Opportunity Report")}</strong>
+          <span>${escapeHtml(t("generatedBy"))}</span>
+          <strong>${escapeHtml(report.title || t("reportTitle"))}</strong>
         </div>
         <div>
           <span>${escapeHtml(options.companyName || state.profile?.companyName || "Company")}</span>
@@ -6805,7 +7419,7 @@ function renderReportPreview(report, options = {}) {
       </div>
       <div class="report-body">
         ${report.htmlContent}
-        ${options.closeButton ? `<button class="btn btn-secondary report-close-btn" data-action="close-archive-report">Close report</button>` : ""}
+        ${options.closeButton ? `<button class="btn btn-secondary report-close-btn" data-action="close-archive-report">${escapeHtml(t("closeReport"))}</button>` : ""}
       </div>
       ${report.textContent && options.includeTextArea !== false ? `<textarea id="report-text" class="hidden-textarea">${escapeHtml(report.textContent)}</textarea>` : ""}
     </section>
@@ -6817,7 +7431,7 @@ function renderSavedReportPreview(savedReport, profile) {
   const periodEnd = savedReport.period_end || savedReport.created_at?.slice(0, 10) || new Date().toISOString().slice(0, 10);
   const htmlContent = normalizeSavedReportHtml(savedReport);
   return renderReportPreview({
-    title: savedReport.title || "Saved report",
+    title: savedReport.title || "Vistað yfirlit",
     periodStart,
     periodEnd,
     htmlContent,
@@ -6838,14 +7452,14 @@ function normalizeSavedReportHtml(savedReport) {
   const periodEnd = savedReport.period_end || savedReport.created_at?.slice(0, 10) || new Date().toISOString().slice(0, 10);
   const fallbackContent = savedReport.html_content
     ? sanitizeReportHtml(savedReport.html_content)
-    : `<pre>${escapeHtml(savedReport.text_content || "No report content was saved.")}</pre>`;
+    : `<pre>${escapeHtml(savedReport.text_content || "Ekkert efni var vistað fyrir þetta yfirlit.")}</pre>`;
   return `
     <div class="report-cover">
-      <div class="report-kicker">Generated by VerkRadar</div>
-      <p class="eyebrow">Saved weekly report</p>
-      <h2>${escapeHtml(savedReport.title || "Saved report")}</h2>
+      <div class="report-kicker">Útbúið af VerkRadar</div>
+      <p class="eyebrow">Vistað yfirlit</p>
+      <h2>${escapeHtml(savedReport.title || "Vistað yfirlit")}</h2>
       <p>${escapeHtml(formatReportDateRange(periodStart, periodEnd))}</p>
-      <p>${escapeHtml(savedReport.summary || "This older saved report is shown in a modern report container.")}</p>
+      <p>${escapeHtml(savedReport.summary || "Þetta eldra vistaða yfirlit er birt í nýju skýrslusniði.")}</p>
     </div>
     <div class="report-legacy-content">
       ${fallbackContent}
@@ -6906,29 +7520,31 @@ function buildReportContent(profile, matches) {
   const start = new Date(now);
   start.setDate(start.getDate() - 7);
   const periodStart = start.toISOString().slice(0, 10);
-  const title = `Weekly Opportunity Report for ${profile.companyName}`;
+  const title = t("reportForCompany", { company: profile.companyName });
   const sections = getReportSections(matches);
   const coreCount = sections.confirmed.length + sections.early.length;
-  const summary = `${coreCount} relevant tender/quote-request ${coreCount === 1 ? "item" : "items"} found for ${profile.companyName}.`;
+  const summary = state.language === "is"
+    ? `${coreCount} viðeigandi útboðs- eða verðfyrirspurnaratriði fundust fyrir ${profile.companyName}.`
+    : `${coreCount} relevant tender/quote-request ${coreCount === 1 ? "item" : "items"} found for ${profile.companyName}.`;
   const textContent = generateWeeklyReport(profile, matches);
   const htmlContent = `
     <div class="report-cover">
-      <div class="report-kicker">Generated by VerkRadar</div>
-      <p class="eyebrow">Weekly opportunity report</p>
+      <div class="report-kicker">${escapeHtml(t("generatedBy"))}</div>
+      <p class="eyebrow">${escapeHtml(t("reportTitle"))}</p>
       <h2>${escapeHtml(title)}</h2>
       <p>${escapeHtml(formatReportDateRange(periodStart, periodEnd))}</p>
-      <p>${escapeHtml(summary)} ${matches[0] ? `The strongest visible item is ${escapeHtml(matches[0].title)}.` : "No strict report-ready tenders or quote requests were found for this period."}</p>
+      <p>${escapeHtml(summary)} ${matches[0] ? escapeHtml(state.language === "is" ? `Sterkasta sýnilega atriðið er ${matches[0].title}.` : `The strongest visible item is ${matches[0].title}.`) : escapeHtml(state.language === "is" ? "Engin skýr útboð eða verðfyrirspurnir fundust fyrir þetta tímabil." : "No strict report-ready tenders or quote requests were found for this period.")}</p>
     </div>
 
     <div class="report-summary-grid">
-      ${renderReportSummaryCard("Open tenders / quote requests", sections.confirmed.length)}
-      ${renderReportSummaryCard("Possible upcoming opportunities", sections.early.length)}
+      ${renderReportSummaryCard(t("openTenders"), sections.confirmed.length)}
+      ${renderReportSummaryCard(t("upcomingOpportunities"), sections.early.length)}
     </div>
 
-    ${renderReportOpportunitySection("Open tenders / quote requests", "Clear procurement intent. Review source documents and decide whether to pursue.", sections.confirmed)}
-    ${renderReportOpportunitySection("Possible upcoming opportunities", "Upcoming procurement signals with clear tender or quote-request intent.", sections.early)}
+    ${renderReportOpportunitySection(t("openTenders"), t("openTendersDescription"), sections.confirmed)}
+    ${sections.early.length ? renderReportOpportunitySection(t("upcomingOpportunities"), t("upcomingDescription"), sections.early) : ""}
 
-    <p class="report-footer-note">VerkRadar helps prioritise public opportunity review. Always check the original source documents, deadlines, requirements and eligibility before acting.</p>
+    <p class="report-footer-note">${escapeHtml(t("reportFooter"))}</p>
   `;
 
   return {
@@ -6942,7 +7558,35 @@ function buildReportContent(profile, matches) {
 }
 
 function formatReportDateRange(start, end) {
-  return `${formatShortDate(start)} to ${formatShortDate(end)}`;
+  return `${formatCustomerReportDate(start)} – ${formatCustomerReportDate(end)}`;
+}
+
+function formatCustomerReportDate(value) {
+  if (!value) return "Engin dagsetning";
+  const date = new Date(`${String(value).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return String(value);
+  if (state.language === "en") {
+    return new Intl.DateTimeFormat("en-GB", {
+      year: "numeric",
+      month: "short",
+      day: "2-digit"
+    }).format(date);
+  }
+  const months = [
+    "janúar",
+    "febrúar",
+    "mars",
+    "apríl",
+    "maí",
+    "júní",
+    "júlí",
+    "ágúst",
+    "september",
+    "október",
+    "nóvember",
+    "desember"
+  ];
+  return `${date.getDate()}. ${months[date.getMonth()]} ${date.getFullYear()}`;
 }
 
 function getReportSections(matches) {
@@ -7255,50 +7899,139 @@ function renderReportOpportunitySection(title, description, opportunities) {
       </div>
       ${opportunities.length
         ? opportunities.map(renderReportOpportunityItem).join("")
-        : `<div class="report-empty">No ${escapeHtml(title.toLowerCase())} in this report.</div>`}
+        : `<div class="report-empty">${escapeHtml(state.language === "is" ? "Engin atriði í þessum hluta." : "No items in this section.")}</div>`}
     </section>
   `;
 }
 
 function renderReportOpportunityItem(opp) {
-  const deadline = getDeadlineDisplay(opp.deadline);
   const valueKnown = Boolean(opp.estimatedValue);
   const risks = getReportRisks(opp);
-  const deadlineText = opp.deadline ? deadline.label : "Not found";
-  const valueText = valueKnown ? formatISK(opp.estimatedValue) : "Not listed";
+  const deadlineText = opp.deadline ? formatCustomerReportDate(opp.deadline) : t("notFound");
+  const valueText = valueKnown ? formatISK(opp.estimatedValue) : t("notListed");
   const sourceUrl = getSafeExternalUrl(opp.url);
   return `
     <article class="report-item">
       <div class="report-item-top">
         ${renderReportQualityBadge(opp)}
-        <span class="${badgeClass(opp.matchLabel)}">${escapeHtml(opp.matchLabel)} · ${opp.matchScore}</span>
+        <span class="${badgeClass(opp.matchLabel)}">${escapeHtml(formatReportMatchLabel(opp.matchLabel))} · ${opp.matchScore}</span>
       </div>
       <h4>${escapeHtml(opp.title)}</h4>
       <div class="report-facts">
-        <span><strong>Buyer</strong>${escapeHtml(opp.buyer)}</span>
-        <span><strong>Source</strong>${escapeHtml(opp.source)}</span>
-        <span><strong>Location</strong>${escapeHtml(opp.location)}</span>
-        <span><strong>Deadline</strong><em>${escapeHtml(deadlineText)}</em></span>
-        <span><strong>Value</strong><em>${escapeHtml(valueText)}</em></span>
+        <span><strong>${escapeHtml(t("buyer"))}</strong>${escapeHtml(formatReportMetadataValue("buyer", opp.buyer))}</span>
+        <span><strong>${escapeHtml(t("source"))}</strong>${escapeHtml(formatReportMetadataValue("source", opp.source))}</span>
+        <span><strong>${escapeHtml(t("area"))}</strong>${escapeHtml(formatReportMetadataValue("location", opp.location))}</span>
+        <span><strong>${escapeHtml(t("deadline"))}</strong><em>${escapeHtml(deadlineText)}</em></span>
+        <span><strong>${escapeHtml(t("estimatedValue"))}</strong><em>${escapeHtml(valueText)}</em></span>
       </div>
       <div class="report-detail-grid">
         <div>
-          <h5>Why this matters</h5>
-          <ul>${(opp.matchReasons.length ? opp.matchReasons : ["Matched to your profile by service, location or keyword overlap."]).slice(0, 4).map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>
+          <h5>${escapeHtml(t("whyThisMatters"))}</h5>
+          <ul>${(opp.matchReasons.length ? opp.matchReasons : ["Matched to your profile by service, location or keyword overlap."]).slice(0, 4).map((reason) => `<li>${escapeHtml(formatReportReason(reason))}</li>`).join("")}</ul>
         </div>
         <div>
-          <h5>Risks / things to check</h5>
-          <ul>${risks.slice(0, 5).map((risk) => `<li>${escapeHtml(risk)}</li>`).join("")}</ul>
+          <h5>${escapeHtml(t("risksToCheck"))}</h5>
+          <ul>${risks.slice(0, 5).map((risk) => `<li>${escapeHtml(formatReportRisk(risk))}</li>`).join("")}</ul>
         </div>
       </div>
-      ${sourceUrl ? `<a class="report-source-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener">Open source <span aria-hidden="true">↗</span></a>` : `<span class="report-source-link is-disabled">Source link missing</span>`}
+      ${sourceUrl ? `<a class="report-source-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener">${escapeHtml(t("openSource"))} <span aria-hidden="true">↗</span></a>` : `<span class="report-source-link is-disabled">${escapeHtml(t("sourceLinkMissing"))}</span>`}
     </article>
   `;
 }
 
 function renderReportQualityBadge(opp) {
   const status = normalizeOpportunityQualityStatus(opp.qualityStatus, opp);
-  return `<span class="report-quality ${escapeHtml(status)}">${escapeHtml(getOpportunityQualityLabel(opp))}</span>`;
+  return `<span class="report-quality ${escapeHtml(status)}">${escapeHtml(formatReportQualityLabel(getOpportunityQualityLabel(opp)))}</span>`;
+}
+
+function formatReportQualityLabel(label) {
+  const map = {
+    "Confirmed tender": t("confirmedTender"),
+    "Likely opportunity": t("likelyOpportunity"),
+    "Early signal": t("earlySignal"),
+    "Needs review": t("needsReview"),
+    "Tender awarded": t("tenderAwarded"),
+    "Tender already announced": t("tenderAlreadyAnnounced"),
+    "Upcoming tender": t("upcomingTender"),
+    "Project signal": t("projectSignal"),
+    "Original language": t("originalLanguage")
+  };
+  return map[label] || label || "";
+}
+
+function formatReportMatchLabel(label) {
+  const map = {
+    "Strong match": t("strongMatch"),
+    "Good match": t("goodMatch"),
+    "Possible match": t("possibleMatch"),
+    "Weak match": t("weakMatch")
+  };
+  return map[label] || label || "";
+}
+
+function formatReportMetadataValue(type, value) {
+  const text = String(value || "").trim();
+  if (!text) return type === "buyer" ? t("unknownBuyer") : t("notListed");
+  if (type === "buyer" && text.toLowerCase() === "unknown buyer") return t("unknownBuyer");
+  if (type === "location" && text.toLowerCase() === "all iceland") return t("allIceland");
+  if (type === "source") return text.replace(/\bprocurement\b/gi, t("procurement"));
+  return text;
+}
+
+function formatCustomerLocation(value) {
+  const text = String(value || "").trim();
+  if (state.language === "is") {
+    const map = {
+      "Capital Area": "Höfuðborgarsvæðið",
+      "South Iceland": "Suðurland",
+      "West Iceland": "Vesturland",
+      "North Iceland": "Norðurland",
+      "East Iceland": "Austurland",
+      "Westfjords": "Vestfirðir",
+      "All Iceland": t("allIceland"),
+      "Remote / Online": "Fjarvinna / netverkefni"
+    };
+    return map[text] || text;
+  }
+  return text;
+}
+
+function formatReportReason(reason) {
+  const text = String(reason || "");
+  const servicePrefix = "Mentions your service:";
+  const keywordPrefix = "Contains your keyword:";
+  if (text.startsWith(servicePrefix)) {
+    return t("mentionsService", { value: text.slice(servicePrefix.length).trim() });
+  }
+  if (text.startsWith(keywordPrefix)) {
+    return t("containsKeyword", { value: text.slice(keywordPrefix.length).trim() });
+  }
+
+  const map = {
+    "National opportunity": t("nationalOpportunity"),
+    "Local match": t("localMatch"),
+    "Located in your selected region": t("localMatch"),
+    "Project value is inside your preferred range": state.language === "is" ? "Áætlað verðmæti er innan óskaðs bils" : "Project value is inside your preferred range",
+    "Deadline is coming up soon": state.language === "is" ? "Skilafrestur nálgast" : "Deadline is coming up soon",
+    "Matched to your company profile.": state.language === "is" ? "Passar við fyrirtækjaprófílinn." : "Matched to your company profile.",
+    "Matched to your profile by service, location or keyword overlap.": state.language === "is" ? "Passar við þjónustu, svæði eða lykilorð í prófílnum." : "Matched to your profile by service, location or keyword overlap."
+  };
+  return map[text] || text || "";
+}
+
+function formatReportRisk(risk) {
+  const map = {
+    "Deadline not available in feed — verify on source page.": "Skilafrestur fannst ekki í heimild - staðfestið á upprunalegri síðu.",
+    "Deadline not available in source — verify page.": "Skilafrestur fannst ekki í heimild - staðfestið á upprunalegri síðu.",
+    "No formal tender deadline extracted — verify source article.": "Formlegur skilafrestur fannst ekki - staðfestið í heimildargrein.",
+    "Formal tender deadline not found yet — monitor source article.": "Formlegur skilafrestur fannst ekki enn - fylgist með heimildargrein.",
+    "Tender appears already announced/awarded — verify source article.": "Útboð virðist þegar auglýst eða afgreitt - staðfestið í heimildargrein.",
+    "Estimated value is not listed in the imported data.": "Áætlað verðmæti er ekki gefið upp í innfluttum gögnum.",
+    "Open the source page and confirm mandatory requirements.": "Opnið upprunalega heimild og staðfestið skyldukröfur.",
+    "Extracted project signal — verify tender timing in the source article.": "Útdregin verkefnavísbending - staðfestið útboðstímasetningu í heimildargrein.",
+    "Imported from broad feed — verify that this is a real tender or business opportunity.": "Innflutt úr breiðum fréttastraumi - staðfestið að þetta sé raunverulegt útboð eða viðskiptatækifæri."
+  };
+  return map[risk] || risk || "";
 }
 
 function getReportRisks(opp) {
@@ -7321,28 +8054,28 @@ function generateWeeklyReport(profile, matches) {
     ...sections.confirmed,
     ...sections.early,
   ];
-  return `Weekly Opportunity Report for ${profile.companyName}
-Date range: ${formatReportDateRange(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10), new Date().toISOString().slice(0, 10))}
+  return `${t("reportForCompany", { company: profile.companyName })}
+${state.language === "is" ? "Tímabil" : "Date range"}: ${formatReportDateRange(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10), new Date().toISOString().slice(0, 10))}
 
-Summary:
-- Open tenders / quote requests: ${sections.confirmed.length}
-- Possible upcoming opportunities: ${sections.early.length}
+${state.language === "is" ? "Samantekt" : "Summary"}:
+- ${t("openTenders")}: ${sections.confirmed.length}
+- ${t("upcomingOpportunities")}: ${sections.early.length}
 
 ${orderedMatches.length ? orderedMatches.map((opp, i) => `${i + 1}. ${opp.title}
-Quality: ${getOpportunityQualityLabel(opp)}
-Buyer: ${opp.buyer}
-Source: ${opp.source}
-Location: ${opp.location}
-Deadline: ${formatOpportunityDeadlineForReport(opp)}
-Value: ${opp.estimatedValue ? formatISK(opp.estimatedValue) : "Not listed"}
-Match: ${opp.matchScore}/100 (${opp.matchLabel})
-Why this fits:
-${(opp.matchReasons.length ? opp.matchReasons : ["Matched to your company profile."]).map((r) => `- ${r}`).join("\n")}
-Things to check:
-${getReportRisks(opp).map((r) => `- ${r}`).join("\n")}
-Recommended next step:
-${opp.url ? `Open source page: ${opp.url}` : "Find and verify the original source page before acting."}
-`).join("\n") : "No report-ready matches were found for this period."}
+${state.language === "is" ? "Gæði" : "Quality"}: ${formatReportQualityLabel(getOpportunityQualityLabel(opp))}
+${t("buyer")}: ${formatReportMetadataValue("buyer", opp.buyer)}
+${t("source")}: ${formatReportMetadataValue("source", opp.source)}
+${t("area")}: ${formatReportMetadataValue("location", opp.location)}
+${t("deadline")}: ${opp.deadline ? formatCustomerReportDate(opp.deadline) : t("notFound")}
+${t("estimatedValue")}: ${opp.estimatedValue ? formatISK(opp.estimatedValue) : t("notListed")}
+${state.language === "is" ? "Samsvörun" : "Match"}: ${opp.matchScore}/100 (${formatReportMatchLabel(opp.matchLabel)})
+${t("whyThisMatters")}:
+${(opp.matchReasons.length ? opp.matchReasons : ["Matched to your company profile."]).map((r) => `- ${formatReportReason(r)}`).join("\n")}
+${t("risksToCheck")}:
+${getReportRisks(opp).map((r) => `- ${formatReportRisk(r)}`).join("\n")}
+${state.language === "is" ? "Næsta skref" : "Next step"}:
+${opp.url ? `${t("openSource")}: ${opp.url}` : (state.language === "is" ? "Finnið og staðfestið upprunalega heimild áður en brugðist er við." : "Find and verify the original source page before acting.")}
+`).join("\n") : (state.language === "is" ? "Engin skýr útboð eða verðfyrirspurnir fundust fyrir þetta tímabil." : "No report-ready matches were found for this period.")}
 
 VerkRadar`;
 }
@@ -7373,7 +8106,7 @@ function downloadReportPdf() {
   reportClone.querySelectorAll("textarea, .report-close-btn").forEach((node) => node.remove());
   const metaBar = reportClone.querySelector(".report-meta-bar");
   if (metaBar) {
-    const reportTitle = metaBar.querySelector("div:first-child strong")?.textContent?.trim() || "Weekly Opportunity Report";
+    const reportTitle = metaBar.querySelector("div:first-child strong")?.textContent?.trim() || t("reportForCompany", { company: profile.companyName || "Company" });
     const companyName = metaBar.querySelector("div:last-child span")?.textContent?.trim() || profile.companyName || "Company";
     const reportRange = metaBar.querySelector("div:last-child strong")?.textContent?.trim() || "";
     const logoSrc = document.querySelector(".brand-logo")?.src || document.querySelector('link[rel="icon"]')?.href || "";
@@ -7382,9 +8115,9 @@ function downloadReportPdf() {
     const headerText = document.createElement("div");
     headerText.className = "pdf-report-header-text";
     const generated = document.createElement("span");
-    generated.textContent = "Generated by VerkRadar";
+    generated.textContent = t("generatedBy");
     const title = document.createElement("strong");
-    title.textContent = reportTitle || `Weekly Opportunity Report for ${companyName}`;
+    title.textContent = reportTitle || t("reportForCompany", { company: companyName });
     const range = document.createElement("em");
     range.textContent = reportRange;
     headerText.append(generated, title, range);
@@ -7400,17 +8133,7 @@ function downloadReportPdf() {
   }
   const summaryGrid = reportClone.querySelector(".report-summary-grid");
   if (summaryGrid) {
-    const summaryParts = Array.from(summaryGrid.querySelectorAll(".report-summary-card"))
-      .map((card) => {
-        const label = card.querySelector("span")?.textContent?.trim() || "";
-        const value = card.querySelector("strong")?.textContent?.trim() || "0";
-        return label ? `${value} ${label.toLowerCase()}` : "";
-      })
-      .filter(Boolean);
-    const compactSummary = document.createElement("p");
-    compactSummary.className = "pdf-compact-summary";
-    compactSummary.textContent = summaryParts.join(" · ");
-    summaryGrid.replaceWith(compactSummary);
+    summaryGrid.remove();
   }
   const dateRange = reportNode.querySelector(".report-meta-bar div:last-child strong")?.textContent || new Date().toISOString().slice(0, 10);
   const fileName = makeReportPdfFileName(profile.companyName || "company", dateRange);
@@ -7646,10 +8369,10 @@ function renderSettings() {
   if (state.profileLoading && !state.profile && !state.profileDraft) {
     return renderShell(`
       <section class="empty-state">
-        <div class="loader-mark" aria-label="Loading company profile"></div>
-        <h1>Loading company profile…</h1>
-        <p>Checking your saved company profile.</p>
-        <button class="btn btn-secondary" type="button" data-action="retry-settings-profile">Retry</button>
+        <div class="loader-mark" aria-label="${escapeHtml(state.language === "is" ? "Hleð fyrirtækjaprófíl" : "Loading company profile")}"></div>
+        <h1>${escapeHtml(state.language === "is" ? "Hleð fyrirtækjaprófíl..." : "Loading company profile...")}</h1>
+        <p>${escapeHtml(state.language === "is" ? "Sæki vistaðan fyrirtækjaprófíl." : "Checking your saved company profile.")}</p>
+        <button class="btn btn-secondary" type="button" data-action="retry-settings-profile">${escapeHtml(state.language === "is" ? "Reyna aftur" : "Retry")}</button>
       </section>
     `);
   }
@@ -7657,30 +8380,30 @@ function renderSettings() {
   if (state.profileLoadError && !state.profile && !state.profileDraft) {
     return renderShell(`
       <section class="empty-state">
-        <h1>Could not load Settings</h1>
+        <h1>${escapeHtml(state.language === "is" ? "Gat ekki hlaðið stillingum" : "Could not load Settings")}</h1>
         <p>${escapeHtml(state.profileLoadError)}</p>
-        <button class="btn btn-primary" type="button" data-action="retry-settings-profile">Retry</button>
+        <button class="btn btn-primary" type="button" data-action="retry-settings-profile">${escapeHtml(state.language === "is" ? "Reyna aftur" : "Retry")}</button>
       </section>
     `);
   }
 
   if (!state.profile && !state.profileDraft) {
     return requireProfilePage(
-      "Create a profile first",
-      "Settings are available after you create a company profile."
+      state.language === "is" ? "Stofnaðu prófíl fyrst" : "Create a profile first",
+      state.language === "is" ? "Stillingar eru tiltækar eftir að fyrirtækjaprófíll hefur verið stofnaður." : "Settings are available after you create a company profile."
     );
   }
 
   return renderShell(`
     <section class="page-head">
-      <p class="eyebrow">Settings</p>
-      <h1>Edit profile</h1>
-      <p>Update your company profile and matching preferences.</p>
-      ${state.profileDraftDirty ? `<div class="form-message warning">Unsaved changes</div>` : ""}
+      <p class="eyebrow">${escapeHtml(t("navSettings"))}</p>
+      <h1>${escapeHtml(state.language === "is" ? "Breyta prófíl" : "Edit profile")}</h1>
+      <p>${escapeHtml(state.language === "is" ? "Uppfærið fyrirtækjaprófíl og samsvörunarstillingar." : "Update your company profile and matching preferences.")}</p>
+      ${state.profileDraftDirty ? `<div class="form-message warning">${escapeHtml(state.language === "is" ? "Óvistaðar breytingar" : "Unsaved changes")}</div>` : ""}
       ${state.profileLoadError ? `
         <div class="form-message error">
           ${escapeHtml(state.profileLoadError)}
-          <button class="btn btn-secondary" type="button" data-action="retry-settings-profile">Retry</button>
+          <button class="btn btn-secondary" type="button" data-action="retry-settings-profile">${escapeHtml(state.language === "is" ? "Reyna aftur" : "Retry")}</button>
         </div>
       ` : ""}
     </section>
