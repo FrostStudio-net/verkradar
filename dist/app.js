@@ -155,16 +155,16 @@ const translations = {
     matchesAutoRefresh: "Samsvaranir uppfærast sjálfkrafa eftir vistun prófíls.",
     refreshMatches: "Uppfæra samsvaranir",
     refreshing: "Uppfæri...",
-    viewWeeklyReport: "Skoða vikuyfirlit",
+    viewWeeklyReport: "Skoða yfirlit",
     strongMatches: "Sterkar samsvaranir",
-    closingSoon: "Styttist í frest",
+    closingSoon: "Rennur út fljótlega",
     savedLabel: "Vistað",
     totalPotentialValue: "Áætlað heildarverðmæti",
     searchOpportunities: "Leita í tækifærum...",
     savedOnly: "Aðeins vistað",
     improveProfile: "Bæta prófíl",
     includeNationalOpportunities: "Sýna landsdekkandi tækifæri",
-    showAllStoredMatches: "Sýna allar vistaðar samsvaranir",
+    showAllStoredMatches: "Sýna allar samsvaranir",
     inspectAllOpportunities: "Skoða öll tækifæri",
     details: "Nánar",
     save: "Vista",
@@ -172,7 +172,7 @@ const translations = {
     originalLanguage: "Upprunalegt tungumál",
     extractedProject: "Útdregið verkefni",
     reportTitle: "Útboðs- og verkefnayfirlit",
-    weeklyReport: "Vikuyfirlit",
+    weeklyReport: "Yfirlit",
     saveReport: "Vista yfirlit",
     savingReport: "Vista...",
     downloadPdf: "Sækja PDF",
@@ -354,7 +354,7 @@ const translations = {
     matchesAutoRefresh: "Matches refresh automatically after profile saves.",
     refreshMatches: "Refresh matches",
     refreshing: "Refreshing...",
-    viewWeeklyReport: "View weekly report",
+    viewWeeklyReport: "View report",
     strongMatches: "Strong matches",
     closingSoon: "Closing soon",
     savedLabel: "Saved",
@@ -363,7 +363,7 @@ const translations = {
     savedOnly: "Saved only",
     improveProfile: "Improve profile",
     includeNationalOpportunities: "Include national opportunities",
-    showAllStoredMatches: "Show all stored matches",
+    showAllStoredMatches: "Show all matches",
     inspectAllOpportunities: "Inspect all opportunities",
     details: "Details",
     save: "Save",
@@ -371,7 +371,7 @@ const translations = {
     originalLanguage: "Original language",
     extractedProject: "Extracted project",
     reportTitle: "Tender and opportunity report",
-    weeklyReport: "Weekly report",
+    weeklyReport: "Report",
     saveReport: "Save report",
     savingReport: "Saving...",
     downloadPdf: "Download PDF",
@@ -4448,18 +4448,18 @@ function getDashboardFilterSummary({ visibleCount, storedMatchCount, filteredSto
   if (state.language === "is") {
     if (selected === "all_opportunities") return `${availableCount} tækifæri eru til í kerfinu. Sýni ${visibleCount} sýnileg tækifæri til yfirferðar.`;
     if (selected === "needs_review") return `${availableCount} tækifæri eru til í kerfinu. Sýni ${visibleCount} atriði sem þarf að staðfesta.`;
-    if (selected === "all") return `${storedMatchCount} vistaðar samsvaranir fyrir ${companyName}. Sýni ${visibleCount}.`;
-    if (selected === "strong") return `${storedMatchCount} vistaðar samsvaranir fyrir ${companyName}. Sýni ${visibleCount} sterkar samsvaranir.`;
+    if (selected === "all") return `${storedMatchCount} tækifæri fundust sem gætu passað við ${companyName}. Sýni ${visibleCount}.`;
+    if (selected === "strong") return `${storedMatchCount} tækifæri fundust sem gætu passað við ${companyName}. Sýni ${visibleCount} sterkar samsvaranir.`;
     if (selected === "recommended") {
       if (!visibleCount) {
         if (strongCount > 0) return `${strongCount} sterkar samsvaranir eru til fyrir ${companyName}, en þær eru faldar af núverandi síum.`;
-        if (filteredStoredCount > 0) return `${filteredStoredCount} vistaðar samsvaranir eru faldar af gæðasíum. Notið Allar samsvaranir eða Þarfnast staðfestingar til að skoða þær.`;
+        if (filteredStoredCount > 0) return `${filteredStoredCount} tækifæri eru falin af gæðasíum. Notið Allar samsvaranir eða Þarfnast staðfestingar til að skoða þau.`;
         return `Engar ráðlagðar samsvaranir fyrir ${companyName} enn. ${availableCount} tækifæri eru til í kerfinu, en ekkert passar nógu sterkt við þennan prófíl.`;
       }
-      return `${storedMatchCount} vistaðar samsvaranir fyrir ${companyName}. Sýni ${visibleCount} ráðlagðar eða mögulegar samsvaranir.`;
+      return `${storedMatchCount} tækifæri fundust sem gætu passað við ${companyName}. Sýni ${visibleCount} ráðlögð eða möguleg tækifæri.`;
     }
-    if (selected === "possible") return `${storedMatchCount} vistaðar samsvaranir fyrir ${companyName}. Sýni ${visibleCount} mögulegar eða veikar samsvaranir.`;
-    return `${storedMatchCount} vistaðar samsvaranir fyrir ${companyName}. Sýni ${visibleCount} tækifæri.`;
+    if (selected === "possible") return `${storedMatchCount} tækifæri fundust sem gætu passað við ${companyName}. Sýni ${visibleCount} mögulegar eða veikar samsvaranir.`;
+    return `${storedMatchCount} tækifæri fundust sem gætu passað við ${companyName}. Sýni ${visibleCount} tækifæri.`;
   }
   if (selected === "all_opportunities") {
     return `${availableCount} opportunities are available in the system. Showing ${visibleCount} visible opportunities for inspection.`;
@@ -4467,22 +4467,22 @@ function getDashboardFilterSummary({ visibleCount, storedMatchCount, filteredSto
   if (selected === "needs_review") {
     return `${availableCount} opportunities are available in the system. Showing ${visibleCount} needs-review opportunities.`;
   }
-  if (selected === "all") return `${storedMatchCount} stored matches for ${companyName}. Showing all ${visibleCount}.`;
-  if (selected === "strong") return `${storedMatchCount} stored matches for ${companyName}. Showing ${visibleCount} strong matches.`;
+  if (selected === "all") return `${storedMatchCount} opportunities may fit ${companyName}. Showing all ${visibleCount}.`;
+  if (selected === "strong") return `${storedMatchCount} opportunities may fit ${companyName}. Showing ${visibleCount} strong matches.`;
   if (selected === "recommended") {
     if (!visibleCount) {
       if (strongCount > 0) {
         return `${strongCount} strong ${strongCount === 1 ? "match exists" : "matches exist"} for ${companyName}, but ${strongCount === 1 ? "it is" : "they are"} hidden by your current filters.`;
       }
       if (filteredStoredCount > 0) {
-        return `${filteredStoredCount} stored ${filteredStoredCount === 1 ? "match is" : "matches are"} hidden from Recommended by quality checks. Use All matches or Needs review to inspect them.`;
+        return `${filteredStoredCount} ${filteredStoredCount === 1 ? "opportunity is" : "opportunities are"} hidden from Recommended by quality checks. Use All matches or Needs review to inspect them.`;
       }
       return `No recommended matches for ${companyName} yet. ${availableCount} opportunities are available in the system, but none match this profile strongly enough.`;
     }
-    return `${storedMatchCount} stored matches for ${companyName}. Showing ${visibleCount} recommended or possible matches.`;
+    return `${storedMatchCount} opportunities may fit ${companyName}. Showing ${visibleCount} recommended or possible matches.`;
   }
-  if (selected === "possible") return `${storedMatchCount} stored matches for ${companyName}. Showing ${visibleCount} possible or weak matches.`;
-  return `${storedMatchCount} stored matches for ${companyName}. Showing ${visibleCount} ${selected.toLowerCase()} opportunities.`;
+  if (selected === "possible") return `${storedMatchCount} opportunities may fit ${companyName}. Showing ${visibleCount} possible or weak matches.`;
+  return `${storedMatchCount} opportunities may fit ${companyName}. Showing ${visibleCount} ${selected.toLowerCase()} opportunities.`;
 }
 
 async function loadOpportunityActionsForCurrentCompany() {
@@ -4695,12 +4695,12 @@ function getOpportunityDeadlineDisplay(opp) {
 }
 
 function formatISK(value) {
-  if (!value) return "Value unknown";
+  if (!value) return state.language === "is" ? "Ekki gefið upp" : "Value unknown";
   return new Intl.NumberFormat("is-IS").format(value) + " kr";
 }
 
 function formatEstimatedValue(value, currency = "ISK") {
-  if (!value) return "Value unknown";
+  if (!value) return state.language === "is" ? "Ekki gefið upp" : "Value unknown";
   const code = currency || "ISK";
   const suffix = code === "ISK" ? "kr" : code;
   return `${new Intl.NumberFormat("is-IS").format(value)} ${suffix}`;
@@ -4804,7 +4804,6 @@ function renderShell(content) {
     ? [
         [t("navDashboard"), "/dashboard"],
         [t("navReport"), "/report"],
-        [t("navPricing"), "/pricing"],
         [t("navSettings"), "/settings"]
       ]
     : [
@@ -5205,7 +5204,6 @@ function renderMobileMenuPanel(navItems, headerCta, isLoggedIn) {
     ? [
         [t("navDashboard"), "/dashboard"],
         [t("navReport"), "/report"],
-        [t("navPricing"), "/pricing"],
         [t("navSettings"), "/settings"]
       ]
     : navItems;
@@ -5250,10 +5248,12 @@ function renderMobileAccountSection(headerCta, isLoggedIn) {
         </div>
       </div>
       <div class="mobile-account-actions">
+        <button type="button" data-action="mobile-nav" data-href="/dashboard">${t("navDashboard")}</button>
         ${state.profile
-          ? `<button type="button" data-action="mobile-nav" data-href="/settings">${t("companyProfile")}</button>`
+          ? `<button type="button" data-action="mobile-nav" data-href="/settings">${t("navSettings")}</button>`
           : `<button type="button" data-action="mobile-nav" data-href="/onboarding">${t("createProfile")}</button>`
         }
+        ${state.isAdmin ? `<button type="button" data-action="mobile-nav" data-href="/admin">Admin</button>` : ""}
         <button type="button" class="mobile-logout" data-action="logout">${t("logout")}</button>
       </div>
     </div>
@@ -6817,9 +6817,11 @@ function renderDashboard() {
         <p>${escapeHtml(t("dashboardIntro", { refresh: matchRefreshText }))}</p>
       </div>
       <div class="dashboard-actions">
-        <button class="btn btn-primary" data-action="run-matching" ${state.matchingLoading ? "disabled" : ""}>
-          ${state.matchingLoading ? escapeHtml(t("refreshing")) : escapeHtml(t("refreshMatches"))}
-        </button>
+        ${state.isAdmin ? `
+          <button class="btn btn-primary" data-action="run-matching" ${state.matchingLoading ? "disabled" : ""}>
+            ${state.matchingLoading ? escapeHtml(t("refreshing")) : escapeHtml(t("refreshMatches"))}
+          </button>
+        ` : ""}
         <button class="btn btn-secondary" data-action="go" data-href="/report">${escapeHtml(t("viewWeeklyReport"))}</button>
       </div>
     </section>
@@ -6906,7 +6908,7 @@ function getDashboardProfileSuggestions(profile) {
 function getDashboardEmptyCopy(filter, context = {}) {
   if (state.language === "is") {
     if (filter === "all") {
-      return { eyebrow: "Engar samsvaranir", title: "Engar vistaðar samsvaranir enn.", body: "Uppfærið samsvaranir eða víkkið prófílinn til að búa til vistaðar samsvaranir." };
+      return { eyebrow: "Engar samsvaranir", title: "Engin tækifæri fundust fyrir þennan prófíl enn.", body: "Víkkið þjónustu, svæði eða leitarorð til að finna fleiri tækifæri." };
     }
     if (filter === "all_opportunities") {
       return { eyebrow: "Engin tækifæri", title: "Engin tiltæk tækifæri enn.", body: "Flytjið inn fleiri heimildir eða skoðið heimildayfirlit í Admin." };
@@ -6925,8 +6927,8 @@ function getDashboardEmptyCopy(filter, context = {}) {
   if (filter === "all") {
     return {
       eyebrow: "No matches",
-      title: "No stored matches yet.",
-      body: "Refresh matches or broaden your profile to create stored opportunity matches."
+      title: "No opportunities found for this profile yet.",
+      body: "Broaden your services, locations or keywords to find more opportunities."
     };
   }
   if (filter === "all_opportunities") {
@@ -6983,8 +6985,8 @@ function getRecommendedEmptyBody(context = {}) {
     return "Clear search/category/location filters or turn off Saved only to see the strong matches.";
   }
   if (filteredStoredCount > 0) {
-    if (state.language === "is") return `${filteredStoredCount} vistaðar samsvaranir eru til, en faldar af gæðasíum. Notið Allar samsvaranir eða Þarfnast staðfestingar til að skoða þær.`;
-    return `${filteredStoredCount} stored ${filteredStoredCount === 1 ? "match is" : "matches are"} available, but hidden from Recommended by quality checks. Use All matches or Needs review to inspect them.`;
+    if (state.language === "is") return `${filteredStoredCount} tækifæri eru til, en falin af gæðasíum. Notið Allar samsvaranir eða Þarfnast staðfestingar til að skoða þau.`;
+    return `${filteredStoredCount} ${filteredStoredCount === 1 ? "opportunity is" : "opportunities are"} available, but hidden from Recommended by quality checks. Use All matches or Needs review to inspect them.`;
   }
   if (state.language === "is") return `${availableCount} tækifæri eru til í kerfinu, en ekkert passar nógu sterkt við þennan prófíl.`;
   return `${availableCount} opportunities are available in the system, but none match this profile strongly enough.`;
