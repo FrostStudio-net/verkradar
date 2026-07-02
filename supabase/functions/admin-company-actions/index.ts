@@ -412,6 +412,18 @@ function sortMatchTermsBySpecificity(values: string[]) {
   return [...values].sort((a, b) => rankMatchTerm(a) - rankMatchTerm(b) || b.length - a.length || a.localeCompare(b));
 }
 
+function getStrongCivilTermsInText(text: string) {
+  const normalizedText = normalizeText(text);
+  return CIVIL_STRONG_SERVICE_TERMS.filter((term) => normalizedText.includes(normalizeText(term)));
+}
+
+function promoteWeakGenericHitsToSpecificCivilTerms(hits: string[], opportunityTextValue: string) {
+  const strongTerms = getStrongCivilTermsInText(opportunityTextValue);
+  if (!strongTerms.length || !hits.some(isCivilWeakGenericTerm)) return hits;
+  const nonWeakHits = hits.filter((hit) => !isCivilWeakGenericTerm(hit));
+  return Array.from(new Set([...strongTerms, ...nonWeakHits]));
+}
+
 function isCivilContractorProfile(profile: CompanyProfile) {
   const profileText = [
     profile.industry,
@@ -461,8 +473,8 @@ function getCivilContractorFit(
   const shouldScoreWeakTerms = hasStrongCivilTerm || hasAnySpecificHit;
 
   return {
-    serviceHits: sortMatchTermsBySpecificity(shouldScoreWeakTerms ? serviceHits : serviceHits.filter((service) => !isCivilWeakGenericTerm(service))),
-    keywordHits: sortMatchTermsBySpecificity(shouldScoreWeakTerms ? keywordHits : keywordHits.filter((keyword) => !isCivilWeakGenericTerm(keyword))),
+    serviceHits: sortMatchTermsBySpecificity(shouldScoreWeakTerms ? promoteWeakGenericHitsToSpecificCivilTerms(serviceHits, opportunityTextValue) : serviceHits.filter((service) => !isCivilWeakGenericTerm(service))),
+    keywordHits: sortMatchTermsBySpecificity(shouldScoreWeakTerms ? promoteWeakGenericHitsToSpecificCivilTerms(keywordHits, opportunityTextValue) : keywordHits.filter((keyword) => !isCivilWeakGenericTerm(keyword))),
     hasWeakOnlyFit: !hasStrongCivilTerm && !hasAnySpecificHit && (serviceHitsAreWeakOnly || keywordHitsAreWeakOnly),
     hasIndoorMismatch: hasIndoorTerm && !hasStrongCivilTerm && !allowsIndoorWork,
   };

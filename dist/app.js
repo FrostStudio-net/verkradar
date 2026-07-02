@@ -4291,6 +4291,18 @@ function sortMatchTermsBySpecificity(values) {
   return [...values].sort((a, b) => rankMatchTerm(a) - rankMatchTerm(b) || String(b).length - String(a).length || String(a).localeCompare(String(b)));
 }
 
+function getStrongCivilTermsInText(text) {
+  const normalizedText = normalizeMatchText(text);
+  return CIVIL_STRONG_SERVICE_TERMS.filter((term) => normalizedText.includes(normalizeMatchText(term)));
+}
+
+function promoteWeakGenericHitsToSpecificCivilTerms(hits, opportunityTextValue) {
+  const strongTerms = getStrongCivilTermsInText(opportunityTextValue);
+  if (!strongTerms.length || !hits.some(isCivilWeakGenericTerm)) return hits;
+  const nonWeakHits = hits.filter((hit) => !isCivilWeakGenericTerm(hit));
+  return [...new Set([...strongTerms, ...nonWeakHits])];
+}
+
 function isCivilContractorProfile(profile = {}) {
   const profileText = [
     profile.industry,
@@ -4337,10 +4349,10 @@ function getCivilContractorFit(profile, opp, serviceHits, keywordHits) {
 
   const shouldScoreWeakTerms = hasStrongCivilTerm || hasAnySpecificHit;
   const filteredServiceHits = shouldScoreWeakTerms
-    ? serviceHits
+    ? promoteWeakGenericHitsToSpecificCivilTerms(serviceHits, text)
     : serviceHits.filter((service) => !isCivilWeakGenericTerm(service));
   const filteredKeywordHits = shouldScoreWeakTerms
-    ? keywordHits
+    ? promoteWeakGenericHitsToSpecificCivilTerms(keywordHits, text)
     : keywordHits.filter((keyword) => !isCivilWeakGenericTerm(keyword));
 
   return {
@@ -4619,6 +4631,7 @@ function getMatchedOpportunities() {
   if (state.storedMatches.length) {
     return state.storedMatches
       .filter(isCustomerMatchEligibleOpportunity)
+      .filter(isStrictDashboardEligibleOpportunity)
       .filter(isDashboardVisibleOpportunity)
       .filter((opp) => !state.ignored.includes(opp.id))
       .map(reconcileStoredMatchForCurrentProfile)
@@ -4630,6 +4643,7 @@ function getMatchedOpportunities() {
   return state.opportunities
     .filter(isCustomerMatchEligibleOpportunity)
     .map((opp) => calculateMatch(profile, opp))
+    .filter(isStrictDashboardEligibleOpportunity)
     .filter(isDashboardVisibleOpportunity)
     .filter((opp) => !state.ignored.includes(opp.id))
     .sort((a, b) => b.matchScore - a.matchScore || daysUntilDeadline(a.deadline) - daysUntilDeadline(b.deadline));
@@ -4638,6 +4652,7 @@ function getMatchedOpportunities() {
 function getStoredDashboardMatches() {
   return state.storedMatches
     .filter(isCustomerMatchEligibleOpportunity)
+    .filter(isStrictDashboardEligibleOpportunity)
     .filter(isDashboardVisibleOpportunity)
     .filter((opp) => !state.ignored.includes(opp.id))
     .sort((a, b) => b.matchScore - a.matchScore || daysUntilDeadline(a.deadline) - daysUntilDeadline(b.deadline));
@@ -4649,6 +4664,7 @@ function getAvailableDashboardOpportunities() {
   return state.opportunities
     .filter(isCustomerMatchEligibleOpportunity)
     .map((opp) => calculateMatch(profile, opp))
+    .filter(isStrictDashboardEligibleOpportunity)
     .filter(isDashboardVisibleOpportunity)
     .filter((opp) => !state.ignored.includes(opp.id))
     .sort((a, b) => {
@@ -4656,6 +4672,11 @@ function getAvailableDashboardOpportunities() {
       if (qualityDiff) return qualityDiff;
       return b.matchScore - a.matchScore || daysUntilDeadline(a.deadline) - daysUntilDeadline(b.deadline);
     });
+}
+
+function isStrictDashboardEligibleOpportunity(opp) {
+  if (state.isAdmin && state.filters.label === "all_opportunities") return true;
+  return isStrictCustomerReportEligible(opp);
 }
 
 function getDashboardOpportunityById(id) {
