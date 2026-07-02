@@ -192,6 +192,32 @@ const translations = {
     reportFooter: "VerkRadar hjálpar til við að forgangsraða yfirferð opinberra tækifæra. Staðfestið alltaf útboðsgögn, skilafresti, kröfur og hæfi á upprunalegri heimild áður en brugðist er við.",
     buyer: "Kaupandi",
     source: "Heimild",
+    description: "Lýsing",
+    requirements: "Kröfur",
+    noSpecificRequirements: "Engar sérstakar kröfur skráðar.",
+    noDescription: "Engin lýsing tiltæk.",
+    noMatchReasons: "Engar ástæður samsvörunar tiltækar.",
+    matchReasons: "Ástæður samsvörunar",
+    opportunityInfo: "Upplýsingar um tækifæri",
+    extraction: "Útdráttur",
+    sourceArticle: "Heimildargrein",
+    parentArticle: "Upprunagrein",
+    openSourceArticle: "Opna heimildargrein",
+    extractedRegion: "Útdregið svæði",
+    projectNumber: "Verknúmer",
+    tenderState: "Staða útboðs",
+    quality: "Gæði",
+    category: "Flokkur",
+    type: "Tegund",
+    published: "Birt",
+    cpv: "CPV",
+    recommendedNextSteps: "Ráðlögð næstu skref",
+    noMajorRisks: "Engar stórar áhættur greindar í þessum gögnum.",
+    openSourceAndConfirm: "Opnið upprunalega heimild og staðfestið hæfi.",
+    removeFromSaved: "Fjarlægja úr vistuðum",
+    saveOpportunity: "Vista tækifæri",
+    markNotRelevant: "Merkja sem ekki viðeigandi",
+    publicProcurement: "Opinbert útboð",
     area: "Svæði",
     deadline: "Skilafrestur",
     estimatedValue: "Áætlað verðmæti",
@@ -391,6 +417,32 @@ const translations = {
     reportFooter: "VerkRadar helps prioritise public opportunity review. Always check the original source documents, deadlines, requirements and eligibility before acting.",
     buyer: "Buyer",
     source: "Source",
+    description: "Description",
+    requirements: "Requirements",
+    noSpecificRequirements: "No specific requirements listed.",
+    noDescription: "No description available.",
+    noMatchReasons: "No match reasons available.",
+    matchReasons: "Match reasons",
+    opportunityInfo: "Opportunity info",
+    extraction: "Extraction",
+    sourceArticle: "Source article",
+    parentArticle: "Parent article",
+    openSourceArticle: "Open source article",
+    extractedRegion: "Extracted region",
+    projectNumber: "Project number",
+    tenderState: "Tender state",
+    quality: "Quality",
+    category: "Category",
+    type: "Type",
+    published: "Published",
+    cpv: "CPV",
+    recommendedNextSteps: "Recommended next steps",
+    noMajorRisks: "No major risks detected in this data.",
+    openSourceAndConfirm: "Open the source notice and confirm eligibility.",
+    removeFromSaved: "Remove from saved",
+    saveOpportunity: "Save opportunity",
+    markNotRelevant: "Mark not relevant",
+    publicProcurement: "Public procurement",
     area: "Location",
     deadline: "Deadline",
     estimatedValue: "Estimated value",
@@ -4074,6 +4126,146 @@ function opportunityText(opp) {
   return [opp.title, opp.description, opp.category, opp.location, ...(opp.keywords || [])].join(" ").toLowerCase();
 }
 
+const CIVIL_STRONG_SERVICE_TERMS = [
+  "jarðvinna",
+  "gatnagerð",
+  "lóðarframkvæmdir",
+  "lagnavinna",
+  "lagnir",
+  "fráveita",
+  "vatnslagnir",
+  "regnvatnslagnir",
+  "malbikun",
+  "gangstétt",
+  "gangstéttir",
+  "stígar",
+  "bílastæði",
+  "vegagerð",
+  "gröftur",
+  "jarðvegsskipti",
+  "undirbygging",
+  "yfirborðsfrágangur",
+  "hellulögn",
+  "kantsteinn",
+  "snjómokstur",
+  "gatnaframkvæmdir"
+];
+
+const CIVIL_WEAK_GENERIC_TERMS = [
+  "framkvæmdir",
+  "framkvæmd",
+  "útboð",
+  "verðfyrirspurn",
+  "tilboð",
+  "viðhald",
+  "verktaki",
+  "verk"
+];
+
+const CIVIL_INDOOR_DOWNGRADE_TERMS = [
+  "innanhússfrágangur",
+  "innanhúss",
+  "smíði",
+  "smíðavinna",
+  "málun",
+  "gólfefni",
+  "innréttingar",
+  "raflagnir",
+  "pípulagnir",
+  "leikskóli",
+  "skóli",
+  "húsnæði",
+  "byggingarvinna"
+];
+
+const CIVIL_INDOOR_ALLOWED_SERVICE_TERMS = [
+  "innanhússfrágangur",
+  "innanhúss",
+  "smíði",
+  "smíðavinna",
+  "málun",
+  "gólfefni",
+  "innréttingar",
+  "raflagnir",
+  "pípulagnir",
+  "byggingarvinna"
+];
+
+function normalizeMatchText(value) {
+  return normalizeLocationText(value);
+}
+
+function normalizedContainsAny(text, terms) {
+  const normalized = normalizeMatchText(text);
+  return terms.some((term) => normalized.includes(normalizeMatchText(term)));
+}
+
+function isCivilWeakGenericTerm(value) {
+  const normalized = normalizeMatchText(value);
+  return CIVIL_WEAK_GENERIC_TERMS.some((term) => normalized === normalizeMatchText(term));
+}
+
+function isCivilContractorProfile(profile = {}) {
+  const profileText = [
+    profile.industry,
+    ...(Array.isArray(profile.services) ? profile.services : []),
+    ...(Array.isArray(profile.includeKeywords) ? profile.includeKeywords : [])
+  ].filter(Boolean).join(" ");
+  return normalizedContainsAny(profileText, [
+    ...CIVIL_STRONG_SERVICE_TERMS,
+    "construction",
+    "contractor",
+    "verktaki",
+    "mannvirki",
+    "jarðtækni"
+  ]);
+}
+
+function hasExplicitIndoorService(profile = {}) {
+  const profileText = [
+    ...(Array.isArray(profile.services) ? profile.services : []),
+    ...(Array.isArray(profile.includeKeywords) ? profile.includeKeywords : [])
+  ].filter(Boolean).join(" ");
+  return normalizedContainsAny(profileText, CIVIL_INDOOR_ALLOWED_SERVICE_TERMS);
+}
+
+function getCivilContractorFit(profile, opp, serviceHits, keywordHits) {
+  const isCivilProfile = isCivilContractorProfile(profile);
+  if (!isCivilProfile) {
+    return {
+      isCivilProfile: false,
+      serviceHits,
+      keywordHits,
+      hasWeakOnlyFit: false,
+      hasIndoorMismatch: false
+    };
+  }
+
+  const text = opportunityText(opp);
+  const hasStrongCivilTerm = normalizedContainsAny(text, CIVIL_STRONG_SERVICE_TERMS);
+  const hasIndoorTerm = normalizedContainsAny(text, CIVIL_INDOOR_DOWNGRADE_TERMS);
+  const allowsIndoorWork = hasExplicitIndoorService(profile);
+  const serviceHitsAreWeakOnly = serviceHits.length > 0 && serviceHits.every(isCivilWeakGenericTerm);
+  const keywordHitsAreWeakOnly = keywordHits.length > 0 && keywordHits.every(isCivilWeakGenericTerm);
+  const hasAnySpecificHit = [...serviceHits, ...keywordHits].some((hit) => !isCivilWeakGenericTerm(hit));
+
+  const shouldScoreWeakTerms = hasStrongCivilTerm || hasAnySpecificHit;
+  const filteredServiceHits = shouldScoreWeakTerms
+    ? serviceHits
+    : serviceHits.filter((service) => !isCivilWeakGenericTerm(service));
+  const filteredKeywordHits = shouldScoreWeakTerms
+    ? keywordHits
+    : keywordHits.filter((keyword) => !isCivilWeakGenericTerm(keyword));
+
+  return {
+    isCivilProfile: true,
+    serviceHits: filteredServiceHits,
+    keywordHits: filteredKeywordHits,
+    hasWeakOnlyFit: !hasStrongCivilTerm && !hasAnySpecificHit && (serviceHitsAreWeakOnly || keywordHitsAreWeakOnly),
+    hasIndoorMismatch: hasIndoorTerm && !hasStrongCivilTerm && !allowsIndoorWork
+  };
+}
+
 function isNationalOpportunity(opp) {
   const location = normalizeLocationText(opp.location);
   const text = normalizeLocationText(`${opp.title} ${opp.description} ${opp.location}`);
@@ -4218,18 +4410,18 @@ function calculateMatch(profile, opp) {
     reasons.push(`Matches your ${profile.industry} industry`);
   }
 
-  for (const service of profile.services || []) {
-    if (textIncludes(text, service)) {
-      score += 10;
-      reasons.push(`Mentions your service: ${service}`);
-    }
+  const serviceHits = (profile.services || []).filter((service) => textIncludes(text, service));
+  const keywordHits = (profile.includeKeywords || []).filter((keyword) => textIncludes(text, keyword));
+  const civilFit = getCivilContractorFit(profile, opp, serviceHits, keywordHits);
+
+  for (const service of civilFit.serviceHits) {
+    score += 10;
+    reasons.push(`Mentions your service: ${service}`);
   }
 
-  for (const keyword of profile.includeKeywords || []) {
-    if (textIncludes(text, keyword)) {
-      score += 8;
-      reasons.push(`Contains your keyword: ${keyword}`);
-    }
+  for (const keyword of civilFit.keywordHits) {
+    score += 8;
+    reasons.push(`Contains your keyword: ${keyword}`);
   }
 
   const locationCategory = getLocationMatchCategory(profile, opp);
@@ -4289,6 +4481,16 @@ function calculateMatch(profile, opp) {
     risks.push("This appears to be a higher-complexity opportunity");
   }
 
+  if (civilFit.hasWeakOnlyFit) {
+    score = Math.min(score, 40);
+    risks.push("Only broad construction/procurement terms matched; verify fit");
+  }
+
+  if (civilFit.hasIndoorMismatch) {
+    score = Math.min(score - 20, 40);
+    risks.push("Appears to be indoor/building finishing work outside your core civil services");
+  }
+
   score = Math.max(0, Math.min(100, Math.round(score)));
 
   return {
@@ -4306,6 +4508,20 @@ function calculateMatch(profile, opp) {
   };
 }
 
+function reconcileStoredMatchForCurrentProfile(opp) {
+  if (!state.profile || !isCivilContractorProfile(state.profile)) return opp;
+  const recalculated = calculateMatch(state.profile, opp);
+  if (Number(recalculated.matchScore || 0) >= Number(opp.matchScore || 0)) return opp;
+  return {
+    ...opp,
+    matchScore: recalculated.matchScore,
+    matchLabel: recalculated.matchLabel,
+    matchReasons: recalculated.matchReasons,
+    risks: recalculated.risks,
+    nextSteps: recalculated.nextSteps
+  };
+}
+
 function getMatchLabel(score) {
   if (score >= 85) return "Strong match";
   if (score >= 65) return "Good match";
@@ -4319,6 +4535,7 @@ function getMatchedOpportunities() {
       .filter(isCustomerMatchEligibleOpportunity)
       .filter(isDashboardVisibleOpportunity)
       .filter((opp) => !state.ignored.includes(opp.id))
+      .map(reconcileStoredMatchForCurrentProfile)
       .sort((a, b) => b.matchScore - a.matchScore || daysUntilDeadline(a.deadline) - daysUntilDeadline(b.deadline));
   }
 
@@ -7106,12 +7323,12 @@ function renderTenderStateBadge(opp) {
   if (!isVegagerdinExtractedProject(opp)) return "";
   const stateValue = getVegagerdinExtractedTenderState(opp);
   const labels = {
-    tender_awarded: "Tender awarded",
-    awarded: "Tender awarded",
-    already_tendered: "Tender already announced",
-    announced: "Tender announced",
-    upcoming_tender: "Upcoming tender",
-    project_signal: "Project signal"
+    tender_awarded: t("tenderAwarded"),
+    awarded: t("tenderAwarded"),
+    already_tendered: t("tenderAlreadyAnnounced"),
+    announced: t("tenderAlreadyAnnounced"),
+    upcoming_tender: t("upcomingTender"),
+    project_signal: t("projectSignal")
   };
   const label = labels[stateValue] || "";
   return label ? `<span class="source-pill source-badge muted-badge">${escapeHtml(label)}</span>` : "";
@@ -7119,15 +7336,15 @@ function renderTenderStateBadge(opp) {
 
 function formatTenderState(value) {
   const labels = {
-    tender_awarded: "Tender awarded",
-    awarded: "Tender awarded",
-    already_tendered: "Tender already announced",
-    announced: "Tender announced",
-    upcoming_tender: "Upcoming tender",
-    project_signal: "Project signal",
-    open_or_published: "Tender announced",
-    planned_tender: "Upcoming tender",
-    unclear: "Project signal"
+    tender_awarded: t("tenderAwarded"),
+    awarded: t("tenderAwarded"),
+    already_tendered: t("tenderAlreadyAnnounced"),
+    announced: t("tenderAlreadyAnnounced"),
+    upcoming_tender: t("upcomingTender"),
+    project_signal: t("projectSignal"),
+    open_or_published: t("tenderAlreadyAnnounced"),
+    planned_tender: t("upcomingTender"),
+    unclear: t("projectSignal")
   };
   return labels[String(value || "")] || capitalize(String(value || "").replace(/_/g, " "));
 }
@@ -7135,30 +7352,34 @@ function formatTenderState(value) {
 function renderQualityWarning(opp) {
   const intent = getOpportunityIntent(opp);
   if (intent === "news_context" || intent === "not_opportunity") {
-    return `<div class="note-panel quality-warning">This looks like news or traffic context, not a customer-facing opportunity.</div>`;
+    return `<div class="note-panel quality-warning">${escapeHtml(state.language === "is" ? "Þetta lítur út eins og frétta- eða umferðarefni, ekki tækifæri fyrir viðskiptavin." : "This looks like news or traffic context, not a customer-facing opportunity.")}</div>`;
   }
   if (normalizeOpportunityQualityStatus(opp.qualityStatus, opp) !== "needs_review") return "";
   if (isVegagerdinExtractedProject(opp)) {
-    return `<div class="note-panel quality-warning">Extracted project signal — verify tender timing in the source article.</div>`;
+    return `<div class="note-panel quality-warning">${escapeHtml(state.language === "is" ? "Útdregin verkefnavísbending — staðfestið útboðstímasetningu í heimildargrein." : "Extracted project signal — verify tender timing in the source article.")}</div>`;
   }
-  return `<div class="note-panel quality-warning">Imported from broad feed — verify source page.</div>`;
+  return `<div class="note-panel quality-warning">${escapeHtml(state.language === "is" ? "Innflutt úr breiðum straumi — staðfestið á upprunasíðu." : "Imported from broad feed — verify source page.")}</div>`;
 }
 
 function renderOpportunityModal(opp) {
   const saved = state.saved.includes(opp.id);
   const deadline = getOpportunityDeadlineDisplay(opp);
+  const requirements = Array.isArray(opp.requirements) ? opp.requirements : [];
+  const matchReasons = Array.isArray(opp.matchReasons) ? opp.matchReasons : [];
+  const risks = Array.isArray(opp.risks) ? opp.risks : [];
+  const nextSteps = Array.isArray(opp.nextSteps) ? opp.nextSteps : [];
   return `
     <div class="modal-backdrop">
       <div class="modal" role="dialog" aria-modal="true">
         <div class="modal-header">
           <div>
             <div class="opportunity-badges">
-              <span class="${badgeClass(opp.matchLabel)}">${opp.matchLabel} · ${opp.matchScore}</span>
+              <span class="${badgeClass(opp.matchLabel)}">${escapeHtml(formatReportMatchLabel(opp.matchLabel))} · ${opp.matchScore}</span>
               ${renderQualityBadge(opp)}
               ${renderExtractedArticleBadge(opp)}
             </div>
             <h2>${escapeHtml(opp.title)}</h2>
-            <p>${escapeHtml(opp.buyer)} · ${escapeHtml(opp.location)} · ${formatISK(opp.estimatedValue)}</p>
+            <p>${escapeHtml(formatOpportunityModalValue("buyer", opp.buyer))} · ${escapeHtml(formatOpportunityModalValue("location", opp.location))} · ${opp.estimatedValue ? formatISK(opp.estimatedValue) : t("notListed")}</p>
           </div>
           <button type="button" class="icon-btn modal-close-btn" data-action="close-modal" aria-label="Close details">×</button>
         </div>
@@ -7167,48 +7388,48 @@ function renderOpportunityModal(opp) {
           <div class="modal-grid">
             <section>
               ${renderQualityWarning(opp)}
-              <h3>Description</h3>
-              <p>${escapeHtml(opp.description || "No description available.")}</p>
-              <h3>Requirements</h3>
+              <h3>${escapeHtml(t("description"))}</h3>
+              <p>${escapeHtml(opp.description || t("noDescription"))}</p>
+              <h3>${escapeHtml(t("requirements"))}</h3>
               <ul class="check-list">
-                ${(opp.requirements.length ? opp.requirements : ["No specific requirements listed."]).map((r) => `<li>${escapeHtml(r)}</li>`).join("")}
+                ${(requirements.length ? requirements : [t("noSpecificRequirements")]).map((r) => `<li>${escapeHtml(r)}</li>`).join("")}
               </ul>
-              <h3>Match reasons</h3>
+              <h3>${escapeHtml(t("matchReasons"))}</h3>
               <ul class="check-list">
-                ${(opp.matchReasons.length ? opp.matchReasons : ["No match reasons available."]).map((r) => `<li>${escapeHtml(r)}</li>`).join("")}
+                ${(matchReasons.length ? matchReasons.map(formatReportReason) : [t("noMatchReasons")]).map((r) => `<li>${escapeHtml(r)}</li>`).join("")}
               </ul>
             </section>
 
             <aside class="side-panel">
-              <h3>Opportunity info</h3>
-              <p><strong>Source:</strong> ${escapeHtml(opp.source)}</p>
-              ${isVegagerdinExtractedProject(opp) ? `<p><strong>Extraction:</strong> Extracted from Vegagerðin article</p>` : ""}
-              ${opp.rawPayload?.parent_article_title ? `<p><strong>Source article:</strong> ${escapeHtml(opp.rawPayload.parent_article_title)}</p>` : ""}
-              ${opp.rawPayload?.parent_url ? `<p><strong>Parent article:</strong> <a href="${escapeHtml(opp.rawPayload.parent_url)}" target="_blank" rel="noreferrer">Open source article</a></p>` : ""}
-              ${opp.rawPayload?.region ? `<p><strong>Extracted region:</strong> ${escapeHtml(opp.rawPayload.region)}</p>` : ""}
-              ${opp.rawPayload?.project_number ? `<p><strong>Project number:</strong> ${escapeHtml(opp.rawPayload.project_number)}</p>` : ""}
-              ${isVegagerdinExtractedProject(opp) ? `<p><strong>Tender state:</strong> ${escapeHtml(formatTenderState(getVegagerdinExtractedTenderState(opp)))}</p>` : ""}
-              <p><strong>Quality:</strong> ${escapeHtml(getOpportunityQualityLabel(opp))}</p>
-              <p><strong>Category:</strong> ${escapeHtml(opp.category)}</p>
-              <p><strong>Type:</strong> ${escapeHtml(opp.type)}</p>
-              <p><strong>Deadline:</strong> <span class="${deadline.className}">${escapeHtml(deadline.label)}</span></p>
-              <p><strong>Published:</strong> ${escapeHtml(opp.publishedDate)}</p>
-              <p><strong>CPV:</strong> ${escapeHtml(opp.cpvCode || "—")}</p>
+              <h3>${escapeHtml(t("opportunityInfo"))}</h3>
+              <p><strong>${escapeHtml(t("source"))}:</strong> ${escapeHtml(formatOpportunityModalValue("source", opp.source))}</p>
+              ${isVegagerdinExtractedProject(opp) ? `<p><strong>${escapeHtml(t("extraction"))}:</strong> ${escapeHtml(state.language === "is" ? "Útdregið úr grein Vegagerðarinnar" : "Extracted from Vegagerðin article")}</p>` : ""}
+              ${opp.rawPayload?.parent_article_title ? `<p><strong>${escapeHtml(t("sourceArticle"))}:</strong> ${escapeHtml(opp.rawPayload.parent_article_title)}</p>` : ""}
+              ${opp.rawPayload?.parent_url ? `<p><strong>${escapeHtml(t("parentArticle"))}:</strong> <a href="${escapeHtml(opp.rawPayload.parent_url)}" target="_blank" rel="noreferrer">${escapeHtml(t("openSourceArticle"))}</a></p>` : ""}
+              ${opp.rawPayload?.region ? `<p><strong>${escapeHtml(t("extractedRegion"))}:</strong> ${escapeHtml(opp.rawPayload.region)}</p>` : ""}
+              ${opp.rawPayload?.project_number ? `<p><strong>${escapeHtml(t("projectNumber"))}:</strong> ${escapeHtml(opp.rawPayload.project_number)}</p>` : ""}
+              ${isVegagerdinExtractedProject(opp) ? `<p><strong>${escapeHtml(t("tenderState"))}:</strong> ${escapeHtml(formatTenderState(getVegagerdinExtractedTenderState(opp)))}</p>` : ""}
+              <p><strong>${escapeHtml(t("quality"))}:</strong> ${escapeHtml(formatReportQualityLabel(getOpportunityQualityLabel(opp)))}</p>
+              <p><strong>${escapeHtml(t("category"))}:</strong> ${escapeHtml(formatOpportunityModalValue("category", opp.category))}</p>
+              <p><strong>${escapeHtml(t("type"))}:</strong> ${escapeHtml(formatOpportunityModalValue("type", opp.type))}</p>
+              <p><strong>${escapeHtml(t("deadline"))}:</strong> <span class="${deadline.className}">${escapeHtml(formatReportRisk(deadline.label))}</span></p>
+              <p><strong>${escapeHtml(t("published"))}:</strong> ${escapeHtml(opp.publishedDate)}</p>
+              <p><strong>${escapeHtml(t("cpv"))}:</strong> ${escapeHtml(opp.cpvCode || "—")}</p>
 
-              <h3>Risks / things to check</h3>
+              <h3>${escapeHtml(t("risksToCheck"))}</h3>
               <ul class="risk-list">
-                ${(opp.risks.length ? opp.risks : ["No major risks detected in this demo data."]).map((r) => `<li>${escapeHtml(r)}</li>`).join("")}
+                ${(risks.length ? risks.map(formatReportRisk) : [t("noMajorRisks")]).map((r) => `<li>${escapeHtml(r)}</li>`).join("")}
               </ul>
 
-              <h3>Recommended next steps</h3>
+              <h3>${escapeHtml(t("recommendedNextSteps"))}</h3>
               <ol class="steps-list">
-                ${(opp.nextSteps.length ? opp.nextSteps : ["Open the source notice and confirm eligibility."]).map((s) => `<li>${escapeHtml(s)}</li>`).join("")}
+                ${(nextSteps.length ? nextSteps : [t("openSourceAndConfirm")]).map((s) => `<li>${escapeHtml(s)}</li>`).join("")}
               </ol>
 
               <div class="button-stack">
-                <button class="btn btn-primary" data-action="save" data-id="${opp.id}">${saved ? "Remove from saved" : "Save opportunity"}</button>
-                <a class="btn btn-secondary" href="${escapeHtml(opp.url)}" target="_blank" rel="noreferrer">Open source</a>
-                <button class="btn btn-ghost" data-action="ignore" data-id="${opp.id}">Mark not relevant</button>
+                <button class="btn btn-primary" data-action="save" data-id="${opp.id}">${saved ? escapeHtml(t("removeFromSaved")) : escapeHtml(t("saveOpportunity"))}</button>
+                <a class="btn btn-secondary" href="${escapeHtml(opp.url)}" target="_blank" rel="noreferrer">${escapeHtml(t("openSource"))}</a>
+                <button class="btn btn-ghost" data-action="ignore" data-id="${opp.id}">${escapeHtml(t("markNotRelevant"))}</button>
               </div>
             </aside>
           </div>
@@ -8366,6 +8587,18 @@ function formatReportMetadataValue(type, value) {
   return text;
 }
 
+function formatOpportunityModalValue(type, value) {
+  const text = formatReportMetadataValue(type, value);
+  if (state.language !== "is") return text;
+  const normalized = String(text || "").trim().toLowerCase();
+  const map = {
+    "public procurement": t("publicProcurement"),
+    "procurement": t("procurement"),
+    "tender": t("tender")
+  };
+  return map[normalized] || text.replace(/\bpublic procurement\b/gi, t("publicProcurement")).replace(/\btender\b/gi, t("tender"));
+}
+
 function formatCustomerLocation(value) {
   const text = String(value || "").trim();
   if (state.language === "is") {
@@ -8408,8 +8641,9 @@ function formatReportReason(reason) {
 }
 
 function formatReportRisk(risk) {
+  if (state.language !== "is") return risk || "";
   const map = {
-    "Deadline not available in feed — verify on source page.": "Skilafrestur fannst ekki í heimild - staðfestið á upprunalegri síðu.",
+    "Deadline not available in feed — verify on source page.": "Skilafrestur fannst ekki í gögnunum — staðfestið á upprunasíðu.",
     "Deadline not available in source — verify page.": "Skilafrestur fannst ekki í heimild - staðfestið á upprunalegri síðu.",
     "No formal tender deadline extracted — verify source article.": "Formlegur skilafrestur fannst ekki - staðfestið í heimildargrein.",
     "Formal tender deadline not found yet — monitor source article.": "Formlegur skilafrestur fannst ekki enn - fylgist með heimildargrein.",
