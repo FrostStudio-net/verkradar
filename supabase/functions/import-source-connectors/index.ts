@@ -2421,6 +2421,7 @@ function isCustomerMatchEligibleOpportunity(opportunity: Record<string, unknown>
   const payload = opportunity.raw_payload && typeof opportunity.raw_payload === "object"
     ? opportunity.raw_payload as Record<string, unknown>
     : {};
+  if (isDemoTestOpportunity(opportunity)) return false;
   const adminStatus = String(payload.admin_report_status || "").toLowerCase();
   if (adminStatus === "include") return true;
   if (payload.hidden_from_reports === true) return false;
@@ -2434,6 +2435,18 @@ function isCustomerMatchEligibleOpportunity(opportunity: Record<string, unknown>
   if (intent === "news_context" || intent === "not_opportunity") return false;
   if (intent === "confirmed_tender" || intent === "early_opportunity") return true;
   return !hasObviousNewsTitleIntent(String(opportunity.title || ""));
+}
+
+function isDemoTestOpportunity(opportunity: Record<string, unknown>) {
+  const payload = opportunity.raw_payload && typeof opportunity.raw_payload === "object"
+    ? opportunity.raw_payload as Record<string, unknown>
+    : {};
+  if (payload.is_demo === true || payload.demo === true) return true;
+  const source = opportunity.sources && typeof opportunity.sources === "object"
+    ? opportunity.sources as Record<string, unknown>
+    : {};
+  const haystack = normalize(`${source.name || ""} ${source.source_type || ""} ${opportunity.title || ""} ${opportunity.external_id || ""}`);
+  return ["private lead", "manual test", "grant portal", "demo", "test", "sample", "mock", "fake"].some((value) => haystack.includes(normalize(value)));
 }
 
 function selectedProfileLocations(profile: Record<string, unknown>) {

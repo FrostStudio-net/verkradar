@@ -586,6 +586,7 @@ function isCustomerMatchEligibleOpportunity(opportunity: Record<string, unknown>
   const payload = opportunity.rawPayload && typeof opportunity.rawPayload === "object"
     ? opportunity.rawPayload as Record<string, unknown>
     : {};
+  if (isDemoTestOpportunity(opportunity)) return false;
   const adminStatus = String(payload.admin_report_status || "").toLowerCase();
   if (adminStatus === "include") return true;
   if (payload.hidden_from_reports === true) return false;
@@ -947,7 +948,11 @@ function isProcurementSource(opportunity: Record<string, unknown>) {
 }
 
 function isDemoTestOpportunity(opportunity: Record<string, unknown>) {
-  const haystack = normalizeText(`${opportunity.source || ""} ${opportunity.title || ""} ${opportunity.externalId || ""}`);
+  const payload = opportunity.rawPayload && typeof opportunity.rawPayload === "object"
+    ? opportunity.rawPayload as Record<string, unknown>
+    : {};
+  if (payload.is_demo === true || payload.demo === true) return true;
+  const haystack = normalizeText(`${opportunity.source || ""} ${opportunity.sourceType || ""} ${opportunity.title || ""} ${opportunity.externalId || ""}`);
   return ["private lead", "manual test", "grant portal", "demo", "test", "sample", "mock", "fake"].some((value) => haystack.includes(normalizeText(value)));
 }
 

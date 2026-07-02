@@ -631,7 +631,7 @@ let state = {
     search: "",
     tedOnly: false,
     manualOnly: false,
-    showDemoTest: true
+    showDemoTest: false
   },
   adminOpportunityDraft: createEmptyAdminOpportunityDraft(),
   matchStatus: null,
@@ -2100,12 +2100,15 @@ function isDemoTestOpportunity(opp) {
   const title = normalizeLocationText(opp?.title || "");
   const externalId = normalizeLocationText(opp?.externalId || "");
   const sourceType = normalizeLocationText(opp?.sourceType || "");
+  const rawPayload = opp?.rawPayload || {};
   const haystack = `${source} ${title} ${externalId} ${sourceType}`;
 
+  if (rawPayload.is_demo === true || rawPayload.demo === true) return true;
   if (source === "private lead" || source.includes("private lead")) return true;
   if (source === "grant portal" || source.includes("grant portal")) return true;
   if (source === "manual test") return true;
   if (source.includes("manual test")) return true;
+  if (["demo", "test", "sample", "mock", "fake"].some((value) => sourceType.includes(value))) return true;
   if (/\b(demo|test|sample|mock|fake|manual)\b/.test(haystack)) return true;
   if (title.includes("manual test")) return true;
   if (title.includes("municipal websites example")) return true;
@@ -8155,7 +8158,7 @@ function getSavedReportSections(matches) {
     const placement = getReportOpportunityPlacement(opp);
     if (placement === "confirmed") sections.confirmed.push(opp);
     else if (placement === "early") sections.early.push(opp);
-    else sections.review.push(opp);
+    else if (placement !== "excluded") sections.review.push(opp);
   });
 
   return sections;
