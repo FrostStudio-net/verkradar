@@ -2007,15 +2007,16 @@ async function refreshAdminOperationsData() {
 
 function mapSupabaseOpportunity(row) {
   const rawPayload = row.raw_payload && typeof row.raw_payload === "object" ? row.raw_payload : {};
+  const sourceName = row.sources?.name || rawPayload.source_name || "";
   const qualityStatus = normalizeOpportunityQualityStatus(rawPayload.quality_status || rawPayload.qualityStatus, {
-    source: row.sources?.name || "",
+    source: sourceName,
     sourceType: row.sources?.source_type || "",
     title: row.title || "",
     description: row.description || "",
     rawPayload
   });
   const intent = getOpportunityIntent({
-    source: row.sources?.name || "",
+    source: sourceName,
     sourceType: row.sources?.source_type || "",
     title: row.title || "",
     description: row.description || "",
@@ -2029,8 +2030,8 @@ function mapSupabaseOpportunity(row) {
     externalId: row.external_id || "",
     countryCode: row.country_code || "",
     title: row.title,
-    buyer: row.buyer || "Unknown buyer",
-    source: row.sources?.name || "Supabase",
+    buyer: getCleanOpportunityBuyer(row.buyer, sourceName),
+    source: sourceName || "Supabase",
     sourceType: row.sources?.source_type || "",
     category: row.category || "Other",
     type: row.type || "tender",
@@ -5762,7 +5763,7 @@ function renderImportedTedRow(opp) {
       <div class="imported-opportunity-main">
         <h4>${escapeHtml(opp.title)}</h4>
         <span class="source-pill language-pill">Original language</span>
-        <p>${escapeHtml(opp.buyer || "Unknown buyer")}</p>
+        <p>${escapeHtml(formatOpportunityBuyer(opp))}</p>
       </div>
       <dl>
         <div>
@@ -6298,7 +6299,7 @@ function renderSourceLatestItemsRow(source) {
                   <div class="source-item">
                     <div>
                       <strong>${escapeHtml(opportunity.title || "Untitled opportunity")}</strong>
-                      <span>${escapeHtml(opportunity.buyer || source.name || "Unknown buyer")} · ${escapeHtml(formatOpportunityDeadline(opportunity.deadline))}</span>
+                      <span>${escapeHtml(formatReportMetadataValue("buyer", getCleanOpportunityBuyer(opportunity.buyer, source.name)))} · ${escapeHtml(formatOpportunityDeadline(opportunity.deadline))}</span>
                     </div>
                     <span class="quality-badge ${escapeHtml(quality)}">${escapeHtml(formatQualityStatus(quality))}</span>
                     ${opportunity.url ? `<a class="btn btn-ghost btn-small" href="${escapeHtml(opportunity.url)}" target="_blank" rel="noreferrer">Open</a>` : ""}
@@ -6443,7 +6444,7 @@ function renderAdminReportItem(item) {
       </div>
       <h4>${escapeHtml(opp.title)}</h4>
       <div class="admin-report-meta-grid">
-        <span><strong>${escapeHtml(t("buyer"))}</strong>${escapeHtml(formatReportMetadataValue("buyer", opp.buyer))}</span>
+        <span><strong>${escapeHtml(t("buyer"))}</strong>${escapeHtml(formatOpportunityBuyer(opp))}</span>
         <span><strong>${escapeHtml(t("source"))}</strong>${escapeHtml(formatReportMetadataValue("source", opp.source))}</span>
         <span><strong>${escapeHtml(t("area"))}</strong>${escapeHtml(formatReportMetadataValue("location", opp.location))}</span>
         <span><strong>${escapeHtml(t("deadline"))}</strong>${escapeHtml(deadline.label)}</span>
@@ -7254,7 +7255,7 @@ function renderOpportunityCard(opp) {
         <h3>${escapeHtml(opp.title)}</h3>
         <p>${escapeHtml(opp.description)}</p>
         <div class="meta-row">
-          <span>${escapeHtml(formatReportMetadataValue("buyer", opp.buyer))}</span>
+          <span>${escapeHtml(formatOpportunityBuyer(opp))}</span>
           <span>${escapeHtml(formatReportMetadataValue("location", opp.location))}</span>
           <span>${formatISK(opp.estimatedValue)}</span>
           <span class="${deadline.className}">${escapeHtml(deadline.label)}</span>
@@ -7799,7 +7800,7 @@ function renderAdminOpportunityRow(opp) {
     <div class="admin-row">
       <div>
         <h3>${escapeHtml(opp.title)}</h3>
-        <p>${escapeHtml(opp.buyer)} · ${escapeHtml(opp.source)} · ${escapeHtml(opp.location)} · ${escapeHtml(opp.status)}</p>
+        <p>${escapeHtml(formatOpportunityBuyer(opp))} · ${escapeHtml(opp.source)} · ${escapeHtml(opp.location)} · ${escapeHtml(opp.status)}</p>
         <p>Quality: ${escapeHtml(getOpportunityQualityLabel(opp))} · Intent: ${escapeHtml(formatOpportunityIntent(intent))}${hiddenFromReports ? " · Hidden from reports" : ""}</p>
       </div>
       <div class="admin-row-actions">
@@ -8527,7 +8528,7 @@ function renderReportOpportunityItem(opp) {
       </div>
       <h4>${escapeHtml(opp.title)}</h4>
       <div class="report-facts">
-        <span><strong>${escapeHtml(t("buyer"))}</strong>${escapeHtml(formatReportMetadataValue("buyer", opp.buyer))}</span>
+        <span><strong>${escapeHtml(t("buyer"))}</strong>${escapeHtml(formatOpportunityBuyer(opp))}</span>
         <span><strong>${escapeHtml(t("source"))}</strong>${escapeHtml(formatReportMetadataValue("source", opp.source))}</span>
         <span><strong>${escapeHtml(t("area"))}</strong>${escapeHtml(formatReportMetadataValue("location", opp.location))}</span>
         <span><strong>${escapeHtml(t("deadline"))}</strong><em>${escapeHtml(deadlineText)}</em></span>
@@ -8581,10 +8582,63 @@ function formatReportMatchLabel(label) {
 function formatReportMetadataValue(type, value) {
   const text = String(value || "").trim();
   if (!text) return type === "buyer" ? t("unknownBuyer") : t("notListed");
-  if (type === "buyer" && text.toLowerCase() === "unknown buyer") return t("unknownBuyer");
+  if (type === "buyer") {
+    if (isInvalidBuyerName(text)) return t("unknownBuyer");
+    if (text.toLowerCase() === "unknown buyer") return t("unknownBuyer");
+  }
   if (type === "location" && text.toLowerCase() === "all iceland") return t("allIceland");
   if (type === "source") return text.replace(/\bprocurement\b/gi, t("procurement"));
   return text;
+}
+
+function isInvalidBuyerName(value) {
+  const normalized = normalizeLocationText(value);
+  if (!normalized) return true;
+  if ([
+    "admin",
+    "administrator",
+    "ritstjori",
+    "editor",
+    "noreply",
+    "no reply",
+    "wordpress",
+    "wp admin",
+    "user",
+    "test"
+  ].includes(normalized)) return true;
+  if (normalized.includes("noreply")) return true;
+  if (/^wp\s*[-_]?\s*\d+$/.test(normalized)) return true;
+  return false;
+}
+
+function inferBuyerFromSourceName(sourceName) {
+  const source = String(sourceName || "").trim();
+  const normalized = normalizeLocationText(source);
+  if (!normalized) return "";
+  if (normalized.includes("borgarbyggd")) return "Borgarbyggð";
+  if (normalized.includes("akranes")) return "Akraneskaupstaður";
+  if (normalized.includes("gardabaer")) return "Garðabær";
+  if (normalized.includes("reykjanesbaer")) return "Reykjanesbær";
+  if (normalized.includes("kopavogur")) return "Kópavogur";
+  if (normalized.includes("hafnarfjordur")) return "Hafnarfjarðarbær";
+  if (normalized.includes("mosfellsbaer")) return "Mosfellsbær";
+  if (normalized.includes("arborg")) return "Sveitarfélagið Árborg";
+  if (normalized.includes("fjardabyggd")) return "Fjarðabyggð";
+  if (normalized.includes("mulathing")) return "Múlaþing";
+  if (normalized.includes("garðabaer")) return "Garðabær";
+  if (normalized.includes("rikiskaup") || normalized.includes("utbodsvefur")) return "";
+  return "";
+}
+
+function getCleanOpportunityBuyer(buyer, sourceName) {
+  const text = String(buyer || "").trim();
+  if (text && !isInvalidBuyerName(text) && text.toLowerCase() !== "unknown buyer") return text;
+  return inferBuyerFromSourceName(sourceName) || "Unknown buyer";
+}
+
+function formatOpportunityBuyer(opp) {
+  const sourceName = opp?.source || opp?.rawPayload?.source_name || "";
+  return formatReportMetadataValue("buyer", getCleanOpportunityBuyer(opp?.buyer, sourceName));
 }
 
 function formatOpportunityModalValue(type, value) {
@@ -8685,7 +8739,7 @@ ${state.language === "is" ? "Samantekt" : "Summary"}:
 
 ${orderedMatches.length ? orderedMatches.map((opp, i) => `${i + 1}. ${opp.title}
 ${state.language === "is" ? "Gæði" : "Quality"}: ${formatReportQualityLabel(getOpportunityQualityLabel(opp))}
-${t("buyer")}: ${formatReportMetadataValue("buyer", opp.buyer)}
+${t("buyer")}: ${formatOpportunityBuyer(opp)}
 ${t("source")}: ${formatReportMetadataValue("source", opp.source)}
 ${t("area")}: ${formatReportMetadataValue("location", opp.location)}
 ${t("deadline")}: ${opp.deadline ? formatCustomerReportDate(opp.deadline) : t("notFound")}
@@ -8718,7 +8772,7 @@ ${state.language === "is" ? "Tímabil" : "Date range"}: ${formatReportDateRange(
 
 ${orderedMatches.length ? orderedMatches.map((opp, i) => `${i + 1}. ${opp.title}
 ${state.language === "is" ? "Gæði" : "Quality"}: ${formatReportQualityLabel(getOpportunityQualityLabel(opp))}
-${t("buyer")}: ${formatReportMetadataValue("buyer", opp.buyer)}
+${t("buyer")}: ${formatOpportunityBuyer(opp)}
 ${t("source")}: ${formatReportMetadataValue("source", opp.source)}
 ${t("area")}: ${formatReportMetadataValue("location", opp.location)}
 ${t("deadline")}: ${opp.deadline ? formatCustomerReportDate(opp.deadline) : t("notFound")}
@@ -9088,7 +9142,7 @@ function renderOpportunitySummaryForCopy() {}
 
 function generateOpportunitySummary(opp) {
   return `${opp.title}
-${t("buyer")}: ${formatReportMetadataValue("buyer", opp.buyer)}
+${t("buyer")}: ${formatOpportunityBuyer(opp)}
 ${t("deadline")}: ${formatOpportunityDeadlineForReport(opp)}
 ${state.language === "is" ? "Samsvörun" : "Match"}: ${opp.matchScore}/100 (${formatReportMatchLabel(opp.matchLabel)})
 ${t("whyThisMatters")}:

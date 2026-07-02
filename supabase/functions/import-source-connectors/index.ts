@@ -181,6 +181,7 @@ const RIKISKAUP_SOURCE_NAME = "Ríkiskaup / island.is procurement";
 const VEGAGERDIN_SOURCE_NAME = "Vegagerðin";
 const VEGAGERDIN_PROJECT_EXTRACTION_METHOD = "vegagerdin_article_project_parser";
 const GARDABAER_SOURCE_NAME = "Garðabær Municipality";
+const FAXAFLOAHAFNIR_SOURCE_NAME = "Faxaflóahafnir útboð";
 const MISSING_DEADLINE_RISK = "Deadline not available in feed — verify on source page.";
 const STRONG_OPPORTUNITY_KEYWORDS = [
   "útboð",
@@ -614,7 +615,7 @@ async function fetchConnectorItems(connector: ConnectorRow, limit: number) {
 }
 
 async function fetchPageMonitorItems(connector: ConnectorRow, limit: number) {
-  if (!isGardabaerTenderPageConnector(connector)) {
+  if (!isGardabaerTenderPageConnector(connector) && !isFaxafloahafnirTenderPageConnector(connector)) {
     throw new Error("Unsupported page monitor connector");
   }
 
@@ -625,6 +626,9 @@ async function fetchPageMonitorItems(connector: ConnectorRow, limit: number) {
     },
   });
   if (!response.ok) throw new Error(`Page monitor fetch failed (${response.status})`);
+  if (isFaxafloahafnirTenderPageConnector(connector)) {
+    return enrichFaxafloahafnirTenderItems(parseFaxafloahafnirTenderPage(await response.text(), connector.endpoint_url).slice(0, limit));
+  }
   return parseGardabaerTenderPage(await response.text(), connector.endpoint_url).slice(0, limit);
 }
 
@@ -633,6 +637,16 @@ function isGardabaerTenderPageConnector(connector: ConnectorRow) {
   try {
     const url = new URL(connector.endpoint_url);
     return url.hostname.replace(/^www\./i, "") === "gardabaer.is" && url.pathname === "/framkvaemdir/utbod";
+  } catch {
+    return false;
+  }
+}
+
+function isFaxafloahafnirTenderPageConnector(connector: ConnectorRow) {
+  if (connector.sources?.name !== FAXAFLOAHAFNIR_SOURCE_NAME) return false;
+  try {
+    const url = new URL(connector.endpoint_url);
+    return url.hostname.replace(/^www\./i, "") === "faxafloahafnir.is" && url.pathname === "/utbod";
   } catch {
     return false;
   }
@@ -817,6 +831,117 @@ function parseGardabaerTenderPage(html: string, endpointUrl: string) {
   }
 
   return items;
+}
+
+function parseFaxafloahafnirTenderPage(html: string, endpointUrl: string) {
+  const items: Record<string, unknown>[] = [];
+  const cardPattern = /<article\b[^>]*TenderList_item__[^>]*>([\s\S]*?)<\/article>/gi;
+  const seen = new Set<string>();
+  let match: RegExpExecArray | null;
+
+  while ((match = cardPattern.exec(html)) !== null) {
+    const cardHtml = match[1] || "";
+    const href = decodeHtml(firstHtmlMatch(cardHtml, /<a\b[^>]*href="([^"]*\/utbod\/[^"]+)"[^>]*>/i));
+    const url = absolutizeUrl(href, endpointUrl);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+
+    const title = cleanConnectorText(firstHtmlMatch(cardHtml, /<h3\b[^>]*>([\s\S]*?)<\/h3>/i), "");
+    const publishedDate = parseDate(firstHtmlMatch(cardHtml, /<time\b[^>]*dateTime="([^"]+)"[^>]*>/i)) ||
+      parseDate(cleanConnectorText(firstHtmlMatch(cardHtml, /<time\b[^>]*>([\s\S]*?)<\/time>/i), ""));
+
+    if (!title) continue;
+
+    items.push({
+      externalId: `faxafloahafnir:${getUrlSlug(url)}`,
+      title,
+      link: url,
+      description: title,
+      content: title,
+      publishedDate,
+      categories: ["Útboð"],
+      buyer: "Faxaflóahafnir",
+      raw: {
+        source_page: endpointUrl,
+        source_page_type: "faxafloahafnir_tender_listing",
+        listing_published_date: publishedDate,
+      },
+    });
+  }
+
+  return items;
+}
+
+async function enrichFaxafloahafnirTenderItems(items: Record<string, unknown>[]) {
+  const enriched: Record<string, unknown>[] = [];
+  for (const item of items) {
+    const url = String(item.link || "");
+    if (!isSafeFaxafloahafnirTenderUrl(url)) {
+      enriched.push(item);
+      continue;
+    }
+
+    try {
+      const html = await fetchTextWithTimeout(url, 8000);
+      enriched.push(enrichFaxafloahafnirTenderItem(item, html));
+    } catch (error) {
+      enriched.push({
+        ...item,
+        raw: {
+          ...(item.raw && typeof item.raw === "object" ? item.raw as Record<string, unknown> : {}),
+          detail_fetch_error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+  return enriched;
+}
+
+function enrichFaxafloahafnirTenderItem(item: Record<string, unknown>, html: string) {
+  const articleHtml = extractFaxafloahafnirTenderArticleHtml(html);
+  const title = cleanConnectorText(firstHtmlMatch(articleHtml, /<h1\b[^>]*>([\s\S]*?)<\/h1>/i), String(item.title || "")) || String(item.title || "");
+  const publishedDate = parseDate(firstHtmlMatch(articleHtml, /<time\b[^>]*dateTime="([^"]+)"[^>]*>/i)) ||
+    parseDate(cleanConnectorText(firstHtmlMatch(articleHtml, /<time\b[^>]*>([\s\S]*?)<\/time>/i), "")) ||
+    String(item.publishedDate || "");
+  const bodyHtml = articleHtml.replace(/<h1\b[^>]*>[\s\S]*?<\/h1>/i, "").replace(/<time\b[^>]*>[\s\S]*?<\/time>/gi, "");
+  const description = cleanConnectorText(bodyHtml, title);
+  const extractedDeadline = extractDeadline(`${title} ${description}`);
+  const raw = item.raw && typeof item.raw === "object" ? item.raw as Record<string, unknown> : {};
+
+  return {
+    ...item,
+    title,
+    description: description || title,
+    content: description || title,
+    publishedDate,
+    deadline: extractedDeadline.date,
+    buyer: "Faxaflóahafnir",
+    raw: {
+      ...raw,
+      source_page_type: "faxafloahafnir_tender_listing",
+      detail_page_enriched: true,
+      extracted_deadline_text: extractedDeadline.rawText,
+    },
+  };
+}
+
+function extractFaxafloahafnirTenderArticleHtml(html: string) {
+  const mainMatch = html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i);
+  const mainHtml = mainMatch?.[1] || html;
+  const start = mainHtml.search(/<time\b|<h1\b/i);
+  if (start < 0) return mainHtml;
+  const footerStart = mainHtml.search(/<footer\b|<section\b[^>]*Footer_|Faxaflóahafnir reka umfangsmestu hafnir/i);
+  return footerStart > start ? mainHtml.slice(start, footerStart) : mainHtml.slice(start);
+}
+
+function isSafeFaxafloahafnirTenderUrl(value: string) {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.replace(/^www\./i, "");
+    return host === "faxafloahafnir.is" && /^\/utbod\/[^/]+\/?$/.test(url.pathname);
+  } catch {
+    return false;
+  }
 }
 
 function extractGardabaerTenderDetails(html: string) {
@@ -1079,7 +1204,7 @@ function normalizeConnectorItem(
   const categories = isWordPress
     ? extractWordPressTerms(item)
     : Array.isArray(item.categories) ? item.categories.map(String) : [];
-  const category = categories[0] || "Public procurement";
+  const category = source.name === FAXAFLOAHAFNIR_SOURCE_NAME ? "public procurement" : categories[0] || "Public procurement";
   const description = buildConnectorDescription({
     title,
     cleanDescription,
@@ -1091,7 +1216,9 @@ function normalizeConnectorItem(
   const extractedDeadline = extractDeadline(searchText);
   const deadline = String(item.deadline || "") || extractedDeadline.date;
   const isExpired = deadline ? daysUntil(deadline) < 0 : false;
-  const qualityStatus = getConnectorOpportunityQuality(searchText);
+  const qualityStatus = source.name === FAXAFLOAHAFNIR_SOURCE_NAME && !deadline
+    ? "needs_review"
+    : getConnectorOpportunityQuality(searchText);
   const opportunityIntent = getConnectorOpportunityIntent(searchText, title);
   const buyer = getConnectorItemBuyer(item, connector.connector_type, source.name, title) || "Unknown buyer";
 
@@ -1124,6 +1251,7 @@ function normalizeConnectorItem(
     raw_payload: {
       connector_type: connector.connector_type,
       source_name: source.name,
+      ...(source.name === FAXAFLOAHAFNIR_SOURCE_NAME ? { source_intent: "high_intent_procurement" } : {}),
       buyer,
       quality_status: qualityStatus,
       opportunity_intent: opportunityIntent,
@@ -1506,12 +1634,54 @@ function getConnectorItemBuyer(item: Record<string, unknown>, connectorType: Con
     const authorName = stripHtml(String(authors[0]?.name || ""));
     const authorUrl = stripHtml(String(authors[0]?.url || ""));
     if (sourceName === RIKISKAUP_SOURCE_NAME) {
-      return inferRikiskaupBuyer(title, authorName, authorUrl);
+      return sanitizeConnectorBuyer(inferRikiskaupBuyer(title, authorName, authorUrl), sourceName);
     }
-    return authorName;
+    return sanitizeConnectorBuyer(authorName, sourceName);
   }
 
-  return stripHtml(String(item.creator || item.buyer || ""));
+  return sanitizeConnectorBuyer(stripHtml(String(item.buyer || item.creator || "")), sourceName);
+}
+
+function sanitizeConnectorBuyer(value: string, sourceName = "") {
+  const clean = cleanBuyerName(value);
+  if (clean && !isInvalidConnectorBuyer(clean)) return clean;
+  return inferBuyerFromSourceName(sourceName);
+}
+
+function isInvalidConnectorBuyer(value: string) {
+  const normalized = normalizeSearchText(value);
+  if (!normalized) return true;
+  if ([
+    "admin",
+    "administrator",
+    "ritstjori",
+    "editor",
+    "noreply",
+    "no reply",
+    "wordpress",
+    "wp admin",
+    "user",
+    "test",
+  ].includes(normalized)) return true;
+  if (normalized.includes("noreply")) return true;
+  if (/^wp\s*[-_]?\s*\d+$/.test(normalized)) return true;
+  return false;
+}
+
+function inferBuyerFromSourceName(sourceName: string) {
+  const normalized = normalizeSearchText(sourceName);
+  if (!normalized) return "";
+  if (normalized.includes("borgarbyggd")) return "Borgarbyggð";
+  if (normalized.includes("akranes")) return "Akraneskaupstaður";
+  if (normalized.includes("gardabaer")) return "Garðabær";
+  if (normalized.includes("reykjanesbaer")) return "Reykjanesbær";
+  if (normalized.includes("kopavogur")) return "Kópavogur";
+  if (normalized.includes("hafnarfjordur")) return "Hafnarfjarðarbær";
+  if (normalized.includes("mosfellsbaer")) return "Mosfellsbær";
+  if (normalized.includes("arborg")) return "Sveitarfélagið Árborg";
+  if (normalized.includes("fjardabyggd")) return "Fjarðabyggð";
+  if (normalized.includes("mulathing")) return "Múlaþing";
+  return "";
 }
 
 function inferRikiskaupBuyer(title: string, authorName: string, authorUrl = "") {
