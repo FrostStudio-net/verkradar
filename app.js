@@ -1945,7 +1945,7 @@ async function generateAdminCompanyReport(companyId) {
     if (!payload.report_created) {
       state.adminMessage = {
         type: "error",
-        text: payload.message || `No customer-report-ready matches found for ${company.companyName}.`
+        text: getAdminNoReportMessage(payload, company.companyName)
       };
       render();
       return;
@@ -1990,6 +1990,16 @@ async function runAdminCompanyAction(companyId, action, extra = {}) {
 
 function formatAdminReportMode(mode) {
   return mode === "all_current" ? "all current matches" : "new opportunities";
+}
+
+function getAdminNoReportMessage(payload, companyName) {
+  const mode = payload?.report_mode || state.adminReportMode || "new_only";
+  if (state.language === "is") {
+    return mode === "new_only"
+      ? "Engin ný tækifæri fundust síðan síðasta yfirlit."
+      : `Engin viðeigandi tækifæri fundust fyrir ${companyName}.`;
+  }
+  return payload?.message || `No customer-report-ready matches found for ${companyName}.`;
 }
 
 async function refreshAdminOperationsData() {
