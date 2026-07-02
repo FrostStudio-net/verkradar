@@ -228,6 +228,8 @@ async function generateCompanyReport(
     report_id: savedReport.id,
     opportunity_id: match.id,
     match_score: match.matchScore,
+    match_reasons: Array.isArray(match.matchReasons) ? match.matchReasons : [],
+    risks: Array.isArray(match.risks) ? match.risks : [],
     sort_order: index + 1,
   }));
 
@@ -398,6 +400,18 @@ function isCivilWeakGenericTerm(value: string) {
   return CIVIL_WEAK_GENERIC_TERMS.some((term) => normalized === normalizeText(term));
 }
 
+function rankMatchTerm(value: string) {
+  const normalized = normalizeText(value);
+  if (CIVIL_STRONG_SERVICE_TERMS.some((term) => normalized === normalizeText(term))) return 0;
+  if (CIVIL_STRONG_SERVICE_TERMS.some((term) => normalized.includes(normalizeText(term)) || normalizeText(term).includes(normalized))) return 1;
+  if (isCivilWeakGenericTerm(value)) return 10;
+  return 3;
+}
+
+function sortMatchTermsBySpecificity(values: string[]) {
+  return [...values].sort((a, b) => rankMatchTerm(a) - rankMatchTerm(b) || b.length - a.length || a.localeCompare(b));
+}
+
 function isCivilContractorProfile(profile: CompanyProfile) {
   const profileText = [
     profile.industry,
@@ -447,8 +461,8 @@ function getCivilContractorFit(
   const shouldScoreWeakTerms = hasStrongCivilTerm || hasAnySpecificHit;
 
   return {
-    serviceHits: shouldScoreWeakTerms ? serviceHits : serviceHits.filter((service) => !isCivilWeakGenericTerm(service)),
-    keywordHits: shouldScoreWeakTerms ? keywordHits : keywordHits.filter((keyword) => !isCivilWeakGenericTerm(keyword)),
+    serviceHits: sortMatchTermsBySpecificity(shouldScoreWeakTerms ? serviceHits : serviceHits.filter((service) => !isCivilWeakGenericTerm(service))),
+    keywordHits: sortMatchTermsBySpecificity(shouldScoreWeakTerms ? keywordHits : keywordHits.filter((keyword) => !isCivilWeakGenericTerm(keyword))),
     hasWeakOnlyFit: !hasStrongCivilTerm && !hasAnySpecificHit && (serviceHitsAreWeakOnly || keywordHitsAreWeakOnly),
     hasIndoorMismatch: hasIndoorTerm && !hasStrongCivilTerm && !allowsIndoorWork,
   };

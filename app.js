@@ -921,6 +921,10 @@ document.addEventListener("click", (event) => {
     return;
   }
   if (name === "save-report") saveCurrentReport();
+  if (name === "archive-report") {
+    archiveReport(id);
+    return;
+  }
   if (name === "view-report") {
     state.selectedReportId = id;
     render();
@@ -1570,6 +1574,8 @@ async function loadAdminReports() {
           id,
           opportunity_id,
           match_score,
+          match_reasons,
+          risks,
           sort_order,
           opportunities (
             *,
@@ -1625,6 +1631,8 @@ async function loadAdminReportDetails(reportId) {
           id,
           opportunity_id,
           match_score,
+          match_reasons,
+          risks,
           sort_order,
           opportunities (
             *,
@@ -3348,10 +3356,20 @@ async function loadReportsForCurrentCompany() {
           id,
           opportunity_id,
           match_score,
-          sort_order
+          match_reasons,
+          risks,
+          sort_order,
+          opportunities (
+            *,
+            sources (
+              name,
+              source_type
+            )
+          )
         )
       `)
       .eq("company_id", state.companyId)
+      .is("archived_at", null)
       .order("created_at", { ascending: false });
 
     if (error) throw error;
@@ -3415,6 +3433,8 @@ async function saveCurrentReport() {
         report_id: savedReport.id,
         opportunity_id: opp.id,
         match_score: opp.matchScore,
+        match_reasons: opp.matchReasons || [],
+        risks: opp.risks || [],
         sort_order: index + 1
       }));
 
@@ -3431,6 +3451,49 @@ async function saveCurrentReport() {
     state.reportMessage = { type: "error", text: `Failed to save report. ${formatSupabaseError(error)}` };
   } finally {
     state.reportSaveLoading = false;
+    render();
+  }
+}
+
+async function archiveReport(reportId) {
+  if (!reportId || !supabaseClient || !state.user) return;
+  const confirmed = window.confirm(state.language === "is"
+    ? "Ertu viss um að þú viljir fela þetta yfirlit? Þetta er ekki hægt að afturkalla í mælaborðinu."
+    : "Are you sure you want to hide this report? This cannot be undone from the dashboard.");
+  if (!confirmed) return;
+
+  state.reportArchiveLoading = true;
+  state.reportMessage = null;
+  render();
+
+  try {
+    const { error } = await supabaseClient
+      .from("reports")
+      .update({
+        archived_at: new Date().toISOString(),
+        archived_by: state.user.id
+      })
+      .eq("id", reportId)
+      .eq("company_id", state.companyId);
+
+    if (error) throw error;
+    if (state.selectedReportId === reportId) state.selectedReportId = null;
+    state.reports = state.reports.filter((report) => report.id !== reportId);
+    state.reportMessage = {
+      type: "success",
+      text: state.language === "is" ? "Yfirlitið var falið." : "Report hidden."
+    };
+    showToast(state.language === "is" ? "Yfirlit falið" : "Report hidden", "success");
+  } catch (error) {
+    console.error("Failed to archive report:", error);
+    state.reportMessage = {
+      type: "error",
+      text: state.language === "is"
+        ? `Gat ekki falið yfirlitið. ${formatSupabaseError(error)}`
+        : `Could not hide report. ${formatSupabaseError(error)}`
+    };
+  } finally {
+    state.reportArchiveLoading = false;
     render();
   }
 }
@@ -4216,6 +4279,18 @@ function isCivilWeakGenericTerm(value) {
   return CIVIL_WEAK_GENERIC_TERMS.some((term) => normalized === normalizeMatchText(term));
 }
 
+function rankMatchTerm(value) {
+  const normalized = normalizeMatchText(value);
+  if (CIVIL_STRONG_SERVICE_TERMS.some((term) => normalized === normalizeMatchText(term))) return 0;
+  if (CIVIL_STRONG_SERVICE_TERMS.some((term) => normalized.includes(normalizeMatchText(term)) || normalizeMatchText(term).includes(normalized))) return 1;
+  if (isCivilWeakGenericTerm(value)) return 10;
+  return 3;
+}
+
+function sortMatchTermsBySpecificity(values) {
+  return [...values].sort((a, b) => rankMatchTerm(a) - rankMatchTerm(b) || String(b).length - String(a).length || String(a).localeCompare(String(b)));
+}
+
 function isCivilContractorProfile(profile = {}) {
   const profileText = [
     profile.industry,
@@ -4270,8 +4345,8 @@ function getCivilContractorFit(profile, opp, serviceHits, keywordHits) {
 
   return {
     isCivilProfile: true,
-    serviceHits: filteredServiceHits,
-    keywordHits: filteredKeywordHits,
+    serviceHits: sortMatchTermsBySpecificity(filteredServiceHits),
+    keywordHits: sortMatchTermsBySpecificity(filteredKeywordHits),
     hasWeakOnlyFit: !hasStrongCivilTerm && !hasAnySpecificHit && (serviceHitsAreWeakOnly || keywordHitsAreWeakOnly),
     hasIndoorMismatch: hasIndoorTerm && !hasStrongCivilTerm && !allowsIndoorWork
   };
@@ -6456,7 +6531,7 @@ function renderAdminReportItem(item) {
       <div class="admin-report-meta-grid">
         <span><strong>${escapeHtml(t("buyer"))}</strong>${escapeHtml(formatOpportunityBuyer(opp))}</span>
         <span><strong>${escapeHtml(t("source"))}</strong>${escapeHtml(formatReportMetadataValue("source", opp.source))}</span>
-        <span><strong>${escapeHtml(t("area"))}</strong>${escapeHtml(formatReportMetadataValue("location", opp.location))}</span>
+        <span><strong>${escapeHtml(t("area"))}</strong>${escapeHtml(formatOpportunityLocation(opp))}</span>
         <span><strong>${escapeHtml(t("deadline"))}</strong>${escapeHtml(deadline.label)}</span>
         <span><strong>${escapeHtml(t("estimatedValue"))}</strong>${escapeHtml(opp.estimatedValue ? formatISK(opp.estimatedValue) : t("notListed"))}</span>
       </div>
@@ -7266,7 +7341,7 @@ function renderOpportunityCard(opp) {
         <p>${escapeHtml(opp.description)}</p>
         <div class="meta-row">
           <span>${escapeHtml(formatOpportunityBuyer(opp))}</span>
-          <span>${escapeHtml(formatReportMetadataValue("location", opp.location))}</span>
+          <span>${escapeHtml(formatOpportunityLocation(opp))}</span>
           <span>${formatISK(opp.estimatedValue)}</span>
           <span class="${deadline.className}">${escapeHtml(deadline.label)}</span>
         </div>
@@ -7390,7 +7465,7 @@ function renderOpportunityModal(opp) {
               ${renderExtractedArticleBadge(opp)}
             </div>
             <h2>${escapeHtml(opp.title)}</h2>
-            <p>${escapeHtml(formatOpportunityModalValue("buyer", opp.buyer))} · ${escapeHtml(formatOpportunityModalValue("location", opp.location))} · ${opp.estimatedValue ? formatISK(opp.estimatedValue) : t("notListed")}</p>
+            <p>${escapeHtml(formatOpportunityModalValue("buyer", opp.buyer))} · ${escapeHtml(formatOpportunityLocation(opp))} · ${opp.estimatedValue ? formatISK(opp.estimatedValue) : t("notListed")}</p>
           </div>
           <button type="button" class="icon-btn modal-close-btn" data-action="close-modal" aria-label="Close details">×</button>
         </div>
@@ -7810,7 +7885,7 @@ function renderAdminOpportunityRow(opp) {
     <div class="admin-row">
       <div>
         <h3>${escapeHtml(opp.title)}</h3>
-        <p>${escapeHtml(formatOpportunityBuyer(opp))} · ${escapeHtml(opp.source)} · ${escapeHtml(opp.location)} · ${escapeHtml(opp.status)}</p>
+        <p>${escapeHtml(formatOpportunityBuyer(opp))} · ${escapeHtml(opp.source)} · ${escapeHtml(formatOpportunityLocation(opp))} · ${escapeHtml(opp.status)}</p>
         <p>Quality: ${escapeHtml(getOpportunityQualityLabel(opp))} · Intent: ${escapeHtml(formatOpportunityIntent(intent))}${hiddenFromReports ? " · Hidden from reports" : ""}</p>
       </div>
       <div class="admin-row-actions">
@@ -7904,15 +7979,40 @@ function renderReport() {
 function renderReportArchiveRow(report) {
   const itemCount = Array.isArray(report.report_items) ? report.report_items.length : Number(report.itemCount || 0);
   const companyName = state.profile?.companyName || report.companies?.company_name || "Company";
+  const created = state.language === "is" ? formatCustomerReportDate(report.created_at) : formatShortDate(report.created_at);
+  const itemLabel = state.language === "is"
+    ? `${itemCount} ${itemCount === 1 ? "tækifæri" : "tækifæri"}`
+    : `${itemCount} item${itemCount === 1 ? "" : "s"}`;
   return `
     <div class="report-archive-row">
       <div>
         <h3>${escapeHtml(getCustomerReportTitle(report, companyName))}</h3>
-        <p>${formatDateTime(report.created_at)} · ${itemCount} item${itemCount === 1 ? "" : "s"} · ${escapeHtml(report.status || "draft")}</p>
+        <p>${escapeHtml(created)} · ${escapeHtml(itemLabel)} · ${escapeHtml(formatReportArchiveStatus(report.status))}</p>
       </div>
-      <button class="btn btn-secondary" data-action="view-report" data-id="${escapeHtml(report.id)}">${escapeHtml(t("viewReport"))}</button>
+      <div class="admin-row-actions">
+        <button class="btn btn-secondary" data-action="view-report" data-id="${escapeHtml(report.id)}">${escapeHtml(t("viewReport"))}</button>
+        <button class="btn btn-ghost btn-small" data-action="archive-report" data-id="${escapeHtml(report.id)}">${escapeHtml(state.language === "is" ? "Fela yfirlit" : "Hide report")}</button>
+      </div>
     </div>
   `;
+}
+
+function formatReportArchiveStatus(status) {
+  const value = String(status || "draft");
+  if (state.language === "is") {
+    const map = {
+      generated_all_current: "Heildaryfirlit",
+      generated_new_only: "Ný tækifæri",
+      draft: "Vistað yfirlit"
+    };
+    return map[value] || value;
+  }
+  const map = {
+    generated_all_current: "All current",
+    generated_new_only: "New opportunities",
+    draft: "Saved report"
+  };
+  return map[value] || value;
 }
 
 function renderReportPreview(report, options = {}) {
@@ -8003,8 +8103,10 @@ function getSavedReportItemMatches(savedReport) {
         ...opp,
         matchScore: Number(item.match_score || 0),
         matchLabel: getMatchLabel(Number(item.match_score || 0)),
-        matchReasons: sanitizeMatchReasons(opp, []),
-        risks: Array.isArray(opp.rawPayload?.risks) ? opp.rawPayload.risks : [],
+        matchReasons: sanitizeMatchReasons(opp, Array.isArray(item.match_reasons) ? item.match_reasons : []),
+        risks: Array.isArray(item.risks) && item.risks.length
+          ? item.risks
+          : (Array.isArray(opp.rawPayload?.risks) ? opp.rawPayload.risks : []),
         nextSteps: []
       };
     })
@@ -8540,7 +8642,7 @@ function renderReportOpportunityItem(opp) {
       <div class="report-facts">
         <span><strong>${escapeHtml(t("buyer"))}</strong>${escapeHtml(formatOpportunityBuyer(opp))}</span>
         <span><strong>${escapeHtml(t("source"))}</strong>${escapeHtml(formatReportMetadataValue("source", opp.source))}</span>
-        <span><strong>${escapeHtml(t("area"))}</strong>${escapeHtml(formatReportMetadataValue("location", opp.location))}</span>
+        <span><strong>${escapeHtml(t("area"))}</strong>${escapeHtml(formatOpportunityLocation(opp))}</span>
         <span><strong>${escapeHtml(t("deadline"))}</strong><em>${escapeHtml(deadlineText)}</em></span>
         <span><strong>${escapeHtml(t("estimatedValue"))}</strong><em>${escapeHtml(valueText)}</em></span>
       </div>
@@ -8627,6 +8729,7 @@ function inferBuyerFromSourceName(sourceName) {
   if (!normalized) return "";
   if (normalized.includes("borgarbyggd")) return "Borgarbyggð";
   if (normalized.includes("akranes")) return "Akraneskaupstaður";
+  if (normalized.includes("faxafloahafnir")) return "Faxaflóahafnir";
   if (normalized.includes("gardabaer")) return "Garðabær";
   if (normalized.includes("reykjanesbaer")) return "Reykjanesbær";
   if (normalized.includes("kopavogur")) return "Kópavogur";
@@ -8649,6 +8752,23 @@ function getCleanOpportunityBuyer(buyer, sourceName) {
 function formatOpportunityBuyer(opp) {
   const sourceName = opp?.source || opp?.rawPayload?.source_name || "";
   return formatReportMetadataValue("buyer", getCleanOpportunityBuyer(opp?.buyer, sourceName));
+}
+
+function formatOpportunityLocation(opp) {
+  const sourceName = opp?.source || opp?.rawPayload?.source_name || "";
+  const sourceLocation = inferLocationFromSourceName(sourceName);
+  if (sourceLocation) return sourceLocation;
+  return formatReportMetadataValue("location", opp?.location);
+}
+
+function inferLocationFromSourceName(sourceName) {
+  const normalized = normalizeLocationText(sourceName);
+  if (!normalized) return "";
+  if (normalized.includes("borgarbyggd")) return "Borgarbyggð / Vesturland";
+  if (normalized.includes("akranes")) return "Akranes / Vesturland";
+  if (normalized.includes("faxafloahafnir")) return "Höfuðborgarsvæðið";
+  if (normalized.includes("arborg")) return "Árborg / Suðurland";
+  return "";
 }
 
 function formatOpportunityModalValue(type, value) {
@@ -8751,7 +8871,7 @@ ${orderedMatches.length ? orderedMatches.map((opp, i) => `${i + 1}. ${opp.title}
 ${state.language === "is" ? "Gæði" : "Quality"}: ${formatReportQualityLabel(getOpportunityQualityLabel(opp))}
 ${t("buyer")}: ${formatOpportunityBuyer(opp)}
 ${t("source")}: ${formatReportMetadataValue("source", opp.source)}
-${t("area")}: ${formatReportMetadataValue("location", opp.location)}
+${t("area")}: ${formatOpportunityLocation(opp)}
 ${t("deadline")}: ${opp.deadline ? formatCustomerReportDate(opp.deadline) : t("notFound")}
 ${t("estimatedValue")}: ${opp.estimatedValue ? formatISK(opp.estimatedValue) : t("notListed")}
 ${state.language === "is" ? "Samsvörun" : "Match"}: ${opp.matchScore}/100 (${formatReportMatchLabel(opp.matchLabel)})
@@ -8784,7 +8904,7 @@ ${orderedMatches.length ? orderedMatches.map((opp, i) => `${i + 1}. ${opp.title}
 ${state.language === "is" ? "Gæði" : "Quality"}: ${formatReportQualityLabel(getOpportunityQualityLabel(opp))}
 ${t("buyer")}: ${formatOpportunityBuyer(opp)}
 ${t("source")}: ${formatReportMetadataValue("source", opp.source)}
-${t("area")}: ${formatReportMetadataValue("location", opp.location)}
+${t("area")}: ${formatOpportunityLocation(opp)}
 ${t("deadline")}: ${opp.deadline ? formatCustomerReportDate(opp.deadline) : t("notFound")}
 ${t("estimatedValue")}: ${opp.estimatedValue ? formatISK(opp.estimatedValue) : t("notListed")}
 ${state.language === "is" ? "Samsvörun" : "Match"}: ${opp.matchScore}/100 (${formatReportMatchLabel(opp.matchLabel)})
@@ -9133,12 +9253,16 @@ function renderSettings() {
       ` : ""}
     </section>
     ${renderProfileForm()}
-    <section class="danger-zone">
+    ${canShowDemoReset() ? `<section class="danger-zone">
       <h2>Reset demo</h2>
       <p>This clears localStorage profile, saved and ignored opportunities.</p>
       <button class="btn btn-ghost" data-action="reset">Reset all demo data</button>
-    </section>
+    </section>` : ""}
   `);
+}
+
+function canShowDemoReset() {
+  return Boolean(state.isAdmin || ["localhost", "127.0.0.1", ""].includes(window.location.hostname));
 }
 
 function renderIgnored() {
