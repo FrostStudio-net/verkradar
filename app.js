@@ -550,6 +550,9 @@ let state = {
   adminReportsLoading: false,
   adminReportsLoaded: false,
   adminReportsError: null,
+  selectedAdminReport: null,
+  selectedAdminReportLoading: false,
+  selectedAdminReportError: null,
   sourceCoverage: [],
   sourceCoverageLoading: false,
   sourceCoverageLoaded: false,
@@ -568,6 +571,7 @@ let state = {
     profileStatus: "all",
     plan: "all"
   },
+  adminReportMode: "new_only",
   adminOpportunityFilters: {
     source: "all",
     status: "all",
@@ -588,6 +592,7 @@ let state = {
   reportSaveLoading: false,
   reportMessage: null,
   selectedReportId: null,
+  selectedAdminReportId: null,
   adminMessage: null,
   adminSubmitting: false,
   adminDeletingId: null,
@@ -638,6 +643,9 @@ function clearLocalProfileState() {
   state.adminReportsLoading = false;
   state.adminReportsLoaded = false;
   state.adminReportsError = null;
+  state.selectedAdminReport = null;
+  state.selectedAdminReportLoading = false;
+  state.selectedAdminReportError = null;
   state.sourceCoverage = [];
   state.sourceCoverageLoading = false;
   state.sourceCoverageLoaded = false;
@@ -856,6 +864,10 @@ document.addEventListener("click", (event) => {
   }
   if (name === "copy-report") copyReport();
   if (name === "download-report-pdf") downloadReportPdf();
+  if (name === "download-admin-report-pdf") {
+    downloadAdminReportPdf();
+    return;
+  }
   if (name === "save-report") saveCurrentReport();
   if (name === "view-report") {
     state.selectedReportId = id;
@@ -865,9 +877,30 @@ document.addEventListener("click", (event) => {
     state.selectedReportId = null;
     render();
   }
+  if (name === "view-admin-report") {
+    state.selectedAdminReportId = id;
+    state.selectedAdminReport = null;
+    state.selectedAdminReportError = null;
+    state.adminActiveTab = "reports";
+    render();
+    loadAdminReportDetails(id);
+    return;
+  }
+  if (name === "close-admin-report") {
+    state.selectedAdminReportId = null;
+    state.selectedAdminReport = null;
+    state.selectedAdminReportError = null;
+    render();
+    return;
+  }
+  if (name === "copy-admin-report") {
+    copyAdminReportText(id);
+    return;
+  }
   if (name === "admin-tab") {
     state.adminActiveTab = action.dataset.tab || "overview";
     state.selectedAdminCompanyId = null;
+    state.selectedAdminReportId = null;
     render();
   }
   if (name === "view-admin-company") {
@@ -1084,6 +1117,11 @@ document.addEventListener("input", (event) => {
   if (event.target.matches("[data-admin-company-filter]")) {
     const key = event.target.dataset.adminCompanyFilter;
     state.adminCompanyFilters[key] = event.target.value;
+    render();
+  }
+
+  if (event.target.matches("[data-admin-report-mode]")) {
+    state.adminReportMode = event.target.value === "all_current" ? "all_current" : "new_only";
     render();
   }
 });
@@ -1468,13 +1506,26 @@ async function loadAdminReports() {
         company_id,
         period_start,
         period_end,
+        summary,
+        text_content,
+        html_content,
         status,
         created_at,
         companies (
           company_name
         ),
         report_items (
-          id
+          id,
+          opportunity_id,
+          match_score,
+          sort_order,
+          opportunities (
+            *,
+            sources (
+              name,
+              source_type
+            )
+          )
         )
       `)
       .order("created_at", { ascending: false })
@@ -1491,6 +1542,65 @@ async function loadAdminReports() {
     state.adminReportsLoading = false;
     state.adminReportsLoaded = true;
     render();
+  }
+}
+
+async function loadAdminReportDetails(reportId) {
+  if (!supabaseClient || !state.isAdmin || !reportId) return;
+
+  state.selectedAdminReportLoading = true;
+  state.selectedAdminReportError = null;
+  render();
+
+  try {
+    const { data, error } = await supabaseClient
+      .from("reports")
+      .select(`
+        id,
+        title,
+        company_id,
+        period_start,
+        period_end,
+        summary,
+        text_content,
+        html_content,
+        status,
+        created_at,
+        companies (
+          company_name
+        ),
+        report_items (
+          id,
+          opportunity_id,
+          match_score,
+          sort_order,
+          opportunities (
+            *,
+            sources (
+              name,
+              source_type
+            )
+          )
+        )
+      `)
+      .eq("id", reportId)
+      .single();
+
+    if (error) throw error;
+    if (state.selectedAdminReportId === reportId) {
+      state.selectedAdminReport = data;
+    }
+  } catch (error) {
+    console.error("Failed to load admin report details:", error);
+    if (state.selectedAdminReportId === reportId) {
+      state.selectedAdminReport = null;
+      state.selectedAdminReportError = formatSupabaseError(error);
+    }
+  } finally {
+    if (state.selectedAdminReportId === reportId) {
+      state.selectedAdminReportLoading = false;
+      render();
+    }
   }
 }
 
@@ -1777,7 +1887,9 @@ async function generateAdminCompanyReport(companyId) {
   render();
 
   try {
-    const payload = await runAdminCompanyAction(companyId, "generate_report");
+    const payload = await runAdminCompanyAction(companyId, "generate_report", {
+      reportMode: state.adminReportMode || "new_only"
+    });
     if (!payload.report_created) {
       state.adminMessage = {
         type: "error",
@@ -1791,7 +1903,7 @@ async function generateAdminCompanyReport(companyId) {
     if (state.companyId === companyId) await loadReportsForCurrentCompany();
     state.adminMessage = {
       type: "success",
-      text: `Generated report for ${company.companyName} with ${Number(payload.report_items || 0)} item${Number(payload.report_items || 0) === 1 ? "" : "s"}. Open the Reports tab to review it.`
+      text: `Generated ${formatAdminReportMode(payload.report_mode || state.adminReportMode)} report for ${company.companyName} with ${Number(payload.report_items || 0)} item${Number(payload.report_items || 0) === 1 ? "" : "s"}. Open the Reports tab to review it.`
     };
     showToast("Company report generated", "success");
   } catch (error) {
@@ -1806,7 +1918,7 @@ async function generateAdminCompanyReport(companyId) {
   }
 }
 
-async function runAdminCompanyAction(companyId, action) {
+async function runAdminCompanyAction(companyId, action, extra = {}) {
   const endpoint = getAdminCompanyActionsEndpoint();
   if (!endpoint) {
     throw new Error("Admin company actions are not configured. Set window.VERKRADAR_ADMIN_COMPANY_ACTIONS_URL or window.VERKRADAR_SUPABASE_URL.");
@@ -1815,13 +1927,17 @@ async function runAdminCompanyAction(companyId, action) {
   const response = await fetch(endpoint, {
     method: "POST",
     headers: await getTedImportHeaders(),
-    body: JSON.stringify({ companyId, action })
+    body: JSON.stringify({ companyId, action, ...extra })
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(payload.error || `Admin company action failed with status ${response.status}`);
   }
   return payload;
+}
+
+function formatAdminReportMode(mode) {
+  return mode === "all_current" ? "all current matches" : "new opportunities";
 }
 
 async function refreshAdminOperationsData() {
@@ -4549,7 +4665,7 @@ function formatOpportunityDeadline(value) {
 }
 
 function formatOpportunityDeadlineForReport(opp) {
-  return opp?.deadline ? formatShortDate(opp.deadline) : getOpportunityMissingDeadlineRisk(opp);
+  return opp?.deadline ? formatCustomerReportDate(opp.deadline) : formatReportRisk(getOpportunityMissingDeadlineRisk(opp));
 }
 
 function getOpportunityMissingDeadlineRisk(opp) {
@@ -5770,6 +5886,7 @@ function renderLatestGeneratedReports() {
                 <th>Period</th>
                 <th>Status</th>
                 <th>Items</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -5778,6 +5895,7 @@ function renderLatestGeneratedReports() {
           </table>
         </div>
       ` : `<div class="empty-card">No generated reports yet.</div>`}
+      ${state.selectedAdminReportId ? renderAdminReportDetails() : ""}
     </section>
   `;
 }
@@ -5983,14 +6101,163 @@ function renderAdminReportRow(report) {
   const itemCount = Array.isArray(report.report_items) ? report.report_items.length : 0;
   return `
     <tr>
-      <td>${escapeHtml(report.title || "Untitled report")}</td>
+      <td>${escapeHtml(getCustomerReportTitle(report, companyName))}</td>
       <td>${escapeHtml(companyName)}</td>
       <td>${escapeHtml(formatDateTime(report.created_at))}</td>
       <td>${escapeHtml(`${formatShortDate(report.period_start)} - ${formatShortDate(report.period_end)}`)}</td>
       <td>${escapeHtml(report.status || "draft")}</td>
       <td>${itemCount}</td>
+      <td>
+        <div class="admin-row-actions">
+          <button class="btn btn-secondary btn-small" type="button" data-action="view-admin-report" data-id="${escapeHtml(report.id)}">View report</button>
+          <button class="btn btn-ghost btn-small" type="button" data-action="copy-admin-report" data-id="${escapeHtml(report.id)}">Copy text</button>
+          <button class="btn btn-ghost btn-small" type="button" data-action="view-admin-report" data-id="${escapeHtml(report.id)}">Open for PDF</button>
+        </div>
+      </td>
     </tr>
   `;
+}
+
+function renderAdminReportDetails() {
+  const listReport = (state.adminReports || []).find((item) => item.id === state.selectedAdminReportId);
+  const report = state.selectedAdminReport?.id === state.selectedAdminReportId ? state.selectedAdminReport : listReport;
+  if (!report && !state.selectedAdminReportLoading && !state.selectedAdminReportError) return "";
+  if (!report) {
+    return `
+      <div class="modal-backdrop">
+        <div class="modal admin-report-modal" role="dialog" aria-modal="true">
+          <div class="modal-header">
+            <div>
+              <span class="status-pill is-success">generated</span>
+              <h2>Loading report</h2>
+              <p>Loading saved report items...</p>
+            </div>
+            <button type="button" class="icon-btn modal-close-btn" data-action="close-admin-report" aria-label="Close report">×</button>
+          </div>
+          <div class="modal-body">
+            ${state.selectedAdminReportError ? `<div class="admin-message is-error">${escapeHtml(state.selectedAdminReportError)}</div>` : `<div class="empty-card">Loading saved report items...</div>`}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+  const companyName = report.companies?.company_name || "Unknown company";
+  const itemCount = Array.isArray(report.report_items) ? report.report_items.length : 0;
+  const cleanTitle = getCustomerReportTitle(report, companyName);
+  return `
+    <div class="modal-backdrop">
+      <div class="modal admin-report-modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <span class="status-pill is-success">${escapeHtml(report.status || "generated")}</span>
+            <h2>${escapeHtml(cleanTitle)}</h2>
+            <p>${escapeHtml(companyName)} · ${escapeHtml(`${formatShortDate(report.period_start)} - ${formatShortDate(report.period_end)}`)} · ${escapeHtml(formatDateTime(report.created_at))}</p>
+          </div>
+          <button type="button" class="icon-btn modal-close-btn" data-action="close-admin-report" aria-label="Close report">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="admin-report-actions">
+            <button class="btn btn-primary" type="button" data-action="download-admin-report-pdf" ${state.selectedAdminReportLoading ? "disabled" : ""}>Download PDF</button>
+            <button class="btn btn-secondary" type="button" data-action="copy-admin-report" data-id="${escapeHtml(report.id)}">Copy text/email summary</button>
+            <button class="btn btn-ghost" type="button" data-action="close-admin-report">Close</button>
+          </div>
+
+          ${state.selectedAdminReportLoading ? `<div class="empty-card">Loading saved report items...</div>` : ""}
+          ${state.selectedAdminReportError ? `<div class="admin-message is-error">${escapeHtml(state.selectedAdminReportError)}</div>` : ""}
+          ${!state.selectedAdminReportLoading ? renderAdminReportMetadataStrip(report, itemCount, companyName) : ""}
+
+          ${!state.selectedAdminReportLoading && itemCount ? renderSavedReportPreview(report, { companyName }, {
+            id: "admin-report-preview",
+            closeButton: false,
+            includeTextArea: false
+          }) : !state.selectedAdminReportLoading ? `
+            <div class="empty-card">No new eligible opportunities in this report.</div>
+          ` : ""}
+
+          ${!state.selectedAdminReportLoading && itemCount ? renderAdminReportItems(report) : ""}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderAdminReportMetadataStrip(report, itemCount, companyName) {
+  const mode = report.status === "generated_all_current"
+    ? "all_current"
+    : report.status === "generated_new_only"
+      ? "new_only"
+      : report.status || "draft";
+  return `
+    <div class="admin-report-meta-strip">
+      <span><strong>Company</strong>${escapeHtml(companyName || "Unknown company")}</span>
+      <span><strong>Period</strong>${escapeHtml(`${formatShortDate(report.period_start)} - ${formatShortDate(report.period_end)}`)}</span>
+      <span><strong>Generated at</strong>${escapeHtml(formatDateTime(report.created_at))}</span>
+      <span><strong>Mode</strong>${escapeHtml(mode)}</span>
+      <span><strong>Items</strong>${Number(itemCount || 0)}</span>
+    </div>
+  `;
+}
+
+function renderAdminReportItems(report) {
+  const items = Array.isArray(report.report_items) ? [...report.report_items] : [];
+  const sortedItems = items.sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0));
+  return `
+    <section class="admin-report-items">
+      <h3>Report items</h3>
+      <div class="admin-report-item-list">
+        ${sortedItems.map((item) => renderAdminReportItem(item)).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderAdminReportItem(item) {
+  const opp = item.opportunities ? mapSupabaseOpportunity(item.opportunities) : null;
+  if (!opp) {
+    return `<article class="admin-report-item"><p>Opportunity data is no longer available.</p></article>`;
+  }
+  const safeUrl = getSafeExternalUrl(opp.url);
+  const deadline = getOpportunityDeadlineDisplay(opp);
+  return `
+    <article class="admin-report-item">
+      <div class="opportunity-badges">
+        <span class="source-pill source-badge">${escapeHtml(formatReportQualityLabel(getOpportunityQualityLabel(opp)))}</span>
+        <span class="${badgeClass(getMatchLabel(Number(item.match_score || 0)))}">${escapeHtml(formatReportMatchLabel(getMatchLabel(Number(item.match_score || 0))))} · ${Number(item.match_score || 0)}</span>
+      </div>
+      <h4>${escapeHtml(opp.title)}</h4>
+      <div class="admin-report-meta-grid">
+        <span><strong>${escapeHtml(t("buyer"))}</strong>${escapeHtml(formatReportMetadataValue("buyer", opp.buyer))}</span>
+        <span><strong>${escapeHtml(t("source"))}</strong>${escapeHtml(formatReportMetadataValue("source", opp.source))}</span>
+        <span><strong>${escapeHtml(t("area"))}</strong>${escapeHtml(formatReportMetadataValue("location", opp.location))}</span>
+        <span><strong>${escapeHtml(t("deadline"))}</strong>${escapeHtml(deadline.label)}</span>
+        <span><strong>${escapeHtml(t("estimatedValue"))}</strong>${escapeHtml(opp.estimatedValue ? formatISK(opp.estimatedValue) : t("notListed"))}</span>
+      </div>
+      <p>${escapeHtml(opp.description || "")}</p>
+      ${safeUrl ? `<a class="btn btn-secondary btn-small" href="${escapeHtml(safeUrl)}" target="_blank" rel="noreferrer">${escapeHtml(t("openSource"))}</a>` : ""}
+    </article>
+  `;
+}
+
+async function copyAdminReportText(reportId) {
+  const report = state.selectedAdminReport?.id === reportId
+    ? state.selectedAdminReport
+    : (state.adminReports || []).find((item) => item.id === reportId);
+  if (!report) {
+    showToast("Report not found", "error");
+    return;
+  }
+  const companyName = report.companies?.company_name || "Company";
+  const detailedMatches = getSavedReportItemMatches(report);
+  const text = detailedMatches.length
+    ? generateSavedReportText(report, companyName, detailedMatches)
+    : report.text_content || stripHtmlFromString(normalizeSavedReportHtml(report));
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast("Report text copied", "success");
+  } catch (error) {
+    console.error("Failed to copy admin report:", error);
+    showToast("Could not copy report text", "error");
+  }
 }
 
 function getFilteredAdminOpportunities() {
@@ -7072,6 +7339,15 @@ function renderAdminCompaniesSection(compact = false) {
           <h2>Companies / users</h2>
           <p>${state.adminCompaniesLoading ? "Loading companies..." : `${companies.length} shown from ${(state.adminCompanies || []).length} total companies.`}</p>
         </div>
+        ${compact ? "" : `
+          <label class="admin-inline-control">
+            <span>Report mode</span>
+            <select data-admin-report-mode>
+              <option value="new_only" ${state.adminReportMode !== "all_current" ? "selected" : ""}>New opportunities report</option>
+              <option value="all_current" ${state.adminReportMode === "all_current" ? "selected" : ""}>All current matches report</option>
+            </select>
+          </label>
+        `}
       </div>
       ${state.adminCompaniesError ? `<div class="admin-message is-error">${escapeHtml(state.adminCompaniesError)}</div>` : ""}
       ${compact ? "" : renderAdminCompanyFilters()}
@@ -7353,6 +7629,7 @@ function renderReport() {
         <p class="eyebrow">${escapeHtml(t("weeklyReport"))}</p>
         <h1>${escapeHtml(t("reportTitle"))}</h1>
         <p>${escapeHtml(profile.companyName || "Your company")} · ${escapeHtml(formatReportDateRange(report.periodStart, report.periodEnd))}</p>
+        <p class="muted-copy">${escapeHtml(state.language === "is" ? "Sýnir öll núverandi viðeigandi tækifæri, ekki aðeins ný frá síðasta vistaða yfirliti." : "Showing all current eligible matches, not only new items since the last saved report.")}</p>
       </div>
       <div class="dashboard-actions">
         <button class="btn btn-primary" data-action="save-report" ${state.reportSaveLoading ? "disabled" : ""}>
@@ -7392,10 +7669,11 @@ function renderReport() {
 
 function renderReportArchiveRow(report) {
   const itemCount = Array.isArray(report.report_items) ? report.report_items.length : Number(report.itemCount || 0);
+  const companyName = state.profile?.companyName || report.companies?.company_name || "Company";
   return `
     <div class="report-archive-row">
       <div>
-        <h3>${escapeHtml(report.title || "Untitled report")}</h3>
+        <h3>${escapeHtml(getCustomerReportTitle(report, companyName))}</h3>
         <p>${formatDateTime(report.created_at)} · ${itemCount} item${itemCount === 1 ? "" : "s"} · ${escapeHtml(report.status || "draft")}</p>
       </div>
       <button class="btn btn-secondary" data-action="view-report" data-id="${escapeHtml(report.id)}">${escapeHtml(t("viewReport"))}</button>
@@ -7426,20 +7704,28 @@ function renderReportPreview(report, options = {}) {
   `;
 }
 
-function renderSavedReportPreview(savedReport, profile) {
+function renderSavedReportPreview(savedReport, profile, options = {}) {
   const periodStart = savedReport.period_start || savedReport.created_at?.slice(0, 10) || new Date().toISOString().slice(0, 10);
   const periodEnd = savedReport.period_end || savedReport.created_at?.slice(0, 10) || new Date().toISOString().slice(0, 10);
-  const htmlContent = normalizeSavedReportHtml(savedReport);
+  const companyName = profile.companyName || savedReport.companies?.company_name || "Company";
+  const detailedMatches = getSavedReportItemMatches(savedReport);
+  const htmlContent = detailedMatches.length
+    ? buildSavedReportItemsHtml(detailedMatches)
+    : normalizeSavedReportHtml(savedReport);
+  const textContent = detailedMatches.length
+    ? generateSavedReportText(savedReport, companyName, detailedMatches)
+    : savedReport.text_content || "";
   return renderReportPreview({
-    title: savedReport.title || "Vistað yfirlit",
+    title: getCustomerReportTitle(savedReport, companyName),
     periodStart,
     periodEnd,
     htmlContent,
-    textContent: savedReport.text_content || ""
+    textContent
   }, {
-    companyName: profile.companyName,
-    closeButton: true,
-    includeTextArea: false
+    companyName,
+    closeButton: options.closeButton !== undefined ? options.closeButton : true,
+    includeTextArea: options.includeTextArea !== undefined ? options.includeTextArea : false,
+    id: options.id || ""
   });
 }
 
@@ -7465,6 +7751,57 @@ function normalizeSavedReportHtml(savedReport) {
       ${fallbackContent}
     </div>
   `;
+}
+
+function getCustomerReportTitle(report, companyName) {
+  const cleanCompany = String(companyName || report?.companies?.company_name || "Company").trim();
+  return t("reportForCompany", { company: cleanCompany });
+}
+
+function getSavedReportItemMatches(savedReport) {
+  const items = Array.isArray(savedReport?.report_items) ? [...savedReport.report_items] : [];
+  return items
+    .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))
+    .map((item) => {
+      if (!item.opportunities) return null;
+      const opp = mapSupabaseOpportunity(item.opportunities);
+      return {
+        ...opp,
+        matchScore: Number(item.match_score || 0),
+        matchLabel: getMatchLabel(Number(item.match_score || 0)),
+        matchReasons: sanitizeMatchReasons(opp, []),
+        risks: Array.isArray(opp.rawPayload?.risks) ? opp.rawPayload.risks : [],
+        nextSteps: []
+      };
+    })
+    .filter(Boolean);
+}
+
+function buildSavedReportItemsHtml(matches) {
+  const sections = getSavedReportSections(matches);
+  return `
+    ${sections.confirmed.length ? renderReportOpportunitySection(t("openTenders"), t("openTendersDescription"), sections.confirmed) : ""}
+    ${sections.early.length ? renderReportOpportunitySection(t("upcomingOpportunities"), t("upcomingDescription"), sections.early) : ""}
+    ${sections.review.length ? renderReportOpportunitySection(t("needsReview"), state.language === "is" ? "Atriði úr vistuðu yfirliti sem þarf að staðfesta á heimild." : "Saved report items that should be verified at the source.", sections.review) : ""}
+    <p class="report-footer-note">${escapeHtml(t("reportFooter"))}</p>
+  `;
+}
+
+function getSavedReportSections(matches) {
+  const sections = {
+    confirmed: [],
+    early: [],
+    review: []
+  };
+
+  matches.forEach((opp) => {
+    const placement = getReportOpportunityPlacement(opp);
+    if (placement === "confirmed") sections.confirmed.push(opp);
+    else if (placement === "early") sections.early.push(opp);
+    else sections.review.push(opp);
+  });
+
+  return sections;
 }
 
 function sanitizeReportHtml(html) {
@@ -7497,17 +7834,30 @@ function sanitizeReportHtml(html) {
   return doc.body.innerHTML;
 }
 
+function stripHtmlFromString(html) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(String(html || ""), "text/html");
+  return doc.body.textContent?.replace(/\s+/g, " ").trim() || "";
+}
+
 function getSafeExternalUrl(value) {
   const url = String(value || "").trim();
   if (/^https?:\/\//i.test(url)) return url;
   return "";
 }
 
-function getReportMatches() {
+function getReportMatches(mode = "all_current", previouslyReportedIds = new Set()) {
+  return buildCurrentReportMatches({ mode, previouslyReportedIds });
+}
+
+function buildCurrentReportMatches({ mode = "all_current", previouslyReportedIds = new Set() } = {}) {
   const matches = getMatchedOpportunities()
     .filter((opp) => opp.matchScore >= 50)
     .filter(isStrictCustomerReportEligible);
-  const sections = getReportSections(matches);
+  const modeMatches = mode === "new_only"
+    ? matches.filter((opp) => !previouslyReportedIds.has(opp.id))
+    : matches;
+  const sections = getReportSections(modeMatches);
   return [
     ...sections.confirmed,
     ...sections.early,
@@ -7751,34 +8101,70 @@ function isProcurementSource(opp) {
 }
 
 function isDesignConsultingOnlyForCurrentProfile(opp) {
+  return isDesignConsultingOnlyForProfile(state.profile || {}, opp);
+}
+
+function isDesignConsultingOnlyForProfile(profile, opp) {
   const text = getOpportunityQualityText(opp);
-  if (!containsAnyNormalizedPhrase(text, [
+  const hasDesignOnlyTerm = containsAnyNormalizedPhrase(text, [
     "for og verkhönnun",
     "for og verkhonnun",
     "verkhönnun",
     "verkhonnun",
+    "forhönnun",
+    "forhonnun",
+    "verkfræðiráðgjöf",
+    "verkfraediradgjof",
+    "ráðgjöf",
+    "radgjof",
+    "útboðsgögn hönnun",
+    "utbodsgogn honnun",
+  ]);
+  const hasGeneralDesignTerm = containsAnyNormalizedPhrase(text, ["hönnun", "honnun"]);
+  const hasPhysicalWorkTerm = containsAnyNormalizedPhrase(text, [
+    "framkvæmdir",
+    "framkvaemdir",
+    "lóðarframkvæmdir",
+    "lodarframkvaemdir",
+    "gatnagerð",
+    "gatnagerd",
+    "lagnir",
+    "jarðvinna",
+    "jardvinna",
+    "malbikun",
+    "bygging",
+    "viðhald",
+    "vidhald",
+    "endurbætur",
+    "endurbaetur",
+  ]);
+  const supervisionOnly = containsAnyNormalizedPhrase(text, ["eftirlit"]) && !hasPhysicalWorkTerm;
+
+  if (!hasDesignOnlyTerm && !(hasGeneralDesignTerm && !hasPhysicalWorkTerm) && !supervisionOnly) return false;
+
+  const profileServiceText = normalizeLocationText([
+    profile.industry,
+    ...(Array.isArray(profile.services) ? profile.services : []),
+  ].filter(Boolean).join(" "));
+  return !containsAnyNormalizedPhrase(profileServiceText, [
     "hönnun",
     "honnun",
     "ráðgjöf",
     "radgjof",
     "verkfræðiráðgjöf",
     "verkfraediradgjof",
-  ])) return false;
-
-  const profile = state.profile || {};
-  const profileText = normalizeLocationText([
-    profile.industry,
-    ...(Array.isArray(profile.services) ? profile.services : []),
-    ...(Array.isArray(profile.includeKeywords) ? profile.includeKeywords : []),
-  ].filter(Boolean).join(" "));
-  return !containsAnyNormalizedPhrase(profileText, [
-    "hönnun",
-    "honnun",
-    "ráðgjöf",
-    "radgjof",
+    "verkfræði",
+    "verkfraedi",
+    "eftirlit",
+    "verkefnastjórnun",
+    "verkefnastjornun",
+    "útboðsgögn",
+    "utbodsgogn",
     "engineering",
     "design",
     "consulting",
+    "project management",
+    "supervision",
   ]);
 }
 
@@ -8080,6 +8466,38 @@ ${opp.url ? `${t("openSource")}: ${opp.url}` : (state.language === "is" ? "Finni
 VerkRadar`;
 }
 
+function generateSavedReportText(savedReport, companyName, matches) {
+  const periodStart = savedReport.period_start || savedReport.created_at?.slice(0, 10) || new Date().toISOString().slice(0, 10);
+  const periodEnd = savedReport.period_end || savedReport.created_at?.slice(0, 10) || new Date().toISOString().slice(0, 10);
+  const title = getCustomerReportTitle(savedReport, companyName);
+  const sections = getSavedReportSections(matches);
+  const orderedMatches = [
+    ...sections.confirmed,
+    ...sections.early,
+    ...sections.review,
+  ];
+
+  return `${title}
+${state.language === "is" ? "Tímabil" : "Date range"}: ${formatReportDateRange(periodStart, periodEnd)}
+
+${orderedMatches.length ? orderedMatches.map((opp, i) => `${i + 1}. ${opp.title}
+${state.language === "is" ? "Gæði" : "Quality"}: ${formatReportQualityLabel(getOpportunityQualityLabel(opp))}
+${t("buyer")}: ${formatReportMetadataValue("buyer", opp.buyer)}
+${t("source")}: ${formatReportMetadataValue("source", opp.source)}
+${t("area")}: ${formatReportMetadataValue("location", opp.location)}
+${t("deadline")}: ${opp.deadline ? formatCustomerReportDate(opp.deadline) : t("notFound")}
+${t("estimatedValue")}: ${opp.estimatedValue ? formatISK(opp.estimatedValue) : t("notListed")}
+${state.language === "is" ? "Samsvörun" : "Match"}: ${opp.matchScore}/100 (${formatReportMatchLabel(opp.matchLabel)})
+${t("whyThisMatters")}:
+${(opp.matchReasons.length ? opp.matchReasons : ["Matched to your company profile."]).map((r) => `- ${formatReportReason(r)}`).join("\n")}
+${t("risksToCheck")}:
+${getReportRisks(opp).map((r) => `- ${formatReportRisk(r)}`).join("\n")}
+${opp.url ? `${t("openSource")}: ${opp.url}` : ""}
+`).join("\n") : (state.language === "is" ? "Engin atriði eru vistuð í þessu yfirliti." : "No items are saved in this report.")}
+
+${t("reportFooter")}`;
+}
+
 async function copyReport() {
   const profile = state.profile || getEmptyProfile();
   const text = generateWeeklyReport(profile, getReportMatches());
@@ -8093,8 +8511,8 @@ async function copyReport() {
   }
 }
 
-function downloadReportPdf() {
-  const reportNode = document.getElementById("report-preview");
+function downloadReportPdf(reportElementId = "report-preview", reportCompanyName = "") {
+  const reportNode = document.getElementById(reportElementId);
   if (!reportNode) {
     showToast("No report available to export", "error");
     return;
@@ -8106,8 +8524,8 @@ function downloadReportPdf() {
   reportClone.querySelectorAll("textarea, .report-close-btn").forEach((node) => node.remove());
   const metaBar = reportClone.querySelector(".report-meta-bar");
   if (metaBar) {
-    const reportTitle = metaBar.querySelector("div:first-child strong")?.textContent?.trim() || t("reportForCompany", { company: profile.companyName || "Company" });
-    const companyName = metaBar.querySelector("div:last-child span")?.textContent?.trim() || profile.companyName || "Company";
+    const reportTitle = metaBar.querySelector("div:first-child strong")?.textContent?.trim() || t("reportForCompany", { company: reportCompanyName || profile.companyName || "Company" });
+    const companyName = metaBar.querySelector("div:last-child span")?.textContent?.trim() || reportCompanyName || profile.companyName || "Company";
     const reportRange = metaBar.querySelector("div:last-child strong")?.textContent?.trim() || "";
     const logoSrc = document.querySelector(".brand-logo")?.src || document.querySelector('link[rel="icon"]')?.href || "";
     metaBar.innerHTML = "";
@@ -8136,7 +8554,7 @@ function downloadReportPdf() {
     summaryGrid.remove();
   }
   const dateRange = reportNode.querySelector(".report-meta-bar div:last-child strong")?.textContent || new Date().toISOString().slice(0, 10);
-  const fileName = makeReportPdfFileName(profile.companyName || "company", dateRange);
+  const fileName = makeReportPdfFileName(reportCompanyName || profile.companyName || "company", dateRange);
   const stylesheetLinks = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
     .map((link) => `<link rel="stylesheet" href="${escapeHtml(link.href)}">`)
     .join("");
@@ -8318,6 +8736,13 @@ function downloadReportPdf() {
   pdfWindow.document.close();
 }
 
+function downloadAdminReportPdf() {
+  const report = state.selectedAdminReport?.id === state.selectedAdminReportId
+    ? state.selectedAdminReport
+    : (state.adminReports || []).find((item) => item.id === state.selectedAdminReportId);
+  downloadReportPdf("admin-report-preview", report?.companies?.company_name || "Company");
+}
+
 function makeReportPdfFileName(companyName, dateRange) {
   const company = slugifyFilePart(companyName) || "company";
   const range = slugifyFilePart(String(dateRange || "").replace(/\s+to\s+/i, "-")) || new Date().toISOString().slice(0, 10);
@@ -8427,12 +8852,12 @@ function renderOpportunitySummaryForCopy() {}
 
 function generateOpportunitySummary(opp) {
   return `${opp.title}
-Buyer: ${opp.buyer}
-Deadline: ${formatOpportunityDeadlineForReport(opp)}
-Match: ${opp.matchScore}/100 (${opp.matchLabel})
-Why this fits:
-${opp.matchReasons.map((r) => `- ${r}`).join("\n")}
-Next step: Open source documents and confirm requirements.`;
+${t("buyer")}: ${formatReportMetadataValue("buyer", opp.buyer)}
+${t("deadline")}: ${formatOpportunityDeadlineForReport(opp)}
+${state.language === "is" ? "Samsvörun" : "Match"}: ${opp.matchScore}/100 (${formatReportMatchLabel(opp.matchLabel)})
+${t("whyThisMatters")}:
+${opp.matchReasons.map((r) => `- ${formatReportReason(r)}`).join("\n")}
+${state.language === "is" ? "Næsta skref" : "Next step"}: ${state.language === "is" ? "Opnið upprunalega heimild og staðfestið kröfur." : "Open source documents and confirm requirements."}`;
 }
 
 function escapeHtml(value) {

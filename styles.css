@@ -24,6 +24,7 @@ body {
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
+  overflow-x: hidden;
 }
 
 body.mobile-menu-active {
@@ -32,6 +33,12 @@ body.mobile-menu-active {
 
 button, input, select, textarea {
   font: inherit;
+}
+
+img,
+svg,
+canvas {
+  max-width: 100%;
 }
 
 button {
@@ -2895,7 +2902,7 @@ body.modal-open {
   grid-template-columns: repeat(3, 1fr);
   gap: 18px;
   align-items: stretch;
-  margin: 30px 10;
+  margin: 30px 0;
 }
 
 .pricing-card {
@@ -3277,13 +3284,114 @@ body.modal-open {
     font-weight: 800;
   }
 
-  .mobile-account-actions button:hover {
-    background: rgba(255,255,255,0.06);
-  }
+.mobile-account-actions button:hover {
+  background: rgba(255,255,255,0.06);
+}
 
-  .mobile-logout {
-    color: #ff6b6b !important;
+.mobile-logout {
+  color: #ff6b6b !important;
+}
+
+.admin-report-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.admin-report-meta-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255,255,255,0.035);
+}
+
+.admin-report-meta-strip span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.admin-report-meta-strip strong {
+  color: var(--text);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.admin-inline-control {
+  display: grid;
+  gap: 6px;
+  min-width: 220px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.admin-inline-control select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255,255,255,0.05);
+  color: var(--text);
+  padding: 10px 12px;
+}
+
+.admin-report-items {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.admin-report-item-list {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-report-item {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255,255,255,0.035);
+}
+
+.admin-report-item h4 {
+  margin: 8px 0 10px;
+  font-size: 16px;
+}
+
+.admin-report-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.admin-report-meta-grid span {
+  display: grid;
+  gap: 2px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.admin-report-meta-grid strong {
+  color: var(--text);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+@media (max-width: 700px) {
+  .admin-report-meta-grid {
+    grid-template-columns: 1fr;
   }
+}
 
   .mobile-logout:hover {
     background: rgba(255,107,107,0.08);
@@ -3539,6 +3647,299 @@ body.modal-open {
 
   .report-item h4 {
     font-size: 20px;
+  }
+}
+
+@media (max-width: 760px) {
+  main {
+    width: min(100% - 24px, 1180px);
+  }
+
+  .page-head,
+  .dashboard-head {
+    padding-top: 34px;
+  }
+
+  .page-head h1,
+  .dashboard-head h1,
+  .auth-copy h1,
+  .legal-hero h1 {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .card-header,
+  .dashboard-head,
+  .modal-header,
+  .opp-top,
+  .meta-row,
+  .import-result-head,
+  .source-items-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .dashboard-actions,
+  .hero-actions,
+  .form-actions,
+  .admin-row-actions,
+  .admin-report-actions,
+  .dashboard-empty-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .dashboard-actions .btn,
+  .hero-actions .btn,
+  .form-actions .btn,
+  .admin-row-actions .btn,
+  .admin-report-actions .btn,
+  .dashboard-empty-actions .btn,
+  .opp-actions .btn,
+  .button-stack .btn {
+    width: 100%;
+  }
+
+  .stats-grid,
+  .admin-overview-metrics,
+  .ops-metrics,
+  .feature-grid,
+  .pricing-grid,
+  .form-grid,
+  .admin-detail-grid,
+  .modal-grid,
+  .report-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .stat-card,
+  .pricing-card,
+  .form-card,
+  .opportunity-card,
+  .dashboard-empty-state,
+  .ops-card,
+  .side-panel {
+    min-width: 0;
+  }
+
+  .opportunity-card {
+    padding: 18px;
+    gap: 16px;
+  }
+
+  .opportunity-card h3,
+  .admin-row h3,
+  .report-item h4,
+  .source-item strong {
+    overflow-wrap: anywhere;
+  }
+
+  .opp-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .meta-row,
+  .reason-row,
+  .opportunity-badges {
+    gap: 8px;
+  }
+
+  .source-pill,
+  .reason-row span,
+  .badge {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .filters,
+  .admin-filters,
+  .admin-company-filters {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .filters input,
+  .filters select,
+  .admin-filters input,
+  .admin-filters select,
+  .admin-inline-control,
+  .admin-inline-control select,
+  .import-mode-control {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .ops-table-wrap {
+    width: calc(100vw - 24px);
+    max-width: 100%;
+    margin-inline: auto;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .ops-table {
+    min-width: 760px;
+  }
+
+  .admin-companies-table {
+    min-width: 980px;
+  }
+
+  .ops-table th,
+  .ops-table td {
+    padding: 10px;
+  }
+
+  .source-item,
+  .imported-opportunity-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .imported-opportunity-row dl,
+  .admin-report-meta-strip,
+  .admin-report-meta-grid,
+  .report-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .site-footer {
+    width: 100%;
+    margin-top: 26px;
+  }
+
+  .site-footer nav {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .site-footer button {
+    text-align: left;
+    width: 100%;
+  }
+
+  .modal-backdrop {
+    align-items: stretch;
+    place-items: stretch;
+    padding: 12px;
+  }
+
+  .modal {
+    width: 100%;
+    max-height: calc(100dvh - 24px);
+    border-radius: 12px;
+  }
+
+  .modal-body {
+    padding: 0 14px 14px;
+  }
+
+  .report-preview {
+    width: 100%;
+    border-radius: 14px;
+  }
+
+  .report-body {
+    padding: 16px;
+  }
+
+  .report-cover {
+    padding: 18px;
+    border-radius: 16px;
+  }
+
+  .report-cover h2 {
+    font-size: 28px;
+    line-height: 1.05;
+  }
+
+  .report-item {
+    padding: 14px;
+    border-radius: 14px;
+  }
+
+  .report-detail-grid > div,
+  .report-legacy-content {
+    padding: 12px;
+  }
+
+  .report-archive-row {
+    align-items: stretch;
+  }
+
+  .auth-page,
+  .public-sample-report-page,
+  .legal-page {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .auth-card,
+  .form-card {
+    padding: 18px;
+  }
+}
+
+@media (max-width: 430px) {
+  .site-header {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  main {
+    width: calc(100% - 20px);
+  }
+
+  h1 {
+    font-size: 36px;
+    line-height: 0.96;
+  }
+
+  h2 {
+    font-size: 28px;
+  }
+
+  .brand-logo {
+    width: 44px;
+  }
+
+  .mobile-menu-panel {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .mobile-menu-links button {
+    min-height: 52px;
+    font-size: 16px;
+    padding: 0 14px;
+  }
+
+  .btn {
+    min-height: 44px;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .empty-card,
+  .empty-state {
+    padding: 24px 16px;
+  }
+
+  .dashboard-empty-state {
+    padding: 20px;
+  }
+
+  .report-meta-bar,
+  .report-section-head,
+  .report-item-top {
+    gap: 10px;
+  }
+
+  .report-source-link {
+    width: 100%;
   }
 }
 

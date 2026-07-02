@@ -27,6 +27,8 @@ type CompanyProfile = {
   allowUnknownValue: boolean;
 };
 
+type ReportMode = "new_only" | "all_current";
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -62,6 +64,7 @@ Deno.serve(async (req) => {
     const body = await safeJson(req);
     const companyId = String(body.companyId || "").trim();
     const action = String(body.action || "refresh_matches").trim();
+    const reportMode: ReportMode = body.reportMode === "all_current" ? "all_current" : "new_only";
     if (!isUuid(companyId)) return json({ error: "A valid companyId is required." }, 400);
     if (!["refresh_matches", "generate_report"].includes(action)) {
       return json({ error: "Unsupported action." }, 400);
@@ -78,13 +81,14 @@ Deno.serve(async (req) => {
       });
     }
 
-    const reportResult = await generateCompanyReport(adminClient, refreshResult.company, refreshResult.matches);
+    const reportResult = await generateCompanyReport(adminClient, refreshResult.company, refreshResult.matches, reportMode);
     return json({
       ok: true,
       action,
       company_id: refreshResult.company.id,
       company_name: refreshResult.company.companyName,
       matches_refreshed: refreshResult.matches_refreshed,
+      report_mode: reportMode,
       ...reportResult,
     });
   } catch (error) {
@@ -179,15 +183,26 @@ async function generateCompanyReport(
   supabase: ReturnType<typeof createClient>,
   company: CompanyProfile,
   matches: Array<Record<string, unknown>>,
+  reportMode: ReportMode,
 ) {
-  const sections = getReportSections(matches);
-  const reportMatches = [...sections.confirmed, ...sections.early];
+  const seenIds = reportMode === "new_only"
+    ? await loadPreviouslyReportedOpportunityIds(supabase, company.id)
+    : new Set<string>();
+  const ignoredIds = await loadCompanyActionOpportunityIds(supabase, company.id, ["ignored"]);
+  const reportMatches = buildCompanyReportMatches(company, matches, reportMode, {
+    previouslyReportedIds: seenIds,
+    ignoredIds,
+  });
   if (!reportMatches.length) {
     return {
       report_created: false,
       report_id: null,
       report_items: 0,
-      message: "No customer-report-ready matches found.",
+      report_mode: reportMode,
+      previous_report_items_excluded: seenIds.size,
+      message: reportMode === "new_only"
+        ? "No new eligible opportunities found for this company. Use all current mode to generate a full current report."
+        : "No customer-report-ready matches found.",
     };
   }
 
@@ -202,7 +217,7 @@ async function generateCompanyReport(
       summary: report.summary,
       text_content: report.textContent,
       html_content: report.htmlContent,
-      status: "generated",
+      status: reportMode === "new_only" ? "generated_new_only" : "generated_all_current",
     })
     .select("id")
     .single();
@@ -225,8 +240,58 @@ async function generateCompanyReport(
     report_created: true,
     report_id: savedReport.id,
     report_items: itemRows.length,
+    report_mode: reportMode,
+    previous_report_items_excluded: seenIds.size,
     message: `Generated report with ${itemRows.length} item${itemRows.length === 1 ? "" : "s"}.`,
   };
+}
+
+function buildCompanyReportMatches(
+  company: CompanyProfile,
+  matches: Array<Record<string, unknown>>,
+  reportMode: ReportMode,
+  options: {
+    previouslyReportedIds?: Set<string>;
+    ignoredIds?: Set<string>;
+  } = {},
+) {
+  const previouslyReportedIds = options.previouslyReportedIds || new Set<string>();
+  const ignoredIds = options.ignoredIds || new Set<string>();
+  const modeMatches = reportMode === "new_only"
+    ? matches.filter((match) => !previouslyReportedIds.has(String(match.id || "")))
+    : matches;
+  const sections = getReportSections(company, modeMatches.filter((match) => !ignoredIds.has(String(match.id || ""))));
+  return [...sections.confirmed, ...sections.early];
+}
+
+async function loadPreviouslyReportedOpportunityIds(supabase: ReturnType<typeof createClient>, companyId: string) {
+  const { data, error } = await supabase
+    .from("reports")
+    .select("report_items(opportunity_id)")
+    .eq("company_id", companyId);
+  if (error) throw error;
+  const ids = new Set<string>();
+  for (const report of data || []) {
+    const items = Array.isArray(report.report_items) ? report.report_items : [];
+    for (const item of items) {
+      if (item?.opportunity_id) ids.add(String(item.opportunity_id));
+    }
+  }
+  return ids;
+}
+
+async function loadCompanyActionOpportunityIds(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+  actionTypes: string[],
+) {
+  const { data, error } = await supabase
+    .from("company_opportunity_actions")
+    .select("opportunity_id")
+    .eq("company_id", companyId)
+    .in("action_type", actionTypes);
+  if (error) throw error;
+  return new Set((data || []).map((row) => String(row.opportunity_id || "")).filter(Boolean));
 }
 
 function mapOpportunity(row: Record<string, unknown>) {
@@ -269,16 +334,18 @@ function calculateMatch(profile: CompanyProfile, opportunity: Record<string, unk
     reasons.push(`Matches your ${profile.industry} industry`);
   }
 
-  const serviceHits = profile.services.filter((service) => textIncludes(text, service));
-  if (serviceHits.length) {
-    score += Math.min(35, serviceHits.length * 10);
-    for (const service of serviceHits.slice(0, 3)) reasons.push(`Mentions your service: ${service}`);
+  for (const service of profile.services || []) {
+    if (textIncludes(text, service)) {
+      score += 10;
+      reasons.push(`Mentions your service: ${service}`);
+    }
   }
 
-  const keywordHits = profile.includeKeywords.filter((keyword) => textIncludes(text, keyword));
-  if (keywordHits.length) {
-    score += Math.min(25, keywordHits.length * 8);
-    for (const keyword of keywordHits.slice(0, 3)) reasons.push(`Contains your keyword: ${keyword}`);
+  for (const keyword of profile.includeKeywords || []) {
+    if (textIncludes(text, keyword)) {
+      score += 8;
+      reasons.push(`Contains your keyword: ${keyword}`);
+    }
   }
 
   const locationCategory = getLocationMatchCategory(profile, opportunity);
@@ -292,25 +359,24 @@ function calculateMatch(profile: CompanyProfile, opportunity: Record<string, unk
     score += 14;
     reasons.push("Remote opportunity");
   } else if (locationCategory === "outside_area_possible") {
-    score += 4;
+    const travelMinimum = Number(profile.minimumProjectValueForTravel || 0);
+    const belowTravelMinimum = Boolean(travelMinimum && opportunity.estimatedValue && Number(opportunity.estimatedValue) < travelMinimum);
+    score += belowTravelMinimum ? -4 : 4;
     reasons.push("Outside base area but travel allowed");
-    risks.push("Check travel cost, project size and delivery capacity");
+    risks.push(belowTravelMinimum
+      ? "Outside base area and below your preferred travel project value"
+      : "Check travel cost, project size and delivery capacity");
   } else {
     score -= 8;
     risks.push("Outside selected area; location match is low confidence");
   }
 
-  const estimatedValue = Number(opportunity.estimatedValue || 0);
-  if (estimatedValue) {
-    if ((profile.minProjectValue && estimatedValue < profile.minProjectValue) || (profile.maxProjectValue && estimatedValue > profile.maxProjectValue)) {
-      score -= 25;
-      risks.push("Estimated project value is outside your preferred range");
-    } else {
-      score += 10;
-      reasons.push("Project value is inside your preferred range");
-    }
-  } else if (!profile.allowUnknownValue) {
-    risks.push("Project value is unknown");
+  if (valueMatches(profile, opportunity)) {
+    score += 10;
+    if (opportunity.estimatedValue) reasons.push("Project value is inside your preferred range");
+  } else {
+    score -= 25;
+    risks.push("Estimated project value is outside your preferred range");
   }
 
   const deadline = String(opportunity.deadline || "");
@@ -338,7 +404,7 @@ function calculateMatch(profile: CompanyProfile, opportunity: Record<string, unk
     ...opportunity,
     matchScore: score,
     matchLabel: getMatchLabel(score),
-    matchReasons: reasons.length ? reasons.slice(0, 5) : ["General profile match"],
+    matchReasons: reasons.slice(0, 5),
     risks: uniqueStrings(risks).slice(0, 4),
     nextSteps: [
       "Open the source documents",
@@ -374,16 +440,21 @@ function isDashboardVisibleOpportunity(opportunity: Record<string, unknown>) {
   return true;
 }
 
-function getReportSections(matches: Array<Record<string, unknown>>) {
+function getReportSections(company: CompanyProfile, matches: Array<Record<string, unknown>>) {
   const buckets = { confirmed: [] as Array<Record<string, unknown>>, early: [] as Array<Record<string, unknown>> };
   const seen = new Set<string>();
   sortCustomerReportMatches(matches).forEach((opportunity) => {
     const id = String(opportunity.id || "");
-    if (!id || seen.has(id) || !isStrictCustomerReportEligible(opportunity)) return;
+    if (!id || seen.has(id) || !isStrictCustomerReportEligible(company, opportunity)) return;
     seen.add(id);
     const intent = getOpportunityIntent(opportunity);
     if (intent === "confirmed_tender") buckets.confirmed.push(opportunity);
     else if (intent === "early_opportunity") buckets.early.push(opportunity);
+    else {
+      const quality = normalizeOpportunityQualityStatus(String(opportunity.qualityStatus || ""), opportunity);
+      if (quality === "confirmed_tender") buckets.confirmed.push(opportunity);
+      else if (quality === "early_signal") buckets.early.push(opportunity);
+    }
   });
   let remaining = 8;
   buckets.confirmed = buckets.confirmed.slice(0, remaining);
@@ -392,14 +463,83 @@ function getReportSections(matches: Array<Record<string, unknown>>) {
   return buckets;
 }
 
-function isStrictCustomerReportEligible(opportunity: Record<string, unknown>) {
+function isStrictCustomerReportEligible(company: CompanyProfile, opportunity: Record<string, unknown>) {
   if (!isCustomerMatchEligibleOpportunity(opportunity)) return false;
   if (isAlreadyAwardedOrTenderedReportItem(opportunity)) return false;
+  if (isDesignConsultingOnlyForProfile(company, opportunity)) return false;
   if (containsTitleNewsIntent(String(opportunity.title || "")) && !hasOpenTenderOrQuoteIntent(opportunity)) return false;
   const intent = getOpportunityIntent(opportunity);
   if (intent === "confirmed_tender") return hasOpenTenderOrQuoteIntent(opportunity) || isProcurementSource(opportunity);
   if (intent === "early_opportunity") return hasUpcomingTenderIntent(opportunity);
+  const quality = normalizeOpportunityQualityStatus(String(opportunity.qualityStatus || ""), opportunity);
+  if (quality === "confirmed_tender") return hasOpenTenderOrQuoteIntent(opportunity) || isProcurementSource(opportunity);
+  if (quality === "early_signal") return hasUpcomingTenderIntent(opportunity);
   return false;
+}
+
+function isDesignConsultingOnlyForProfile(company: CompanyProfile, opportunity: Record<string, unknown>) {
+  const text = getOpportunityQualityText(opportunity);
+  const hasDesignOnlyTerm = containsAnyNormalizedPhrase(text, [
+    "for og verkhönnun",
+    "for og verkhonnun",
+    "verkhönnun",
+    "verkhonnun",
+    "forhönnun",
+    "forhonnun",
+    "verkfræðiráðgjöf",
+    "verkfraediradgjof",
+    "ráðgjöf",
+    "radgjof",
+    "útboðsgögn hönnun",
+    "utbodsgogn honnun",
+  ]);
+  const hasGeneralDesignTerm = containsAnyNormalizedPhrase(text, ["hönnun", "honnun"]);
+  const hasPhysicalWorkTerm = containsAnyNormalizedPhrase(text, [
+    "framkvæmdir",
+    "framkvaemdir",
+    "lóðarframkvæmdir",
+    "lodarframkvaemdir",
+    "gatnagerð",
+    "gatnagerd",
+    "lagnir",
+    "jarðvinna",
+    "jardvinna",
+    "malbikun",
+    "bygging",
+    "viðhald",
+    "vidhald",
+    "endurbætur",
+    "endurbaetur",
+  ]);
+  const supervisionOnly = containsAnyNormalizedPhrase(text, ["eftirlit"]) && !hasPhysicalWorkTerm;
+
+  if (!hasDesignOnlyTerm && !(hasGeneralDesignTerm && !hasPhysicalWorkTerm) && !supervisionOnly) return false;
+
+  const profileServiceText = [
+    company.industry,
+    ...(Array.isArray(company.services) ? company.services : []),
+  ].filter(Boolean).join(" ");
+
+  return !containsAnyNormalizedPhrase(profileServiceText, [
+    "hönnun",
+    "honnun",
+    "ráðgjöf",
+    "radgjof",
+    "verkfræðiráðgjöf",
+    "verkfraediradgjof",
+    "verkfræði",
+    "verkfraedi",
+    "eftirlit",
+    "verkefnastjórnun",
+    "verkefnastjornun",
+    "útboðsgögn",
+    "utbodsgogn",
+    "engineering",
+    "design",
+    "consulting",
+    "project management",
+    "supervision",
+  ]);
 }
 
 function sortCustomerReportMatches(matches: Array<Record<string, unknown>>) {
@@ -435,6 +575,21 @@ function getOpportunityIntent(opportunity: Record<string, unknown>) {
   if (containsTitleNewsIntent(String(opportunity.title || "")) || containsObviousNewsIntent(text)) return "news_context";
   if (hasUpcomingTenderIntent(opportunity)) return "early_opportunity";
   return "market_signal";
+}
+
+function normalizeOpportunityQualityStatus(status: string, opportunity: Record<string, unknown>) {
+  const value = String(status || "").toLowerCase();
+  const payload = opportunity.rawPayload && typeof opportunity.rawPayload === "object" ? opportunity.rawPayload as Record<string, unknown> : {};
+  const intentOverride = normalizeReportIntent(String(payload.opportunity_intent || payload.intent || ""));
+  if (intentOverride === "confirmed_tender") return "confirmed_tender";
+  if (["early_opportunity", "market_signal"].includes(intentOverride)) return "early_signal";
+  if (["news_context", "not_opportunity"].includes(intentOverride)) return "needs_review";
+  if (/ted|tenders electronic daily/i.test(String(opportunity.source || ""))) return "confirmed_tender";
+  if (value === "early_signal" || value === "needs_review" || value === "confirmed_tender") return value;
+  const text = getOpportunityQualityText(opportunity);
+  if (containsConfirmedTenderIntent(text)) return "confirmed_tender";
+  if (hasUpcomingTenderIntent(opportunity)) return "early_signal";
+  return "needs_review";
 }
 
 function buildReportContent(company: CompanyProfile, matches: Array<Record<string, unknown>>) {
@@ -508,7 +663,15 @@ function normalizeCountryCode(value: unknown) {
 function categoryMatches(profile: CompanyProfile, opportunity: Record<string, unknown>) {
   const industry = normalizeText(profile.industry);
   const category = normalizeText(String(opportunity.category || ""));
-  return Boolean(industry && category && (category.includes(industry) || industry.includes(category)));
+  return category.includes(industry) || industry.includes(category);
+}
+
+function valueMatches(profile: CompanyProfile, opportunity: Record<string, unknown>) {
+  const estimatedValue = Number(opportunity.estimatedValue || 0);
+  if (!estimatedValue) return Boolean(profile.allowUnknownValue);
+  if (profile.minProjectValue && estimatedValue < profile.minProjectValue) return false;
+  if (profile.maxProjectValue && estimatedValue > profile.maxProjectValue) return false;
+  return true;
 }
 
 function opportunityText(opportunity: Record<string, unknown>) {
