@@ -5541,12 +5541,20 @@ function renderMobileMenuPanel(navItems, headerCta, isLoggedIn) {
 
   return `
     <nav class="mobile-menu-panel" id="mobile-menu">
+      <div class="mobile-menu-scroll">
+        <div class="mobile-language-block">
+          <span>${state.language === "is" ? "Tungumál" : "Language"}</span>
+          <button class="language-toggle mobile-language-toggle" type="button" data-action="toggle-language" aria-label="Switch language">
+            <span class="${state.language === "is" ? "active" : ""}">IS</span>
+            <span class="${state.language === "en" ? "active" : ""}">EN</span>
+          </button>
+        </div>
       <div class="mobile-menu-links">
-        <button type="button" data-action="toggle-language">${state.language === "is" ? "English" : "Íslenska"}</button>
         ${linkItems}
         ${isLoggedIn && state.isAdmin ? `<button type="button" data-action="mobile-nav" data-href="/admin">Admin</button>` : ""}
       </div>
       ${renderMobileAccountSection(headerCta, isLoggedIn)}
+      </div>
     </nav>
   `;
 }

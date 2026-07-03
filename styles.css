@@ -19,6 +19,11 @@
 
 * { box-sizing: border-box; }
 
+html {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 body {
   margin: 0;
   background: var(--bg);
@@ -39,6 +44,20 @@ img,
 svg,
 canvas {
   max-width: 100%;
+}
+
+main,
+section,
+article,
+.card,
+.hero-card,
+.feature-card,
+.form-card,
+.opportunity-card,
+.pricing-card,
+.report-preview,
+.ops-table-wrap {
+  min-width: 0;
 }
 
 button {
@@ -3066,11 +3085,12 @@ body.modal-open {
   }
 
   .site-header.is-menu-open .mobile-menu-panel {
-    max-height: calc(100vh - var(--header-height, 72px));
+    min-height: 100dvh;
+    max-height: 100dvh;
     opacity: 1;
     pointer-events: auto;
-    transform: translateY(0);
-    padding: 24px;
+    transform: translateX(0);
+    padding: 0;
     border-bottom-color: var(--line);
     box-shadow: 0 24px 60px rgba(0,0,0,0.35);
   }
@@ -3088,7 +3108,7 @@ body.modal-open {
   .header-top {
     width: 100%;
     position: relative;
-    z-index: 2;
+    z-index: 5;
   }
 
   .menu-toggle {
@@ -3105,22 +3125,50 @@ body.modal-open {
 
   .mobile-menu-panel {
     display: block;
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
+    position: fixed;
+    inset: 0;
     width: 100%;
-    max-height: 0;
-    overflow: hidden;
+    min-height: 100dvh;
+    max-height: 100dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
     opacity: 0;
     pointer-events: none;
-    transform: translateY(-8px);
-    transition: max-height 250ms ease, opacity 250ms ease, transform 250ms ease, padding 250ms ease, margin 250ms ease;
-    padding: 0 0;
-    background: rgba(8,8,8,0.98);
+    transform: translateX(100%);
+    transition: opacity 250ms ease, transform 250ms ease;
+    padding: 0;
+    background: rgba(8,8,8,0.985);
     border-bottom: 1px solid transparent;
     box-shadow: 0 24px 60px rgba(0,0,0,0);
     z-index: 3;
+  }
+
+  .mobile-menu-scroll {
+    display: grid;
+    gap: 16px;
+    min-height: 100dvh;
+    padding: calc(var(--header-height, 72px) + 18px) 18px 22px;
+  }
+
+  .mobile-language-block {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 14px;
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 16px;
+    background: rgba(255,255,255,0.035);
+  }
+
+  .mobile-language-block > span {
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 850;
+  }
+
+  .mobile-language-toggle {
+    flex: 0 0 auto;
   }
 
   nav {
@@ -3212,6 +3260,21 @@ body.modal-open {
   nav button:hover {
     background: rgba(215,255,63,0.10);
     border-color: rgba(215,255,63,0.30);
+  }
+
+  .mobile-language-block .mobile-language-toggle {
+    width: auto;
+    min-height: 0;
+    padding: 4px;
+    border-radius: 999px;
+    text-align: center;
+  }
+
+  .mobile-language-block .mobile-language-toggle span {
+    display: inline-flex;
+    justify-content: center;
+    min-width: 30px;
+    padding: 6px 8px;
   }
 
   .header-actions {
@@ -3940,6 +4003,367 @@ body.modal-open {
 
   .report-source-link {
     width: 100%;
+  }
+}
+
+@media (max-width: 720px) {
+  body {
+    font-size: 14px;
+  }
+
+  main {
+    width: min(100% - 20px, 1180px);
+  }
+
+  h1,
+  .page-head h1,
+  .dashboard-head h1,
+  .auth-copy h1,
+  .legal-hero h1 {
+    font-size: clamp(30px, 9vw, 42px);
+    line-height: 1.02;
+    letter-spacing: 0;
+    overflow-wrap: anywhere;
+  }
+
+  h2 {
+    font-size: clamp(24px, 7vw, 32px);
+    line-height: 1.08;
+    letter-spacing: 0;
+  }
+
+  h3,
+  .opportunity-card h3,
+  .report-item h4 {
+    line-height: 1.14;
+    letter-spacing: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .hero {
+    gap: 22px;
+    padding: 34px 0 30px;
+    align-items: start;
+  }
+
+  .hero-text {
+    font-size: 16px;
+    line-height: 1.38;
+  }
+
+  .section-grid,
+  .section-grid.reversed {
+    gap: 22px;
+    padding: 28px 0;
+  }
+
+  .hero-actions,
+  .form-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin-top: 18px;
+  }
+
+  .hero-actions .btn,
+  .form-actions .btn {
+    width: 100%;
+  }
+
+  .hero-card,
+  .feature-card,
+  .form-card,
+  .opportunity-card,
+  .pricing-card,
+  .report-preview,
+  .note-panel,
+  .danger-zone,
+  .empty-state,
+  .dashboard-empty-state,
+  .ops-card,
+  .side-panel {
+    border-radius: 8px;
+  }
+
+  .feature-card,
+  .form-card,
+  .note-panel,
+  .danger-zone,
+  .empty-state,
+  .dashboard-empty-state,
+  .ops-card,
+  .side-panel {
+    padding: 16px;
+  }
+
+  .auth-page,
+  .public-sample-report-page {
+    min-height: auto;
+    padding: 40px 10px 34px;
+  }
+
+  .auth-layout {
+    gap: 20px;
+  }
+
+  .auth-copy {
+    gap: 10px;
+  }
+
+  .auth-card {
+    padding: 16px;
+  }
+
+  .auth-card input,
+  .auth-card button,
+  .filters input,
+  .filters select,
+  .form-card input,
+  .form-card select,
+  .form-card textarea {
+    min-height: 44px;
+  }
+
+  .page-head,
+  .dashboard-head {
+    gap: 14px;
+    padding: 28px 0 14px;
+  }
+
+  .dashboard-head {
+    align-items: stretch;
+  }
+
+  .dashboard-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .stats-grid {
+    gap: 10px;
+    margin: 14px 0;
+  }
+
+  .stat-card {
+    padding: 14px;
+  }
+
+  .filters {
+    gap: 10px;
+    margin: 12px 0;
+  }
+
+  .opportunity-card {
+    padding: 14px;
+    gap: 12px;
+  }
+
+  .opp-top,
+  .opportunity-badges,
+  .meta-row,
+  .reason-row {
+    gap: 8px;
+  }
+
+  .source-pill,
+  .reason-row span,
+  .quality-badge,
+  .match-badge {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .opp-actions {
+    gap: 8px;
+  }
+
+  .form-section {
+    padding: 22px 0;
+  }
+
+  .profile-travel-panel,
+  .suggestion-group {
+    padding: 14px;
+  }
+
+  .checkbox-grid {
+    gap: 8px;
+  }
+
+  .checkbox.compact,
+  .checkbox {
+    align-items: center;
+    justify-content: flex-start;
+    min-height: 42px;
+    padding: 10px 12px;
+    text-align: left;
+  }
+
+  .pricing-grid {
+    gap: 12px;
+    margin: 18px 0;
+  }
+
+  .pricing-card {
+    padding: 16px;
+    gap: 10px;
+  }
+
+  .pricing-card h3,
+  .pricing-card h2 {
+    margin-bottom: 6px;
+  }
+
+  .price {
+    font-size: 28px;
+  }
+
+  .pricing-card .check-list {
+    margin: 8px 0 14px;
+    line-height: 1.42;
+  }
+
+  .pricing-card .check-list li {
+    margin: 4px 0;
+  }
+
+  .popular {
+    position: static;
+    width: fit-content;
+    margin-bottom: 4px;
+  }
+
+  .report-preview {
+    margin-bottom: 28px;
+  }
+
+  .report-meta-bar {
+    gap: 10px;
+    padding: 12px 14px;
+  }
+
+  .report-body {
+    padding: 14px;
+  }
+
+  .report-cover {
+    margin-bottom: 12px;
+    padding: 16px;
+  }
+
+  .report-kicker {
+    margin-bottom: 10px;
+    padding: 6px 8px;
+  }
+
+  .report-cover h2 {
+    font-size: clamp(24px, 7vw, 30px);
+    line-height: 1.08;
+  }
+
+  .report-summary-grid {
+    gap: 8px;
+  }
+
+  .report-section {
+    margin-top: 16px;
+  }
+
+  .report-section-head {
+    margin-bottom: 8px;
+  }
+
+  .report-item {
+    padding: 12px;
+    gap: 10px;
+  }
+
+  .report-item-top,
+  .report-facts,
+  .report-detail-grid {
+    gap: 8px;
+  }
+
+  .report-detail-grid > div,
+  .report-legacy-content {
+    padding: 10px;
+  }
+
+  .report-source-link {
+    min-height: 38px;
+    padding: 8px 10px;
+  }
+
+  .admin-tabs {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 6px;
+    margin-bottom: 14px;
+    overflow-x: auto;
+    padding: 6px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .admin-tabs button {
+    flex: 0 0 auto;
+    min-height: 38px;
+    padding: 0 12px;
+    white-space: nowrap;
+  }
+
+  .admin-filters,
+  .admin-company-filters {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .admin-panel,
+  .import-panel,
+  .admin-row,
+  .report-archive-row {
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .ops-table-wrap {
+    width: 100%;
+    max-width: calc(100vw - 20px);
+  }
+
+  .ops-table {
+    min-width: 720px;
+  }
+
+  .admin-companies-table {
+    min-width: 860px;
+  }
+
+  .admin-row-actions,
+  .admin-report-actions,
+  .imported-opportunity-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .admin-row-actions .btn,
+  .admin-report-actions .btn,
+  .imported-opportunity-actions .btn {
+    flex: 1 1 140px;
+    width: auto;
+  }
+
+  .admin-report-meta-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .toast {
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    max-width: none;
   }
 }
 
