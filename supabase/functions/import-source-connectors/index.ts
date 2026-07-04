@@ -457,7 +457,7 @@ Deno.serve(async (req) => {
           const { data: savedRows, error: upsertError } = await adminClient
             .from("opportunities")
             .upsert(normalized, { onConflict: "source_id,external_id" })
-            .select("external_id");
+            .select("id, external_id");
 
           if (upsertError) throw upsertError;
 
@@ -479,6 +479,11 @@ Deno.serve(async (req) => {
             if (existing.has(row.external_id)) sourceSummary.updated += 1;
             else sourceSummary.inserted += 1;
           }
+
+          await resolveCrossSourceDuplicates(
+            adminClient,
+            (savedRows || []).map((row) => String(row.id || "")).filter(Boolean),
+          );
         }
 
         runDetails.opportunities_imported = sourceSummary.inserted;
@@ -1954,6 +1959,174 @@ async function getExistingExternalIds(supabase: ReturnType<typeof createClient>,
   return new Set((data || []).map((row) => row.external_id));
 }
 
+async function resolveCrossSourceDuplicates(
+  supabase: ReturnType<typeof createClient>,
+  changedOpportunityIds: string[],
+) {
+  const changedIds = uniqueStrings(changedOpportunityIds).filter(Boolean);
+  if (!changedIds.length) return;
+
+  const { data: changedRows, error: changedError } = await supabase
+    .from("opportunities")
+    .select("id, source_id, title, buyer, description, deadline, published_date, status, raw_payload, url, sources(name, source_type)")
+    .in("id", changedIds);
+  if (changedError) throw changedError;
+  if (!changedRows?.length) return;
+
+  const { data: candidateRows, error: candidateError } = await supabase
+    .from("opportunities")
+    .select("id, source_id, title, buyer, description, deadline, published_date, status, raw_payload, url, sources(name, source_type)")
+    .not("title", "is", null)
+    .limit(1500);
+  if (candidateError) throw candidateError;
+
+  const updates = new Map<string, { canonicalId: string; reason: string; duplicateGroupKey: string }>();
+  const canonicalIds = new Set<string>();
+
+  for (const changed of changedRows) {
+    const duplicateGroup = (candidateRows || []).filter((candidate) =>
+      candidate.id !== changed.id && areLikelyDuplicateOpportunities(changed, candidate)
+    );
+    if (!duplicateGroup.length) continue;
+
+    const group = [changed, ...duplicateGroup];
+    const canonical = group.sort((a, b) => getCanonicalOpportunityScore(b) - getCanonicalOpportunityScore(a))[0];
+    const duplicateGroupKey = getDuplicateGroupKey(canonical);
+    canonicalIds.add(String(canonical.id));
+
+    for (const row of group) {
+      if (row.id === canonical.id) continue;
+      updates.set(String(row.id), {
+        canonicalId: String(canonical.id),
+        duplicateGroupKey,
+        reason: `Likely duplicate of ${String(canonical.title || "canonical opportunity")} from ${getSourceName(canonical)}.`,
+      });
+    }
+  }
+
+  for (const canonicalId of canonicalIds) {
+    const row = (candidateRows || []).find((candidate) => String(candidate.id) === canonicalId);
+    if (!row) continue;
+    const payload = row.raw_payload && typeof row.raw_payload === "object" ? row.raw_payload as Record<string, unknown> : {};
+    const nextPayload = {
+      ...payload,
+      duplicate_group_key: getDuplicateGroupKey(row),
+      is_duplicate: false,
+      duplicate_of: null,
+      canonical_opportunity_id: String(row.id),
+    };
+    const { error } = await supabase
+      .from("opportunities")
+      .update({ raw_payload: nextPayload })
+      .eq("id", row.id);
+    if (error) throw error;
+  }
+
+  for (const [id, update] of updates) {
+    const row = (candidateRows || []).find((candidate) => String(candidate.id) === id);
+    const payload = row?.raw_payload && typeof row.raw_payload === "object" ? row.raw_payload as Record<string, unknown> : {};
+    const nextPayload = {
+      ...payload,
+      duplicate_group_key: update.duplicateGroupKey,
+      canonical_opportunity_id: update.canonicalId,
+      is_duplicate: true,
+      duplicate_of: update.canonicalId,
+      duplicate_reason: update.reason,
+      hidden_from_reports: true,
+      admin_report_status: "hidden",
+    };
+    const { error } = await supabase
+      .from("opportunities")
+      .update({ status: "hidden", raw_payload: nextPayload })
+      .eq("id", id);
+    if (error) throw error;
+  }
+
+  const duplicateIds = Array.from(updates.keys());
+  if (duplicateIds.length) {
+    const { error } = await supabase
+      .from("opportunity_matches")
+      .delete()
+      .in("opportunity_id", duplicateIds);
+    if (error) throw error;
+  }
+}
+
+function areLikelyDuplicateOpportunities(a: Record<string, unknown>, b: Record<string, unknown>) {
+  const keyA = getDuplicateGroupKey(a);
+  const keyB = getDuplicateGroupKey(b);
+  if (!keyA || !keyB) return false;
+  if (keyA === keyB && hasDistinctiveDuplicatePhrase(keyA)) return true;
+  if (!shareStrongWorkType(a, b)) return false;
+  return titleSimilarity(keyA, keyB) >= 0.92 && hasDistinctiveDuplicatePhrase(`${keyA} ${keyB}`);
+}
+
+function getDuplicateGroupKey(opportunity: Record<string, unknown>) {
+  return normalizeSearchText(String(opportunity.title || ""))
+    .replace(/\b(utbod|utbodsauglysing|verd fyrirspurn|verdfyrirspurn|oskad eftir tilbodum|tilbod|tilbodum)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function hasDistinctiveDuplicatePhrase(text: string) {
+  const tokens = text.split(/\s+/).filter((token) => token.length >= 5);
+  return tokens.length >= 3 || text.length >= 42;
+}
+
+function shareStrongWorkType(a: Record<string, unknown>, b: Record<string, unknown>) {
+  const terms = [
+    "gatnagerd",
+    "lagnir",
+    "lodarframkvaemdir",
+    "jardvinna",
+    "malbikun",
+    "bilastaedi",
+    "gangstett",
+    "yfirbordsfragangur",
+  ];
+  const textA = normalizeSearchText(`${a.title || ""} ${a.description || ""}`);
+  const textB = normalizeSearchText(`${b.title || ""} ${b.description || ""}`);
+  return terms.some((term) => textA.includes(term) && textB.includes(term));
+}
+
+function titleSimilarity(a: string, b: string) {
+  const tokensA = new Set(a.split(/\s+/).filter((token) => token.length > 2));
+  const tokensB = new Set(b.split(/\s+/).filter((token) => token.length > 2));
+  if (!tokensA.size || !tokensB.size) return 0;
+  const shared = Array.from(tokensA).filter((token) => tokensB.has(token)).length;
+  const total = new Set([...tokensA, ...tokensB]).size;
+  return shared / total;
+}
+
+function getCanonicalOpportunityScore(opportunity: Record<string, unknown>) {
+  const payload = opportunity.raw_payload && typeof opportunity.raw_payload === "object" ? opportunity.raw_payload as Record<string, unknown> : {};
+  let score = 0;
+  const deadline = String(opportunity.deadline || "");
+  if (deadline && daysUntil(deadline) >= 0) score += 80;
+  if (deadline) score += 20;
+  if (hasUsefulBuyer(String(opportunity.buyer || ""))) score += 20;
+  if (String(opportunity.description || "").length > 250) score += 12;
+  if (payload.detail_page_enriched === true || payload.page_monitor === true) score += 12;
+  if (["confirmed_tender", "likely_tender"].includes(String(payload.quality_status || ""))) score += 10;
+  if (payload.hidden_from_reports === true || String(opportunity.status || "") !== "open") score -= 100;
+  const sourceName = getSourceName(opportunity);
+  if (/garðabær|gardabaer|akranes|borgarbyggð|borgarbyggd|reykjanesbær|reykjanesbaer|faxaflóahafnir|faxafloahafnir/i.test(sourceName)) score += 18;
+  if (/ríkiskaup|rikiskaup|utbodsvefur|island\.is/i.test(sourceName) && !deadline) score -= 10;
+  return score;
+}
+
+function hasUsefulBuyer(value: string) {
+  const normalized = normalizeSearchText(value);
+  if (!normalized || normalized.includes("unknown buyer")) return false;
+  return !["admin", "administrator", "editor", "ritstjori", "noreply"].some((term) => normalized.includes(term));
+}
+
+function getSourceName(opportunity: Record<string, unknown>) {
+  const source = opportunity.sources && typeof opportunity.sources === "object" ? opportunity.sources as Record<string, unknown> : {};
+  const payload = opportunity.raw_payload && typeof opportunity.raw_payload === "object" ? opportunity.raw_payload as Record<string, unknown> : {};
+  return String(source.name || payload.source_name || "");
+}
+
 async function startImportRun(
   supabase: ReturnType<typeof createClient>,
   run: { runType: string; sourceName: string; importMode: string; query: string },
@@ -2533,6 +2706,7 @@ function isCustomerMatchEligibleOpportunity(opportunity: Record<string, unknown>
   if (adminStatus === "include") return true;
   if (payload.hidden_from_reports === true) return false;
   if (["hidden", "hide", "noise", "deleted"].includes(adminStatus)) return false;
+  if (isSecondaryDuplicateOpportunity(opportunity, payload)) return false;
   if (isStaleCustomerOpportunity(opportunity)) return false;
   const tenderState = String(payload.tender_state || "").toLowerCase();
   if (["tender_awarded", "awarded", "already_awarded", "already_tendered"].includes(tenderState)) return false;
@@ -2543,6 +2717,14 @@ function isCustomerMatchEligibleOpportunity(opportunity: Record<string, unknown>
   if (intent === "news_context" || intent === "not_opportunity") return false;
   if (intent === "confirmed_tender" || intent === "early_opportunity") return true;
   return !hasObviousNewsTitleIntent(String(opportunity.title || ""));
+}
+
+function isSecondaryDuplicateOpportunity(opportunity: Record<string, unknown>, payload: Record<string, unknown>) {
+  const id = String(opportunity.id || "");
+  const canonicalId = String(payload.canonical_opportunity_id || "");
+  return payload.is_duplicate === true ||
+    Boolean(payload.duplicate_of) ||
+    (Boolean(canonicalId) && Boolean(id) && canonicalId !== id);
 }
 
 function isStaleCustomerOpportunity(opportunity: Record<string, unknown>) {
@@ -2808,6 +2990,7 @@ function isCustomerReportMatch(match: Record<string, unknown>) {
   if (adminStatus === "include") return true;
   if (payload.hidden_from_reports === true) return false;
   if (["hidden", "hide", "noise", "deleted"].includes(adminStatus)) return false;
+  if (isSecondaryDuplicateOpportunity(opportunity, payload)) return false;
   const intent = getReportOpportunityIntent(opportunity);
   return intent === "confirmed_tender" || intent === "early_opportunity";
 }

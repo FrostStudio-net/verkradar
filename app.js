@@ -47,20 +47,23 @@ const translations = {
     heroEyebrow: "Útboðsgreind fyrir verktaka og þjónustufyrirtæki",
     heroTitle: "Finnið verðmæt útboð áður en skilafresturinn rennur út.",
     heroText: "VerkRadar vaktar útboðsvefi, sveitarfélög og opinberar heimildir og raðar tækifærum eftir því hvað skiptir ykkar fyrirtæki máli.",
-    createFreeDemoProfile: "Stofna ókeypis sýniprófíl",
+    createFreeDemoProfile: "Fá ókeypis prufu-yfirlit",
     viewSampleReport: "Skoða sýnishorn",
-    proofStrong: "Verktakar finna viðeigandi tækifæri hraðar.",
-    proofText: "Meðal efstu samsvarana er oft að finna útboð utan helstu gagnagrunna.",
-    bestOpenMatch: "Besta opna samsvörun",
+    proofStrong: "Fyrir verktaka, iðnfyrirtæki og þjónustuaðila.",
+    proofText: "Vöktun á opinberum heimildum, sveitarfélögum og útboðsvefjum - sett fram sem forgangsraðað yfirlit.",
+    bestOpenMatch: "Vöktun í dag",
     tender: "Útboð",
-    deadlineRisk: "Áhætta vegna frests",
+    deadlineRisk: "Rennur út fljótlega",
     daysLeft: "{count} dagar eftir",
     problemEyebrow: "Vandinn",
     problemTitle: "Útboð tapast oft áður en tilboðsgerðin byrjar.",
-    problemOneTitle: "Skilafrestir birtast þegar starfsfólkið er þegar bókað.",
-    problemOneText: "Stuttur svarfrestur verður að helgarvinnu, eða verðmætur samningur fer fram hjá ykkur.",
-    problemTwoTitle: "Leitin tekur lengri tíma en ákvörðunin.",
-    problemTwoText: "Eigendur eyða klukkutímum í að opna illa viðeigandi útboð í stað þess að sjá verðmæti, svæði, kröfur og ástæður á einum stað.",
+    problemOneTitle: "Útboð birtast á mörgum mismunandi stöðum.",
+    problemOneText: "Sveitarfélög, stofnanir og útboðsvefir birta tækifæri á ólíkum síðum og í ólíkum sniðum.",
+    problemTwoTitle: "Skilafrestir geta verið stuttir.",
+    problemTwoText: "Það tekur tíma að finna hvað passar við ykkar verkflokka, svæði og stærð verkefna.",
+    targetEyebrow: "Fyrir hverja?",
+    targetTitle: "Byggt fyrir íslensk fyrirtæki sem þurfa að finna rétt verkefni fyrr.",
+    targetText: "VerkRadar hentar fyrirtækjum sem vilja vakta útboð, verðfyrirspurnir og verkefnavísbendingar án þess að opna sömu vefi handvirkt á hverjum degi.",
     solutionEyebrow: "Lausnin",
     solutionTitle: "Eitt skýrt yfirlit í stað dreifðrar leitar.",
     solutionText: "VerkRadar breytir útboðshávaða í forgangsraðaðan lista yfir tækifæri sem fyrirtækið ætti að skoða.",
@@ -69,10 +72,11 @@ const translations = {
     matchProjectsStep: "2. Samsvara verkefnum",
     matchProjectsStepText: "Kerfið metur hvert tækifæri gagnvart fyrirtækjaprófílnum.",
     getReportStep: "3. Fáið yfirlit",
-    getReportStepText: "Fáið skýrt vikuyfirlit með frestum og næstu skrefum.",
+    getReportStepText: "Fáið skýrt yfirlit með frestum, ástæðum samsvörunar og næstu skrefum.",
     sampleReportEyebrow: "Sýnishorn",
-    sampleReportTitle: "Vikulegur stuttlisti sem hægt er að bregðast við.",
-    sampleReportText: "Sjáið hvernig VerkRadar pakkar saman samsvörunum, frestaáhættu og næstu skrefum án innskráningar.",
+    sampleReportTitle: "Stuttlisti sem sýnir hvað er þess virði að skoða.",
+    sampleReportText: "Sýnishornið sýnir hvernig VerkRadar raðar útboðum og verkefnum eftir þjónustu, svæði, fresti og ástæðum samsvörunar.",
+    sourceDisclaimer: "VerkRadar hjálpar til við að forgangsraða tækifærum. Upprunaleg útboðsgögn eru alltaf endanleg heimild.",
     tryDemoTitle: "Prófið sýnimælaborðið.",
     tryDemoText: "Hlaðið sýnifyrirtæki og sjáið hvernig samsvörunin virkar.",
     loadDemoCompany: "Hlaða sýnifyrirtæki",
@@ -272,11 +276,11 @@ const translations = {
     heroEyebrow: "Tender intelligence for working contractors",
     heroTitle: "Stop losing valuable jobs to tabs you never opened.",
     heroText: "VerkRadar checks tender portals, municipal pages and public sources, then ranks the jobs worth pricing before the deadline moves on.",
-    createFreeDemoProfile: "Create free demo profile",
+    createFreeDemoProfile: "Get a free trial report",
     viewSampleReport: "View sample report",
     proofStrong: "Contractors find relevant opportunities faster.",
     proofText: "Top matches often include tenders outside the main databases.",
-    bestOpenMatch: "Best open match",
+    bestOpenMatch: "New opportunities",
     tender: "Tender",
     deadlineRisk: "Deadline risk",
     daysLeft: "{count} days left",
@@ -286,6 +290,9 @@ const translations = {
     problemOneText: "A short response window becomes a scramble, or a valuable contract never gets priced.",
     problemTwoTitle: "The search takes longer than the go/no-go call.",
     problemTwoText: "Owners spend hours opening low-fit tenders instead of seeing value, location, requirements and match reasons in one view.",
+    targetEyebrow: "Who it is for",
+    targetTitle: "Built for Icelandic companies that need to find the right jobs earlier.",
+    targetText: "VerkRadar is for teams that want to monitor tenders, quote requests and project signals without checking the same websites manually every day.",
     solutionEyebrow: "The solution",
     solutionTitle: "One clear report instead of scattered searching.",
     solutionText: "VerkRadar turns tender noise into a ranked list of opportunities your business should actually check.",
@@ -296,8 +303,9 @@ const translations = {
     getReportStep: "3. Get report",
     getReportStepText: "Receive a clear weekly report with deadlines and next steps.",
     sampleReportEyebrow: "Sample report",
-    sampleReportTitle: "A weekly shortlist your team can act on.",
-    sampleReportText: "Preview how VerkRadar packages matched opportunities, deadline risk and next steps without requiring a login.",
+    sampleReportTitle: "A shortlist that shows what is worth checking.",
+    sampleReportText: "Preview how VerkRadar ranks tenders and projects by services, region, deadline and match reasons.",
+    sourceDisclaimer: "VerkRadar helps prioritize opportunity review. Original tender documents are always the final authority.",
     tryDemoTitle: "Try the demo dashboard now.",
     tryDemoText: "Load a sample company profile and see how the matching works.",
     loadDemoCompany: "Load demo company",
@@ -2090,6 +2098,7 @@ function isDashboardVisibleOpportunity(opp) {
   if (daysUntilDeadline(opp.deadline) < 0) return false;
   if (isDemoTestOpportunity(opp)) return false;
   if (opp.rawPayload?.extraction_method === "parent_article_with_child_opportunities") return false;
+  if (isSecondaryDuplicateOpportunity(opp)) return false;
   if (isStaleCustomerOpportunity(opp)) return false;
   if (!isTedOpportunity(opp)) return true;
   const country = getOpportunityCountryCode(opp);
@@ -6766,8 +6775,35 @@ function renderAdminOpportunityFilters(opportunities) {
 }
 
 function renderLanding() {
-  const topMatches = getMatchedOpportunities().slice(0, 3);
-  const primaryMatch = topMatches[0];
+  const isIcelandic = state.language === "is";
+  const heroSamples = isIcelandic
+    ? [
+        { title: "Sementsreitur - Gatnagerð og lagnir", type: "Útboð", score: "86% samsvörun", value: "5 ný tækifæri" },
+        { title: "Vífilstaðavegur - gatnagerð og lagnir", type: "Útboð", score: "Sterk samsvörun" },
+        { title: "Verðfyrirspurn - Sandbakki - gatnagerð", type: "Verðfyrirspurn", score: "2 rennur út fljótlega" }
+      ]
+    : [
+        { title: "Civil works and utilities at Sementsreitur", type: "Tender", score: "86% match", value: "5 new opportunities" },
+        { title: "Roadworks and utilities on Vífilstaðavegur", type: "Tender", score: "Strong match" },
+        { title: "Quote request - Sandbakki roadworks", type: "Quote request", score: "2 closing soon" }
+      ];
+  const targetCards = isIcelandic
+    ? [
+        ["Jarðvinna og gatnagerð", "Útboð um vegi, lóðir, bílastæði, stíga og jarðvegsvinnu."],
+        ["Lagnavinna og fráveita", "Verkefni um lagnir, dælustöðvar, fráveitu, vatn og hitaveitu."],
+        ["Malbikun og lóðarframkvæmdir", "Gatnagerð, yfirborðsfrágangur, gangstéttir og viðhald."],
+        ["Rafverktakar", "Raflagnir, brunakerfi, lýsing, öryggiskerfi og hleðslustöðvar."],
+        ["Ræstingar og þjónusta", "Reglulegir þjónustusamningar, húsþjónusta og rekstrarverkefni."],
+        ["Verkfræðistofur og ráðgjafar", "Hönnun, eftirlit, ráðgjöf og verkefnastjórnun þegar það á við."]
+      ]
+    : [
+        ["Earthworks and roadworks", "Tenders for roads, plots, parking areas, paths and earthworks."],
+        ["Utilities and drainage", "Projects for pipes, pumping stations, drainage, water and heating utilities."],
+        ["Paving and site works", "Road construction, surface finishing, sidewalks and maintenance."],
+        ["Electrical contractors", "Wiring, fire alarms, lighting, security systems and chargers."],
+        ["Cleaning and services", "Recurring service contracts, facility services and operations work."],
+        ["Engineering and advisors", "Design, supervision, consulting and project management where relevant."]
+      ];
   return renderShell(`
     <section class="hero">
       <div class="hero-copy">
@@ -6787,32 +6823,32 @@ function renderLanding() {
       </div>
       <div class="product-shot hero-card" aria-label="VerkRadar product preview">
         <div class="shot-topbar">
-          <span>VERKRADAR / RAFFIX EHF.</span>
+          <span>VERKRADAR / JARÐTÆKNI EHF.</span>
           <span>${new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}</span>
         </div>
         <div class="shot-metric">
           <span>${escapeHtml(t("bestOpenMatch"))}</span>
-          <strong>${primaryMatch?.matchScore || 92}%</strong>
+          <strong>${escapeHtml(isIcelandic ? "5 ný tækifæri" : "5 new opportunities")}</strong>
         </div>
         <div class="shot-row is-active">
           <div>
-            <span class="shot-label">${escapeHtml(t("tender"))}</span>
-            <h3>${primaryMatch?.title || "Electrical maintenance for municipal buildings"}</h3>
+            <span class="shot-label">${escapeHtml(heroSamples[0].type)}</span>
+            <h3>${escapeHtml(heroSamples[0].title)}</h3>
           </div>
-          <strong>${formatISK(primaryMatch?.estimatedValue || 15000000)}</strong>
+          <strong>${escapeHtml(heroSamples[0].score)}</strong>
         </div>
-        ${topMatches.slice(1, 3).map((opp) => `
+        ${heroSamples.slice(1, 3).map((opp) => `
           <div class="shot-row">
             <div>
               <span class="shot-label">${escapeHtml(opp.type)}</span>
               <h3>${escapeHtml(opp.title)}</h3>
             </div>
-            <strong>${opp.matchScore}%</strong>
+            <strong>${escapeHtml(opp.score)}</strong>
           </div>
         `).join("")}
         <div class="shot-footer">
           <span>${escapeHtml(t("deadlineRisk"))}</span>
-          <strong>${escapeHtml(t("daysLeft", { count: primaryMatch ? daysUntilDeadline(primaryMatch.deadline) : 18 }))}</strong>
+          <strong>${escapeHtml(isIcelandic ? "2 tækifæri" : "2 items")}</strong>
         </div>
       </div>
     </section>
@@ -6833,6 +6869,22 @@ function renderLanding() {
           <h3>${escapeHtml(t("problemTwoTitle"))}</h3>
           <p>${escapeHtml(t("problemTwoText"))}</p>
         </div>
+      </div>
+    </section>
+
+    <section class="section target-section">
+      <div class="section-copy">
+        <p class="eyebrow">${escapeHtml(t("targetEyebrow"))}</p>
+        <h2>${escapeHtml(t("targetTitle"))}</h2>
+        <p>${escapeHtml(t("targetText"))}</p>
+      </div>
+      <div class="feature-grid target-grid">
+        ${targetCards.map(([title, text]) => `
+          <div class="feature-card">
+            <h3>${escapeHtml(title)}</h3>
+            <p>${escapeHtml(text)}</p>
+          </div>
+        `).join("")}
       </div>
     </section>
 
@@ -6858,28 +6910,38 @@ function renderLanding() {
       <div class="public-report-preview">
         <div class="report-topbar">
           <span>${escapeHtml(t("reportTitle"))}</span>
-          <span>RafFix ehf.</span>
+          <span>Jarðtækni ehf.</span>
         </div>
         <article class="report-item">
-          <h3>Electrical maintenance for municipal buildings</h3>
-          <p><strong>${escapeHtml(t("buyer"))}:</strong> Reykjavík Municipality</p>
+          <h3>${escapeHtml(isIcelandic ? "Gatnagerð og lagnir á Akranesi" : "Roadworks and utilities in Akranes")}</h3>
+          <p><strong>${escapeHtml(t("buyer"))}:</strong> ${escapeHtml(isIcelandic ? "Akraneskaupstaður" : "Akranes Municipality")}</p>
           <p><strong>${escapeHtml(t("deadline"))}:</strong> ${escapeHtml(t("daysLeft", { count: 18 }))} · <strong>${escapeHtml(t("possibleMatch"))}:</strong> 92/100</p>
           <ul>
-            <li>Matches electrical installation and maintenance services.</li>
-            <li>Located in selected Icelandic service area.</li>
-            <li>Project value is inside the preferred range.</li>
+            <li>${escapeHtml(isIcelandic ? "Nefnir gatnagerð og lagnir sem passa við verkflokka fyrirtækisins." : "Mentions roadworks and utilities that match the company profile.")}</li>
+            <li>${escapeHtml(isIcelandic ? "Svæðið er innan valins þjónustusvæðis." : "The area is inside the selected service region.")}</li>
+            <li>${escapeHtml(isIcelandic ? "Verkefnið er þess virði að staðfesta í upprunalegum útboðsgögnum." : "The project is worth verifying in the original tender documents.")}</li>
           </ul>
-          <p><strong>${escapeHtml(t("openSource"))}:</strong> ${state.language === "is" ? "Opnið frumgögn og staðfestið skyldukröfur." : "Open source documents and confirm mandatory certifications."}</p>
+          <p><strong>${escapeHtml(t("openSource"))}:</strong> ${isIcelandic ? "Opnið heimild og staðfestið skilafrest, kröfur og gögn." : "Open the source and confirm deadline, requirements and documents."}</p>
         </article>
         <article class="report-item">
-          <h3>EV charger upgrade for public facilities</h3>
-          <p><strong>${escapeHtml(t("buyer"))}:</strong> Regional facilities office</p>
-          <p><strong>${escapeHtml(t("deadline"))}:</strong> ${escapeHtml(t("daysLeft", { count: 24 }))} · <strong>${escapeHtml(t("possibleMatch"))}:</strong> 81/100</p>
+          <h3>${escapeHtml(isIcelandic ? "Lóðarframkvæmdir við Myllubakkaskóla" : "Site works at Myllubakkaskóli")}</h3>
+          <p><strong>${escapeHtml(t("buyer"))}:</strong> ${escapeHtml(isIcelandic ? "Reykjanesbær" : "Reykjanesbær Municipality")}</p>
+          <p><strong>${escapeHtml(t("deadline"))}:</strong> ${escapeHtml(t("daysLeft", { count: 24 }))} · <strong>${escapeHtml(t("possibleMatch"))}:</strong> 86/100</p>
           <ul>
-            <li>Mentions EV charging and inspection keywords.</li>
-            <li>Unknown value, but allowed by the company profile.</li>
+            <li>${escapeHtml(isIcelandic ? "Inniheldur leitarorð: lóðarframkvæmdir, yfirborðsfrágangur." : "Contains keywords: site works, surface finishing.")}</li>
+            <li>${escapeHtml(isIcelandic ? "Passar við jarðvinnu, frágang og verk á lóðum." : "Fits earthworks, finishing and site work services.")}</li>
           </ul>
         </article>
+        <article class="report-item">
+          <h3>${escapeHtml(isIcelandic ? "Verðfyrirspurn - Sandbakki - gatnagerð" : "Quote request - Sandbakki roadworks")}</h3>
+          <p><strong>${escapeHtml(t("buyer"))}:</strong> ${escapeHtml(isIcelandic ? "Opinber verkkaupi" : "Public buyer")}</p>
+          <p><strong>${escapeHtml(t("deadline"))}:</strong> ${escapeHtml(t("daysLeft", { count: 11 }))} · <strong>${escapeHtml(t("possibleMatch"))}:</strong> 83/100</p>
+          <ul>
+            <li>${escapeHtml(isIcelandic ? "Skýr verðfyrirspurn með gatnagerð í titli." : "Clear quote request with roadworks in the title.")}</li>
+            <li>${escapeHtml(isIcelandic ? "Stuttur frestur, því þarf að bregðast hratt við." : "Short deadline, so it needs quick review.")}</li>
+          </ul>
+        </article>
+        <p class="source-disclaimer">${escapeHtml(t("sourceDisclaimer"))}</p>
       </div>
     </section>
 
@@ -8031,6 +8093,9 @@ function renderAdminOpportunityRow(opp) {
   const intent = getOpportunityIntent(opp);
   const hiddenFromReports = opp.rawPayload?.hidden_from_reports === true ||
     ["hidden", "noise", "deleted"].includes(String(opp.rawPayload?.admin_report_status || "").toLowerCase());
+  const duplicateReason = isSecondaryDuplicateOpportunity(opp)
+    ? (opp.rawPayload?.duplicate_reason || `Duplicate of ${opp.rawPayload?.canonical_opportunity_id || opp.rawPayload?.duplicate_of || "canonical opportunity"}`)
+    : "";
   const staleInfo = getStaleOpportunityInfo({
     title: opp.title,
     description: opp.description,
@@ -8047,7 +8112,7 @@ function renderAdminOpportunityRow(opp) {
       <div>
         <h3>${escapeHtml(opp.title)}</h3>
         <p>${escapeHtml(formatOpportunityBuyer(opp))} · ${escapeHtml(opp.source)} · ${escapeHtml(formatOpportunityLocation(opp))} · ${escapeHtml(opp.status)}</p>
-        <p>Quality: ${escapeHtml(getOpportunityQualityLabel(opp))} · Intent: ${escapeHtml(formatOpportunityIntent(intent))}${hiddenFromReports ? " · Hidden from reports" : ""}${staleReason ? ` · Stale / expired: ${escapeHtml(staleReason)}` : ""}</p>
+        <p>Quality: ${escapeHtml(getOpportunityQualityLabel(opp))} · Intent: ${escapeHtml(formatOpportunityIntent(intent))}${hiddenFromReports ? " · Hidden from reports" : ""}${duplicateReason ? ` · Duplicate: ${escapeHtml(duplicateReason)}` : ""}${staleReason ? ` · Stale / expired: ${escapeHtml(staleReason)}` : ""}</p>
       </div>
       <div class="admin-row-actions">
         <button class="btn btn-ghost btn-small" data-action="admin-report-override" data-override="confirmed_tender" data-id="${escapeHtml(opp.id)}" ${isUpdating ? "disabled" : ""}>Confirmed tender</button>
@@ -8503,9 +8568,18 @@ function isCustomerReportExcludedIntent(opp) {
   if (adminStatus === "include") return false;
   if (payload.hidden_from_reports === true) return true;
   if (["hidden", "hide", "noise", "deleted"].includes(adminStatus)) return true;
+  if (isSecondaryDuplicateOpportunity(opp)) return true;
   if (isStaleCustomerOpportunity(opp)) return true;
   const intent = getOpportunityIntent(opp);
   return intent === "news_context" || intent === "not_opportunity";
+}
+
+function isSecondaryDuplicateOpportunity(opp = {}) {
+  const payload = opp.rawPayload || {};
+  const canonicalId = String(payload.canonical_opportunity_id || "");
+  return payload.is_duplicate === true ||
+    Boolean(payload.duplicate_of) ||
+    (Boolean(canonicalId) && Boolean(opp.id) && canonicalId !== String(opp.id));
 }
 
 function sortCustomerReportMatches(matches) {

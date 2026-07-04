@@ -1089,6 +1089,7 @@ function isCustomerMatchEligibleOpportunity(opportunity: Record<string, unknown>
   if (adminStatus === "include") return true;
   if (payload.hidden_from_reports === true) return false;
   if (["hidden", "hide", "noise", "deleted"].includes(adminStatus)) return false;
+  if (isSecondaryDuplicateOpportunity(opportunity, payload)) return false;
   if (isStaleCustomerOpportunity(opportunity, sourceName)) return false;
   const tenderState = String(payload.tender_state || "").toLowerCase();
   if (["tender_awarded", "awarded", "already_awarded", "already_tendered"].includes(tenderState)) return false;
@@ -1100,6 +1101,14 @@ function isCustomerMatchEligibleOpportunity(opportunity: Record<string, unknown>
   if (inferredIntent === "news_context" || inferredIntent === "not_opportunity") return false;
   if (inferredIntent === "confirmed_tender" || inferredIntent === "early_opportunity") return true;
   return !hasObviousNewsTitleIntent(String(opportunity.title || ""));
+}
+
+function isSecondaryDuplicateOpportunity(opportunity: Record<string, unknown>, payload: Record<string, unknown>) {
+  const id = String(opportunity.id || "");
+  const canonicalId = String(payload.canonical_opportunity_id || "");
+  return payload.is_duplicate === true ||
+    Boolean(payload.duplicate_of) ||
+    (Boolean(canonicalId) && Boolean(id) && canonicalId !== id);
 }
 
 function isStaleCustomerOpportunity(opportunity: Record<string, unknown>, sourceName = "") {

@@ -653,6 +653,7 @@ h3 {
 
 .shot-row strong {
   white-space: nowrap;
+  text-align: right;
 }
 
 .shot-footer {
@@ -1052,6 +1053,37 @@ h3 {
 .public-report-preview .report-item li {
   color: var(--muted);
   line-height: 1.5;
+}
+
+.target-section {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.75fr) minmax(0, 1.25fr);
+  gap: clamp(28px, 5vw, 62px);
+  padding: 44px 0;
+  align-items: start;
+}
+
+.target-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.target-grid .feature-card {
+  padding: 20px;
+}
+
+.target-grid .feature-card h3 {
+  margin-bottom: 8px;
+}
+
+.target-grid .feature-card p,
+.source-disclaimer {
+  color: var(--muted);
+}
+
+.source-disclaimer {
+  margin: 4px 0 0;
+  font-size: 0.92rem;
+  line-height: 1.45;
 }
 
 .form-card {
@@ -4052,9 +4084,31 @@ body.modal-open {
   }
 
   .section-grid,
-  .section-grid.reversed {
+  .section-grid.reversed,
+  .target-section {
+    grid-template-columns: 1fr;
     gap: 22px;
     padding: 28px 0;
+  }
+
+  .target-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .target-grid .feature-card {
+    padding: 16px;
+  }
+
+  .shot-row {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .shot-row strong {
+    justify-self: start;
+    text-align: left;
+    white-space: normal;
   }
 
   .hero-actions,
