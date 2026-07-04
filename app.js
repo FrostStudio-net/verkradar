@@ -2090,6 +2090,7 @@ function isDashboardVisibleOpportunity(opp) {
   if (daysUntilDeadline(opp.deadline) < 0) return false;
   if (isDemoTestOpportunity(opp)) return false;
   if (opp.rawPayload?.extraction_method === "parent_article_with_child_opportunities") return false;
+  if (isStaleCustomerOpportunity(opp)) return false;
   if (!isTedOpportunity(opp)) return true;
   const country = getOpportunityCountryCode(opp);
   return ["IS", "NO", "DK", "SE", "FI"].includes(country);
@@ -2157,6 +2158,9 @@ function normalizeOpportunityIntent(value) {
     news: "news_context",
     noise: "not_opportunity",
     not_opportunity: "not_opportunity",
+    stale_opportunity: "not_opportunity",
+    stale: "not_opportunity",
+    expired: "not_opportunity",
   };
   return aliases[normalized] || "";
 }
@@ -2307,6 +2311,120 @@ function containsConfirmedTenderIntent(text) {
     "útboðsgögn",
     "utbodsgogn"
   ]);
+}
+
+function isStaleCustomerOpportunity(opp = {}) {
+  const payload = opp.rawPayload || {};
+  if (payload.stale_status === "stale_or_expired" || payload.opportunity_intent === "stale_opportunity") return true;
+  return getStaleOpportunityInfo({
+    title: opp.title,
+    description: opp.description,
+    content: [
+      opp.category,
+      opp.source,
+      Array.isArray(opp.keywords) ? opp.keywords.join(" ") : "",
+    ].filter(Boolean).join(" "),
+    publishedDate: opp.publishedDate,
+    deadline: opp.deadline,
+    sourceName: opp.source,
+    sourceType: opp.sourceType,
+    connectorType: payload.connector_type,
+  }).isStale;
+}
+
+function getStaleOpportunityInfo(input = {}) {
+  const deadline = String(input.deadline || "").slice(0, 10);
+  if (deadline && daysUntilDeadline(deadline) >= 0) {
+    return { isStale: false, reason: "", thresholdDays: null, ageDays: null, oldYears: [], expiredKeywords: [] };
+  }
+
+  const text = normalizeLocationText([input.title, input.description, input.content].filter(Boolean).join(" "));
+  const oldYears = getOldYearsFromText(text);
+  const expiredKeywords = getExpiredResultKeywordsFromText(text);
+  const publishedDate = parseIsoDate(input.publishedDate);
+  const ageDays = publishedDate ? Math.floor((Date.now() - new Date(`${publishedDate}T00:00:00Z`).getTime()) / 86400000) : null;
+  const thresholdDays = isStrictStaleSource(input) ? 45 : 60;
+
+  if (oldYears.length) {
+    return { isStale: true, reason: `Old year detected (${oldYears.join(", ")}) and no future deadline found.`, thresholdDays, ageDays, oldYears, expiredKeywords };
+  }
+  if (expiredKeywords.length) {
+    return { isStale: true, reason: `Expired/result wording detected (${expiredKeywords.slice(0, 3).join(", ")}) and no future deadline found.`, thresholdDays, ageDays, oldYears, expiredKeywords };
+  }
+  if (ageDays !== null && ageDays > thresholdDays) {
+    return { isStale: true, reason: `Published ${ageDays} days ago with no current deadline.`, thresholdDays, ageDays, oldYears, expiredKeywords };
+  }
+  return { isStale: false, reason: "", thresholdDays, ageDays, oldYears, expiredKeywords };
+}
+
+function isStrictStaleSource(input = {}) {
+  const text = normalizeLocationText(`${input.sourceName || ""} ${input.sourceType || ""} ${input.connectorType || ""}`);
+  return String(input.connectorType || "") === "rss_feed" && [
+    "municipal",
+    "sveitarfelag",
+    "akranes",
+    "borgarbyggd",
+    "arborg",
+    "selfoss",
+    "gardabaer",
+    "reykjanesbaer",
+    "hafnarfjordur",
+    "mosfellsbaer",
+    "kopavogur",
+    "mulathing",
+    "fjardabyggd",
+  ].some((value) => text.includes(normalizeLocationText(value)));
+}
+
+function getOldYearsFromText(text) {
+  const currentYear = new Date().getUTCFullYear();
+  const years = new Set();
+  String(text || "").replace(/\b(20[0-9]{2})\b/g, (_match, yearValue) => {
+    const year = Number(yearValue);
+    if (year >= 2020 && year < currentYear) years.add(year);
+    return yearValue;
+  });
+  return Array.from(years).sort();
+}
+
+function getExpiredResultKeywordsFromText(text) {
+  const phrases = [
+    "niðurstaða útboðs",
+    "nidurstada utbods",
+    "niðurstöður útboðs",
+    "nidurstodur utbods",
+    "opnun tilboða",
+    "opnun tilboda",
+    "tilboð opnuð",
+    "tilbod opnud",
+    "lokið",
+    "lokid",
+    "lokið útboði",
+    "lokid utbodi",
+    "búið",
+    "buid",
+    "útrunnið",
+    "ut runnid",
+    "eldri útboð",
+    "eldri utbod",
+    "útboðssaga",
+    "utbodssaga",
+    "samningur gerður",
+    "samningur gerdur",
+    "verksamningur",
+    "awarded",
+    "tender results",
+    "contract awarded",
+    "expired",
+  ];
+  return phrases.filter((phrase) => containsAnyNormalizedPhrase(text, [phrase]));
+}
+
+function parseIsoDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 10);
 }
 
 function containsEarlyOpportunityIntent(text) {
@@ -7913,12 +8031,23 @@ function renderAdminOpportunityRow(opp) {
   const intent = getOpportunityIntent(opp);
   const hiddenFromReports = opp.rawPayload?.hidden_from_reports === true ||
     ["hidden", "noise", "deleted"].includes(String(opp.rawPayload?.admin_report_status || "").toLowerCase());
+  const staleInfo = getStaleOpportunityInfo({
+    title: opp.title,
+    description: opp.description,
+    content: `${opp.category || ""} ${opp.source || ""} ${Array.isArray(opp.keywords) ? opp.keywords.join(" ") : ""}`,
+    publishedDate: opp.publishedDate,
+    deadline: opp.deadline,
+    sourceName: opp.source,
+    sourceType: opp.sourceType,
+    connectorType: opp.rawPayload?.connector_type,
+  });
+  const staleReason = opp.rawPayload?.stale_reason || (staleInfo.isStale ? staleInfo.reason : "");
   return `
     <div class="admin-row">
       <div>
         <h3>${escapeHtml(opp.title)}</h3>
         <p>${escapeHtml(formatOpportunityBuyer(opp))} · ${escapeHtml(opp.source)} · ${escapeHtml(formatOpportunityLocation(opp))} · ${escapeHtml(opp.status)}</p>
-        <p>Quality: ${escapeHtml(getOpportunityQualityLabel(opp))} · Intent: ${escapeHtml(formatOpportunityIntent(intent))}${hiddenFromReports ? " · Hidden from reports" : ""}</p>
+        <p>Quality: ${escapeHtml(getOpportunityQualityLabel(opp))} · Intent: ${escapeHtml(formatOpportunityIntent(intent))}${hiddenFromReports ? " · Hidden from reports" : ""}${staleReason ? ` · Stale / expired: ${escapeHtml(staleReason)}` : ""}</p>
       </div>
       <div class="admin-row-actions">
         <button class="btn btn-ghost btn-small" data-action="admin-report-override" data-override="confirmed_tender" data-id="${escapeHtml(opp.id)}" ${isUpdating ? "disabled" : ""}>Confirmed tender</button>
@@ -8374,6 +8503,7 @@ function isCustomerReportExcludedIntent(opp) {
   if (adminStatus === "include") return false;
   if (payload.hidden_from_reports === true) return true;
   if (["hidden", "hide", "noise", "deleted"].includes(adminStatus)) return true;
+  if (isStaleCustomerOpportunity(opp)) return true;
   const intent = getOpportunityIntent(opp);
   return intent === "news_context" || intent === "not_opportunity";
 }
@@ -8544,6 +8674,7 @@ function isCustomerMatchEligibleOpportunity(opp) {
   if (isCustomerReportExcludedIntent(opp)) return false;
   const tenderState = String(payload.tender_state || "").toLowerCase();
   if (["tender_awarded", "awarded", "already_tendered"].includes(tenderState)) return false;
+  if (isStaleCustomerOpportunity(opp)) return false;
   if (containsTitleNewsIntent(opp.title || "") && !containsConfirmedTenderIntent(getOpportunityQualityText(opp))) return false;
   return true;
 }

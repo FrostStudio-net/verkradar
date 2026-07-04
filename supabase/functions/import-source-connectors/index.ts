@@ -1216,10 +1216,22 @@ function normalizeConnectorItem(
   const extractedDeadline = extractDeadline(searchText);
   const deadline = String(item.deadline || "") || extractedDeadline.date;
   const isExpired = deadline ? daysUntil(deadline) < 0 : false;
-  const qualityStatus = source.name === FAXAFLOAHAFNIR_SOURCE_NAME && !deadline
+  const staleInfo = getStaleOpportunityInfo({
+    title,
+    description,
+    content,
+    publishedDate,
+    deadline,
+    sourceName: source.name,
+    sourceType: source.source_type || "",
+    connectorType: connector.connector_type,
+  });
+  const qualityStatus = staleInfo.isStale
+    ? "not_opportunity"
+    : source.name === FAXAFLOAHAFNIR_SOURCE_NAME && !deadline
     ? "needs_review"
     : getConnectorOpportunityQuality(searchText);
-  const opportunityIntent = getConnectorOpportunityIntent(searchText, title);
+  const opportunityIntent = staleInfo.isStale ? "stale_opportunity" : getConnectorOpportunityIntent(searchText, title);
   const buyer = getConnectorItemBuyer(item, connector.connector_type, source.name, title) || "Unknown buyer";
 
   return {
@@ -1247,7 +1259,7 @@ function normalizeConnectorItem(
       ...extractKeywordsFromText(`${title} ${description}`),
     ]),
     difficulty: "medium",
-    status: isExpired ? "hidden" : "open",
+    status: isExpired || staleInfo.isStale ? "hidden" : "open",
     raw_payload: {
       connector_type: connector.connector_type,
       source_name: source.name,
@@ -1255,7 +1267,16 @@ function normalizeConnectorItem(
       buyer,
       quality_status: qualityStatus,
       opportunity_intent: opportunityIntent,
-      hidden_from_reports: opportunityIntent === "news_context" || opportunityIntent === "not_opportunity",
+      hidden_from_reports: staleInfo.isStale || opportunityIntent === "news_context" || opportunityIntent === "not_opportunity",
+      ...(staleInfo.isStale ? {
+        admin_report_status: "hidden",
+        stale_status: "stale_or_expired",
+        stale_reason: staleInfo.reason,
+        stale_threshold_days: staleInfo.thresholdDays,
+        stale_age_days: staleInfo.ageDays,
+        old_years_detected: staleInfo.oldYears,
+        expired_keywords_detected: staleInfo.expiredKeywords,
+      } : {}),
       extracted_deadline_text: extractedDeadline.rawText,
       deadline_warning: deadline ? null : MISSING_DEADLINE_RISK,
       item,
@@ -1833,6 +1854,92 @@ function getConnectorOpportunityIntent(text: string, title = "") {
   if (marketSignalPhrases.some((phrase) => normalized.includes(phrase))) return "market_signal";
 
   return "market_signal";
+}
+
+function getStaleOpportunityInfo(input: {
+  title?: string;
+  description?: string;
+  content?: string;
+  publishedDate?: string | null;
+  deadline?: string | null;
+  sourceName?: string;
+  sourceType?: string;
+  connectorType?: string;
+}) {
+  const deadline = String(input.deadline || "").slice(0, 10);
+  if (deadline && daysUntil(deadline) >= 0) {
+    return { isStale: false, reason: "", thresholdDays: null as number | null, ageDays: null as number | null, oldYears: [] as number[], expiredKeywords: [] as string[] };
+  }
+
+  const text = `${input.title || ""} ${input.description || ""} ${input.content || ""}`;
+  const normalized = normalizeSearchText(text);
+  const oldYears = getOldYears(normalized);
+  const expiredKeywords = getExpiredResultKeywords(normalized);
+  const publishedDate = parseDate(String(input.publishedDate || ""));
+  const ageDays = publishedDate ? Math.floor((Date.now() - new Date(`${publishedDate}T00:00:00Z`).getTime()) / 86400000) : null;
+  const thresholdDays = isStrictStaleSource(input) ? 45 : 60;
+
+  if (oldYears.length) {
+    return { isStale: true, reason: `Old year detected (${oldYears.join(", ")}) and no future deadline found.`, thresholdDays, ageDays, oldYears, expiredKeywords };
+  }
+  if (expiredKeywords.length) {
+    return { isStale: true, reason: `Expired/result wording detected (${expiredKeywords.slice(0, 3).join(", ")}) and no future deadline found.`, thresholdDays, ageDays, oldYears, expiredKeywords };
+  }
+  if (ageDays !== null && ageDays > thresholdDays) {
+    return { isStale: true, reason: `Published ${ageDays} days ago with no current deadline.`, thresholdDays, ageDays, oldYears, expiredKeywords };
+  }
+  return { isStale: false, reason: "", thresholdDays, ageDays, oldYears, expiredKeywords };
+}
+
+function isStrictStaleSource(input: { sourceName?: string; sourceType?: string; connectorType?: string }) {
+  const text = normalizeSearchText(`${input.sourceName || ""} ${input.sourceType || ""} ${input.connectorType || ""}`);
+  return input.connectorType === "rss_feed" && [
+    "municipal",
+    "sveitarfelag",
+    "akranes",
+    "borgarbyggd",
+    "arborg",
+    "selfoss",
+    "gardabaer",
+    "reykjanesbaer",
+    "hafnarfjordur",
+    "mosfellsbaer",
+    "kopavogur",
+    "mulathing",
+    "fjardabyggd",
+  ].some((value) => text.includes(normalizeSearchText(value)));
+}
+
+function getOldYears(normalizedText: string) {
+  const currentYear = new Date().getUTCFullYear();
+  const years = new Set<number>();
+  for (const match of normalizedText.matchAll(/\b(20[0-9]{2})\b/g)) {
+    const year = Number(match[1]);
+    if (year >= 2020 && year < currentYear) years.add(year);
+  }
+  return Array.from(years).sort();
+}
+
+function getExpiredResultKeywords(normalizedText: string) {
+  const phrases = [
+    "nidurstada utbods",
+    "nidurstodur utbods",
+    "opnun tilboda",
+    "tilbod opnud",
+    "lokid",
+    "lokid utbodi",
+    "buid",
+    "ut runnid",
+    "eldri utbod",
+    "utbodssaga",
+    "samningur gerdur",
+    "verksamningur",
+    "awarded",
+    "tender results",
+    "contract awarded",
+    "expired",
+  ];
+  return phrases.filter((phrase) => normalizedText.includes(normalizeSearchText(phrase)));
 }
 
 async function getExistingExternalIds(supabase: ReturnType<typeof createClient>, sourceId: string, externalIds: string[]) {
@@ -2426,6 +2533,7 @@ function isCustomerMatchEligibleOpportunity(opportunity: Record<string, unknown>
   if (adminStatus === "include") return true;
   if (payload.hidden_from_reports === true) return false;
   if (["hidden", "hide", "noise", "deleted"].includes(adminStatus)) return false;
+  if (isStaleCustomerOpportunity(opportunity)) return false;
   const tenderState = String(payload.tender_state || "").toLowerCase();
   if (["tender_awarded", "awarded", "already_awarded", "already_tendered"].includes(tenderState)) return false;
   const explicitIntent = normalizeReportIntent(String(payload.opportunity_intent || payload.intent || payload.quality_status || ""));
@@ -2435,6 +2543,30 @@ function isCustomerMatchEligibleOpportunity(opportunity: Record<string, unknown>
   if (intent === "news_context" || intent === "not_opportunity") return false;
   if (intent === "confirmed_tender" || intent === "early_opportunity") return true;
   return !hasObviousNewsTitleIntent(String(opportunity.title || ""));
+}
+
+function isStaleCustomerOpportunity(opportunity: Record<string, unknown>) {
+  const payload = opportunity.raw_payload && typeof opportunity.raw_payload === "object"
+    ? opportunity.raw_payload as Record<string, unknown>
+    : {};
+  const source = opportunity.sources && typeof opportunity.sources === "object"
+    ? opportunity.sources as Record<string, unknown>
+    : {};
+  if (payload.stale_status === "stale_or_expired" || payload.opportunity_intent === "stale_opportunity") return true;
+  return getStaleOpportunityInfo({
+    title: String(opportunity.title || ""),
+    description: String(opportunity.description || ""),
+    content: [
+      Array.isArray(opportunity.keywords) ? (opportunity.keywords as unknown[]).join(" ") : "",
+      String(opportunity.category || ""),
+      String(source.name || payload.source_name || ""),
+    ].join(" "),
+    publishedDate: String(opportunity.published_date || ""),
+    deadline: String(opportunity.deadline || ""),
+    sourceName: String(source.name || payload.source_name || ""),
+    sourceType: String(source.source_type || ""),
+    connectorType: String(payload.connector_type || ""),
+  }).isStale;
 }
 
 function isDemoTestOpportunity(opportunity: Record<string, unknown>) {
@@ -2708,6 +2840,9 @@ function normalizeReportIntent(value: string) {
     news: "news_context",
     noise: "not_opportunity",
     not_opportunity: "not_opportunity",
+    stale_opportunity: "not_opportunity",
+    stale: "not_opportunity",
+    expired: "not_opportunity",
   };
   return aliases[normalized] || "";
 }

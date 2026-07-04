@@ -1089,6 +1089,7 @@ function isCustomerMatchEligibleOpportunity(opportunity: Record<string, unknown>
   if (adminStatus === "include") return true;
   if (payload.hidden_from_reports === true) return false;
   if (["hidden", "hide", "noise", "deleted"].includes(adminStatus)) return false;
+  if (isStaleCustomerOpportunity(opportunity, sourceName)) return false;
   const tenderState = String(payload.tender_state || "").toLowerCase();
   if (["tender_awarded", "awarded", "already_awarded", "already_tendered"].includes(tenderState)) return false;
   const explicitIntent = normalizeReportIntent(String(payload.opportunity_intent || payload.intent || payload.quality_status || ""));
@@ -1099,6 +1100,24 @@ function isCustomerMatchEligibleOpportunity(opportunity: Record<string, unknown>
   if (inferredIntent === "news_context" || inferredIntent === "not_opportunity") return false;
   if (inferredIntent === "confirmed_tender" || inferredIntent === "early_opportunity") return true;
   return !hasObviousNewsTitleIntent(String(opportunity.title || ""));
+}
+
+function isStaleCustomerOpportunity(opportunity: Record<string, unknown>, sourceName = "") {
+  const payload = opportunity.raw_payload && typeof opportunity.raw_payload === "object"
+    ? opportunity.raw_payload as Record<string, unknown>
+    : {};
+  if (payload.stale_status === "stale_or_expired" || payload.opportunity_intent === "stale_opportunity") return true;
+  if (/ted|tenders electronic daily/i.test(sourceName)) return false;
+  return getStaleOpportunityInfo({
+    title: String(opportunity.title || ""),
+    description: String(opportunity.description || ""),
+    content: `${String(opportunity.category || "")} ${String(sourceName || "")}`,
+    publishedDate: String(opportunity.published_date || ""),
+    deadline: String(opportunity.deadline || ""),
+    sourceName,
+    sourceType: "",
+    connectorType: String(payload.connector_type || ""),
+  }).isStale;
 }
 
 function inferOpportunityIntent(opportunity: Record<string, unknown>) {
@@ -1143,8 +1162,97 @@ function normalizeReportIntent(value: string) {
     news: "news_context",
     noise: "not_opportunity",
     not_opportunity: "not_opportunity",
+    stale_opportunity: "not_opportunity",
+    stale: "not_opportunity",
+    expired: "not_opportunity",
   };
   return aliases[normalized] || "";
+}
+
+function getStaleOpportunityInfo(input: {
+  title?: string;
+  description?: string;
+  content?: string;
+  publishedDate?: string | null;
+  deadline?: string | null;
+  sourceName?: string;
+  sourceType?: string;
+  connectorType?: string;
+}) {
+  const deadline = String(input.deadline || "").slice(0, 10);
+  if (deadline && daysUntilDeadline(deadline) >= 0) {
+    return { isStale: false, reason: "", thresholdDays: null as number | null, ageDays: null as number | null, oldYears: [] as number[], expiredKeywords: [] as string[] };
+  }
+  const text = `${input.title || ""} ${input.description || ""} ${input.content || ""}`;
+  const normalized = normalizeText(text);
+  const oldYears = getOldYears(normalized);
+  const expiredKeywords = getExpiredResultKeywords(normalized);
+  const publishedDate = parseIsoDate(String(input.publishedDate || ""));
+  const ageDays = publishedDate ? Math.floor((Date.now() - new Date(`${publishedDate}T00:00:00Z`).getTime()) / 86400000) : null;
+  const thresholdDays = isStrictStaleSource(input) ? 45 : 60;
+
+  if (oldYears.length) return { isStale: true, reason: `Old year detected (${oldYears.join(", ")}) and no future deadline found.`, thresholdDays, ageDays, oldYears, expiredKeywords };
+  if (expiredKeywords.length) return { isStale: true, reason: `Expired/result wording detected (${expiredKeywords.slice(0, 3).join(", ")}) and no future deadline found.`, thresholdDays, ageDays, oldYears, expiredKeywords };
+  if (ageDays !== null && ageDays > thresholdDays) return { isStale: true, reason: `Published ${ageDays} days ago with no current deadline.`, thresholdDays, ageDays, oldYears, expiredKeywords };
+  return { isStale: false, reason: "", thresholdDays, ageDays, oldYears, expiredKeywords };
+}
+
+function isStrictStaleSource(input: { sourceName?: string; sourceType?: string; connectorType?: string }) {
+  const text = normalizeText(`${input.sourceName || ""} ${input.sourceType || ""} ${input.connectorType || ""}`);
+  return input.connectorType === "rss_feed" && [
+    "municipal",
+    "sveitarfelag",
+    "akranes",
+    "borgarbyggd",
+    "arborg",
+    "selfoss",
+    "gardabaer",
+    "reykjanesbaer",
+    "hafnarfjordur",
+    "mosfellsbaer",
+    "kopavogur",
+    "mulathing",
+    "fjardabyggd",
+  ].some((value) => text.includes(normalizeText(value)));
+}
+
+function getOldYears(normalizedText: string) {
+  const currentYear = new Date().getUTCFullYear();
+  const years = new Set<number>();
+  for (const match of normalizedText.matchAll(/\b(20[0-9]{2})\b/g)) {
+    const year = Number(match[1]);
+    if (year >= 2020 && year < currentYear) years.add(year);
+  }
+  return Array.from(years).sort();
+}
+
+function getExpiredResultKeywords(normalizedText: string) {
+  const phrases = [
+    "nidurstada utbods",
+    "nidurstodur utbods",
+    "opnun tilboda",
+    "tilbod opnud",
+    "lokid",
+    "lokid utbodi",
+    "buid",
+    "ut runnid",
+    "eldri utbod",
+    "utbodssaga",
+    "samningur gerdur",
+    "verksamningur",
+    "awarded",
+    "tender results",
+    "contract awarded",
+    "expired",
+  ];
+  return phrases.filter((phrase) => normalizedText.includes(normalizeText(phrase)));
+}
+
+function parseIsoDate(value: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 10);
 }
 
 function hasObviousNewsTitleIntent(title: string) {
