@@ -516,7 +516,8 @@ const defaultProfile = {
   reportFrequency: "weekly",
   reportDay: "monday",
   deadlineReminders: true,
-  includeLowConfidence: false
+  includeLowConfidence: false,
+  autoAlertMode: "auto_safe_only"
 };
 
 const PROFILE_LOAD_TIMEOUT_MS = 12000;
@@ -543,7 +544,8 @@ function getEmptyProfile() {
     reportFrequency: "weekly",
     reportDay: "monday",
     deadlineReminders: true,
-    includeLowConfidence: false
+    includeLowConfidence: false,
+    autoAlertMode: "auto_safe_only"
   };
 }
 
@@ -624,6 +626,11 @@ let state = {
   adminCompaniesLoading: false,
   adminCompaniesLoaded: false,
   adminCompaniesError: null,
+  adminReviewMatches: [],
+  adminReviewLoading: false,
+  adminReviewLoaded: false,
+  adminReviewError: null,
+  adminReviewActions: {},
   adminCompanyActions: {},
   selectedAdminCompanyId: null,
   adminActiveTab: "overview",
@@ -983,6 +990,10 @@ document.addEventListener("click", (event) => {
   }
   if (name === "admin-generate-company-report") {
     generateAdminCompanyReport(id);
+    return;
+  }
+  if (name === "admin-review-match") {
+    reviewAdminMatch(id, action.dataset.companyId || "", action.dataset.reviewAction || "");
     return;
   }
   if (name === "import-ted") importTedNotices();
@@ -1463,6 +1474,7 @@ function afterRouteRender() {
     if (!state.adminReportsLoaded && !state.adminReportsLoading) loadAdminReports();
     if (!state.sourceCoverageLoaded && !state.sourceCoverageLoading) loadSourceCoverageForAdmin();
     if (!state.adminCompaniesLoaded && !state.adminCompaniesLoading) loadAdminCompanies();
+    if (!state.adminReviewLoaded && !state.adminReviewLoading) loadAdminReviewQueue();
     if (!state.importedTedOpportunitiesLoaded && !state.importedTedOpportunitiesLoading) loadNewestImportedTedOpportunities().then(render).catch((error) => {
       console.error("Failed to load latest TED opportunities:", error);
     });
@@ -1799,7 +1811,7 @@ async function loadAdminCompanies() {
         supabaseClient.from("company_services").select("company_id, service").in("company_id", companyIds),
         supabaseClient.from("company_locations").select("company_id, location").in("company_id", companyIds),
         supabaseClient.from("company_keywords").select("company_id, keyword, type").in("company_id", companyIds),
-        supabaseClient.from("opportunity_matches").select("company_id, opportunity_id, match_score, match_label, opportunities(title, buyer, source_id, sources(name))").in("company_id", companyIds),
+        supabaseClient.from("opportunity_matches").select("company_id, opportunity_id, match_score, match_label, safety_status, opportunities(title, buyer, source_id, sources(name))").in("company_id", companyIds),
         supabaseClient.from("reports").select("id, company_id, title, created_at, period_start, period_end, status").in("company_id", companyIds).order("created_at", { ascending: false })
       ]);
 
@@ -1829,13 +1841,90 @@ async function loadAdminCompanies() {
   }
 }
 
+async function loadAdminReviewQueue() {
+  if (!supabaseClient || !state.isAdmin) {
+    state.adminReviewMatches = [];
+    state.adminReviewLoaded = true;
+    return;
+  }
+
+  state.adminReviewLoading = true;
+  state.adminReviewError = null;
+  render();
+
+  try {
+    const { data, error } = await supabaseClient
+      .from("opportunity_matches")
+      .select(`
+        id,
+        company_id,
+        opportunity_id,
+        match_score,
+        match_label,
+        match_reasons,
+        risks,
+        safety_status,
+        safety_reasons,
+        alert_eligible,
+        review_required,
+        calculated_at,
+        companies (
+          company_name
+        ),
+        opportunities (
+          *,
+          sources (
+            name,
+            source_type
+          )
+        )
+      `)
+      .eq("safety_status", "needs_review")
+      .eq("review_required", true)
+      .order("calculated_at", { ascending: false })
+      .limit(100);
+
+    if (error) throw error;
+    state.adminReviewMatches = (data || []).map(mapAdminReviewMatch);
+    state.adminReviewLoaded = true;
+  } catch (error) {
+    console.error("Failed to load admin review queue:", error);
+    state.adminReviewMatches = [];
+    state.adminReviewError = formatSupabaseError(error);
+  } finally {
+    state.adminReviewLoading = false;
+    state.adminReviewLoaded = true;
+    render();
+  }
+}
+
+function mapAdminReviewMatch(row) {
+  const opportunity = mapSupabaseOpportunity(row.opportunities || {});
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    opportunityId: row.opportunity_id,
+    companyName: row.companies?.company_name || "Unknown company",
+    opportunity,
+    matchScore: Number(row.match_score || 0),
+    matchLabel: row.match_label || getMatchLabel(Number(row.match_score || 0)),
+    matchReasons: sanitizeMatchReasons(opportunity, Array.isArray(row.match_reasons) ? row.match_reasons : []),
+    risks: Array.isArray(row.risks) ? row.risks : [],
+    safetyStatus: row.safety_status || "needs_review",
+    safetyReasons: Array.isArray(row.safety_reasons) ? row.safety_reasons : [],
+    alertEligible: Boolean(row.alert_eligible),
+    reviewRequired: Boolean(row.review_required),
+    calculatedAt: row.calculated_at
+  };
+}
+
 function mapAdminCompany(company, related) {
   const services = cleanStringArray((related.services || []).map((row) => row.service));
   const locations = cleanStringArray((related.locations || []).map((row) => row.location));
   const includeKeywords = cleanStringArray((related.keywords || []).filter((row) => row.type === "include").map((row) => row.keyword));
   const excludeKeywords = cleanStringArray((related.keywords || []).filter((row) => row.type === "exclude").map((row) => row.keyword));
   const reports = related.reports || [];
-  const matches = related.matches || [];
+  const matches = (related.matches || []).filter((match) => match.safety_status !== "hidden");
   const complete = Boolean(company.company_name && company.contact_email && company.industry && services.length && (locations.length || company.base_location || cleanStringArray(company.service_areas).length));
 
   return {
@@ -1862,6 +1951,7 @@ function mapAdminCompany(company, related) {
     maxProjectValue: company.max_project_value,
     allowUnknownValue: Boolean(company.allow_unknown_value),
     includeLowConfidence: Boolean(company.include_low_confidence),
+    autoAlertMode: company.auto_alert_mode || "auto_safe_only",
     reportFrequency: company.report_frequency || "weekly",
     reportDay: company.report_day || "monday",
     deadlineReminders: Boolean(company.deadline_reminders),
@@ -1910,7 +2000,7 @@ async function refreshAdminCompanyMatches(companyId, options = {}) {
     const payload = await runAdminCompanyAction(companyId, "refresh_matches");
     const refreshedCount = Number(payload.matches_refreshed || 0);
 
-    await loadAdminCompanies();
+    await Promise.all([loadAdminCompanies(), loadAdminReviewQueue()]);
     if (state.companyId === companyId) await loadStoredMatchesForCurrentCompany();
     if (!options.silent) {
       state.adminMessage = {
@@ -1969,7 +2059,7 @@ async function generateAdminCompanyReport(companyId) {
       return;
     }
 
-    await Promise.all([loadAdminReports(), loadAdminCompanies()]);
+    await Promise.all([loadAdminReports(), loadAdminCompanies(), loadAdminReviewQueue()]);
     if (state.companyId === companyId) await loadReportsForCurrentCompany();
     state.adminMessage = {
       type: "success",
@@ -1984,6 +2074,51 @@ async function generateAdminCompanyReport(companyId) {
     };
   } finally {
     clearAdminCompanyAction(companyId);
+    render();
+  }
+}
+
+async function reviewAdminMatch(matchId, companyId, reviewAction) {
+  if (!state.isAdmin) {
+    state.adminMessage = { type: "error", text: "You do not have access to this action." };
+    render();
+    return;
+  }
+  if (!matchId || !companyId || !["approve", "reject"].includes(reviewAction)) {
+    state.adminMessage = { type: "error", text: "Missing review action details." };
+    render();
+    return;
+  }
+
+  state.adminReviewActions = {
+    ...(state.adminReviewActions || {}),
+    [matchId]: reviewAction
+  };
+  state.adminMessage = null;
+  render();
+
+  try {
+    const payload = await runAdminCompanyAction(companyId, "review_match", {
+      matchId,
+      reviewAction
+    });
+    await Promise.all([loadAdminReviewQueue(), loadAdminCompanies()]);
+    if (state.companyId === companyId) await loadStoredMatchesForCurrentCompany();
+    state.adminMessage = {
+      type: "success",
+      text: payload.message || (reviewAction === "approve" ? "Match approved for customer reports." : "Match rejected and hidden.")
+    };
+    showToast(reviewAction === "approve" ? "Match approved" : "Match rejected", "success");
+  } catch (error) {
+    console.error("Failed to review admin match:", error);
+    state.adminMessage = {
+      type: "error",
+      text: `Failed to ${reviewAction} match. ${formatSupabaseError(error)}`
+    };
+  } finally {
+    const next = { ...(state.adminReviewActions || {}) };
+    delete next[matchId];
+    state.adminReviewActions = next;
     render();
   }
 }
@@ -2027,7 +2162,8 @@ async function refreshAdminOperationsData() {
     loadNewestImportedTedOpportunities(),
     loadAdminReports(),
     loadSourceCoverageForAdmin(),
-    loadAdminCompanies()
+    loadAdminCompanies(),
+    loadAdminReviewQueue()
   ]);
   showToast("Automation status refreshed", "success");
   render();
@@ -2090,7 +2226,13 @@ function mapStoredMatch(row) {
     matchLabel: row.match_label || getMatchLabel(Number(row.match_score || 0)),
     matchReasons: sanitizeMatchReasons(opp, Array.isArray(row.match_reasons) ? row.match_reasons : []),
     risks: Array.isArray(row.risks) ? row.risks : [],
-    nextSteps: Array.isArray(row.next_steps) ? row.next_steps : []
+    nextSteps: Array.isArray(row.next_steps) ? row.next_steps : [],
+    safetyStatus: row.safety_status || "needs_review",
+    safetyReasons: Array.isArray(row.safety_reasons) ? row.safety_reasons : [],
+    alertEligible: Boolean(row.alert_eligible),
+    reviewRequired: Boolean(row.review_required),
+    reviewedAt: row.reviewed_at || "",
+    reviewNote: row.review_note || ""
   };
 }
 
@@ -3313,7 +3455,8 @@ async function saveCompanyProfile(profile) {
     reportFrequency: profile.reportFrequency || "weekly",
     reportDay: profile.reportDay || "monday",
     deadlineReminders: Boolean(profile.deadlineReminders),
-    includeLowConfidence: Boolean(profile.includeLowConfidence)
+    includeLowConfidence: Boolean(profile.includeLowConfidence),
+    autoAlertMode: profile.autoAlertMode || "auto_safe_only"
   };
   const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
   if (userError) throw userError;
@@ -3342,7 +3485,8 @@ async function saveCompanyProfile(profile) {
       report_frequency: cleanProfile.reportFrequency,
       report_day: cleanProfile.reportDay,
       deadline_reminders: cleanProfile.deadlineReminders,
-      include_low_confidence: cleanProfile.includeLowConfidence
+      include_low_confidence: cleanProfile.includeLowConfidence,
+      auto_alert_mode: cleanProfile.autoAlertMode
     }, { onConflict: "owner_id" })
     .select()
     .single();
@@ -3429,7 +3573,8 @@ function mapSupabaseCompanyProfile(company, services, locations, keywords) {
     reportFrequency: company.report_frequency || "weekly",
     reportDay: company.report_day || "monday",
     deadlineReminders: Boolean(company.deadline_reminders),
-    includeLowConfidence: Boolean(company.include_low_confidence)
+    includeLowConfidence: Boolean(company.include_low_confidence),
+    autoAlertMode: company.auto_alert_mode || "auto_safe_only"
   };
 }
 
@@ -4808,7 +4953,26 @@ function getAvailableDashboardOpportunities() {
 
 function isStrictDashboardEligibleOpportunity(opp) {
   if (state.isAdmin && state.filters.label === "all_opportunities") return true;
+  const safety = getSafetyStatus(opp);
+  if (safety === "hidden") return false;
+  if (safety === "needs_review") {
+    return Boolean(state.profile?.includeLowConfidence) || state.filters.label === "all";
+  }
   return isStrictCustomerReportEligible(opp);
+}
+
+function isCustomerSafetyVisible(opp) {
+  const safety = getSafetyStatus(opp);
+  if (safety === "hidden") return false;
+  if (safety === "auto_approved") return true;
+  if (safety === "needs_review") {
+    return Boolean(state.profile?.includeLowConfidence) || state.filters.label === "all";
+  }
+  return true;
+}
+
+function getSafetyStatus(opp = {}) {
+  return String(opp.safetyStatus || opp.safety_status || "auto_approved");
 }
 
 function getDashboardOpportunityById(id) {
@@ -7427,6 +7591,7 @@ function renderOpportunityCard(opp) {
           <div class="opportunity-badges">
             <span class="source-pill source-badge">${escapeHtml(opp.source)}</span>
             ${renderQualityBadge(opp)}
+            ${renderSafetyBadge(opp)}
             ${renderExtractedArticleBadge(opp)}
             ${isTedOpportunity(opp) ? `<span class="source-pill source-badge muted-badge">${escapeHtml(t("originalLanguage"))}</span>` : ""}
           </div>
@@ -7494,6 +7659,55 @@ function renderQualityBadge(opp) {
   return `<span class="source-pill source-badge quality-badge ${escapeHtml(status)}">${escapeHtml(formatReportQualityLabel(getOpportunityQualityLabel(opp)))}</span>`;
 }
 
+function renderSafetyBadge(opp) {
+  if (!opp || !opp.safetyStatus) return "";
+  const status = getSafetyStatus(opp);
+  return `<span class="source-pill source-badge safety-badge ${escapeHtml(status)}">${escapeHtml(formatSafetyStatus(status))}</span>`;
+}
+
+function formatSafetyStatus(status) {
+  const value = String(status || "").toLowerCase();
+  const labels = state.language === "is"
+    ? {
+        auto_approved: "Sjálfkrafa samþykkt",
+        needs_review: "Þarfnast yfirferðar",
+        hidden: "Falið"
+      }
+    : {
+        auto_approved: "Auto-approved",
+        needs_review: "Needs review",
+        hidden: "Hidden"
+      };
+  return labels[value] || capitalize(value.replace(/_/g, " "));
+}
+
+function formatAlertEligible(value) {
+  return value
+    ? (state.language === "is" ? "Hæft í tilkynningu" : "Alert eligible")
+    : (state.language === "is" ? "Ekki hæft í tilkynningu" : "Not alert eligible");
+}
+
+function formatSafetyReason(reason) {
+  const value = String(reason || "");
+  if (state.language !== "is") return value;
+  const map = {
+    "Valid future deadline found": "Gildur framtíðarskilafrestur fannst",
+    "Recent high-intent procurement signal": "Nýlegt merki frá sterkri útboðsheimild",
+    "Strong service/work-type fit": "Sterk samsvörun við þjónustu eða verkflokk",
+    "No reliable deadline was found": "Áreiðanlegur skilafrestur fannst ekki",
+    "Buyer is missing or generic": "Kaupandi vantar eða er of almennur",
+    "Match depends on broad or low-confidence terms": "Samsvörun byggir á breiðum eða óvissum orðum",
+    "Possible service mismatch for this company profile": "Mögulegt ósamræmi við þjónustu fyrirtækisins",
+    "Mentions design, consulting, supervision, or project management terms": "Nefnir hönnun, ráðgjöf, eftirlit eða verkefnastjórn",
+    "Tender appears already awarded or already tendered": "Útboð virðist þegar auglýst eða útboði lokið",
+    "Stale or expired opportunity signal": "Gamalt eða útrunnið tækifæri",
+    "Current opportunity is plausible but needs review before customer alerts": "Tækifærið gæti átt við en þarf yfirferð áður en það fer í tilkynningu",
+    "Admin override includes this opportunity in customer reports": "Admin hefur samþykkt birtingu í viðskiptavinayfirlitum",
+    "Excluded by customer eligibility, duplicate, stale, hidden, demo, or expired filters": "Falið vegna reglna um birtingu, afrit, aldur, prófunargögn eða útrunnið tækifæri"
+  };
+  return map[value] || formatReportRisk(value);
+}
+
 function renderExtractedArticleBadge(opp) {
   if (opp?.rawPayload?.extraction_method !== "vegagerdin_article_project_parser") return "";
   const region = opp.rawPayload?.region ? ` · ${opp.rawPayload.region}` : "";
@@ -7557,6 +7771,7 @@ function renderOpportunityModal(opp) {
             <div class="opportunity-badges">
               <span class="${badgeClass(opp.matchLabel)}">${escapeHtml(formatReportMatchLabel(opp.matchLabel))} · ${opp.matchScore}</span>
               ${renderQualityBadge(opp)}
+              ${renderSafetyBadge(opp)}
               ${renderExtractedArticleBadge(opp)}
             </div>
             <h2>${escapeHtml(opp.title)}</h2>
@@ -7591,6 +7806,7 @@ function renderOpportunityModal(opp) {
               ${opp.rawPayload?.project_number ? `<p><strong>${escapeHtml(t("projectNumber"))}:</strong> ${escapeHtml(opp.rawPayload.project_number)}</p>` : ""}
               ${isVegagerdinExtractedProject(opp) ? `<p><strong>${escapeHtml(t("tenderState"))}:</strong> ${escapeHtml(formatTenderState(getVegagerdinExtractedTenderState(opp)))}</p>` : ""}
               <p><strong>${escapeHtml(t("quality"))}:</strong> ${escapeHtml(formatReportQualityLabel(getOpportunityQualityLabel(opp)))}</p>
+              ${opp.safetyStatus ? `<p><strong>${escapeHtml(state.language === "is" ? "Öryggisflokkun" : "Safety status")}:</strong> ${escapeHtml(formatSafetyStatus(opp.safetyStatus))} · ${escapeHtml(formatAlertEligible(opp.alertEligible))}</p>` : ""}
               <p><strong>${escapeHtml(t("category"))}:</strong> ${escapeHtml(formatOpportunityModalValue("category", opp.category))}</p>
               <p><strong>${escapeHtml(t("type"))}:</strong> ${escapeHtml(formatOpportunityModalValue("type", opp.type))}</p>
               <p><strong>${escapeHtml(t("deadline"))}:</strong> <span class="${deadline.className}">${escapeHtml(formatReportRisk(deadline.label))}</span></p>
@@ -7599,7 +7815,10 @@ function renderOpportunityModal(opp) {
 
               <h3>${escapeHtml(t("risksToCheck"))}</h3>
               <ul class="risk-list">
-                ${(risks.length ? risks.map(formatReportRisk) : [t("noMajorRisks")]).map((r) => `<li>${escapeHtml(r)}</li>`).join("")}
+                ${([
+                  ...(Array.isArray(opp.safetyReasons) ? opp.safetyReasons : []),
+                  ...(risks.length ? risks.map(formatReportRisk) : [t("noMajorRisks")])
+                ]).map((r) => `<li>${escapeHtml(formatSafetyReason(r))}</li>`).join("")}
               </ul>
 
               <h3>${escapeHtml(t("recommendedNextSteps"))}</h3>
@@ -7656,6 +7875,7 @@ function renderAdminTabs() {
   const tabs = [
     ["overview", "Overview"],
     ["companies", "Companies"],
+    ["review", "Review Queue"],
     ["sources", "Sources/imports"],
     ["opportunities", "Opportunities"],
     ["reports", "Reports"]
@@ -7673,6 +7893,7 @@ function renderAdminTabs() {
 
 function renderAdminActiveTab(opportunities) {
   if (state.adminActiveTab === "companies") return renderAdminCompaniesSection();
+  if (state.adminActiveTab === "review") return renderAdminReviewQueue();
   if (state.adminActiveTab === "sources") {
     return `
       ${renderAutomationStatusCard()}
@@ -7716,6 +7937,69 @@ function renderAdminOverview() {
         <div><span>Latest import status</span><strong>${escapeHtml(latest?.status || "No runs")}</strong></div>
       </div>
     </section>
+  `;
+}
+
+function renderAdminReviewQueue() {
+  const rows = state.adminReviewMatches || [];
+  return `
+    <section class="ops-card">
+      <div class="card-header">
+        <div>
+          <h2>Review Queue</h2>
+          <p>${state.adminReviewLoading ? "Loading review queue..." : `${rows.length} uncertain match${rows.length === 1 ? "" : "es"} need review.`}</p>
+        </div>
+        <button class="btn btn-ghost btn-small" type="button" data-action="refresh-admin-status">Refresh</button>
+      </div>
+      ${state.adminReviewError ? `<div class="admin-message is-error">${escapeHtml(state.adminReviewError)}</div>` : ""}
+      ${state.adminReviewLoading && !rows.length ? `<div class="empty-card">Loading review queue...</div>` : rows.length ? `
+        <div class="ops-table-wrap">
+          <table class="ops-table admin-review-table">
+            <thead>
+              <tr>
+                <th>Opportunity</th>
+                <th>Company</th>
+                <th>Source</th>
+                <th>Deadline</th>
+                <th>Score</th>
+                <th>Safety reasons</th>
+                <th>Match reasons</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(renderAdminReviewRow).join("")}
+            </tbody>
+          </table>
+        </div>
+      ` : `<div class="empty-card">No matches need review right now.</div>`}
+    </section>
+  `;
+}
+
+function renderAdminReviewRow(item) {
+  const opp = item.opportunity || {};
+  const busy = state.adminReviewActions?.[item.id] || "";
+  const deadline = getOpportunityDeadlineDisplay(opp);
+  return `
+    <tr>
+      <td>
+        <strong>${escapeHtml(opp.title || "Untitled opportunity")}</strong>
+        <p>${escapeHtml(formatOpportunityBuyer(opp))} · ${escapeHtml(formatOpportunityLocation(opp))}</p>
+      </td>
+      <td>${escapeHtml(item.companyName)}</td>
+      <td>${escapeHtml(opp.source || "Unknown source")}</td>
+      <td>${escapeHtml(deadline.label || "Not found")}</td>
+      <td>${escapeHtml(formatReportMatchLabel(item.matchLabel))} · ${Number(item.matchScore || 0)}</td>
+      <td>${(item.safetyReasons.length ? item.safetyReasons : ["Needs admin review"]).map((reason) => `<span class="admin-chip">${escapeHtml(formatSafetyReason(reason))}</span>`).join(" ")}</td>
+      <td>${(item.matchReasons.length ? item.matchReasons : ["Profile match"]).map((reason) => `<span class="admin-chip">${escapeHtml(formatReportReason(reason))}</span>`).join(" ")}</td>
+      <td>
+        <div class="admin-row-actions">
+          <button class="btn btn-ghost btn-small" data-action="admin-review-match" data-review-action="approve" data-id="${escapeHtml(item.id)}" data-company-id="${escapeHtml(item.companyId)}" ${busy ? "disabled" : ""}>${busy === "approve" ? "Approving..." : "Approve"}</button>
+          <button class="btn btn-ghost btn-small" data-action="admin-review-match" data-review-action="reject" data-id="${escapeHtml(item.id)}" data-company-id="${escapeHtml(item.companyId)}" ${busy ? "disabled" : ""}>${busy === "reject" ? "Rejecting..." : "Reject"}</button>
+        </div>
+      </td>
+    </tr>
   `;
 }
 
@@ -8429,6 +8713,7 @@ function isReportEligibleOpportunity(opp) {
 
 function isStrictCustomerReportEligible(opp) {
   if (!opp || isDemoTestOpportunity(opp)) return false;
+  if (getSafetyStatus(opp) !== "auto_approved" || opp.alertEligible === false) return false;
   if (!isDashboardVisibleOpportunity(opp)) return false;
   if (isCustomerReportExcludedIntent(opp)) return false;
   if (isAlreadyAwardedOrTenderedReportItem(opp)) return false;

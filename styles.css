@@ -2299,6 +2299,39 @@ button:disabled,
   border-color: rgba(255,184,107,0.24);
 }
 
+.safety-badge.auto_approved {
+  color: var(--accent);
+  background: rgba(215,255,63,0.10);
+  border-color: rgba(215,255,63,0.28);
+}
+
+.safety-badge.needs_review {
+  color: #ffb86b;
+  background: rgba(255,184,107,0.10);
+  border-color: rgba(255,184,107,0.24);
+}
+
+.safety-badge.hidden {
+  color: var(--muted);
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.14);
+}
+
+.admin-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  margin: 2px 4px 2px 0;
+  padding: 4px 8px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.05);
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.25;
+  white-space: normal;
+}
+
 .meta-row {
   justify-content: flex-start;
   flex-wrap: wrap;

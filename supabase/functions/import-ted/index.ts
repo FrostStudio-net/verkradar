@@ -525,19 +525,46 @@ async function refreshMatchesForAllCompanies(supabase: ReturnType<typeof createC
       keywordsResult.data || [],
     );
 
+    const visibleOpportunityIds = visibleOpportunities.map((opportunity) => String(opportunity.id || "")).filter(Boolean);
+    const existingSafety = new Map<string, Record<string, unknown>>();
+    if (visibleOpportunityIds.length) {
+      const { data: existingSafetyRows, error: existingSafetyError } = await supabase
+        .from("opportunity_matches")
+        .select("opportunity_id, safety_status, safety_reasons, alert_eligible, review_required, reviewed_at, reviewed_by, review_note")
+        .eq("company_id", company.id)
+        .in("opportunity_id", visibleOpportunityIds);
+      if (existingSafetyError) throw existingSafetyError;
+      for (const row of existingSafetyRows || []) {
+        if (row.reviewed_at) existingSafety.set(String(row.opportunity_id || ""), row);
+      }
+    }
+
     const rows = visibleOpportunities
       .map((opportunity) => calculateMatch(profile, opportunity))
       .filter((match) => match.matchScore >= MIN_MATCH_SCORE)
-      .map((match) => ({
-        company_id: company.id,
-        opportunity_id: match.id,
-        match_score: match.matchScore,
-        match_label: match.matchLabel,
-        match_reasons: match.matchReasons,
-        risks: match.risks,
-        next_steps: match.nextSteps,
-        calculated_at: new Date().toISOString(),
-      }));
+      .map((match) => {
+        const safety = applyReviewedSafetyOverride(
+          classifyMatchSafety(profile, match, (match.sources as Record<string, unknown> | undefined)?.name || ""),
+          existingSafety.get(String(match.id || "")),
+        );
+        return {
+          company_id: company.id,
+          opportunity_id: match.id,
+          match_score: match.matchScore,
+          match_label: match.matchLabel,
+          match_reasons: match.matchReasons,
+          risks: match.risks,
+          next_steps: match.nextSteps,
+          safety_status: safety.safety_status,
+          safety_reasons: safety.safety_reasons,
+          alert_eligible: safety.alert_eligible,
+          review_required: safety.review_required,
+          reviewed_at: safety.reviewed_at || null,
+          reviewed_by: safety.reviewed_by || null,
+          review_note: safety.review_note || null,
+          calculated_at: new Date().toISOString(),
+        };
+      });
 
     const { error: deleteError } = await supabase
       .from("opportunity_matches")
@@ -592,9 +619,11 @@ async function generateWeeklyReports(supabase: ReturnType<typeof createClient>) 
       supabase.from("company_keywords").select("keyword, type").eq("company_id", company.id),
       supabase
         .from("opportunity_matches")
-        .select("match_score, opportunities(*)")
+        .select("match_score, safety_status, alert_eligible, opportunities(*)")
         .eq("company_id", company.id)
         .gte("match_score", MIN_MATCH_SCORE)
+        .eq("safety_status", "auto_approved")
+        .eq("alert_eligible", true)
         .order("match_score", { ascending: false })
         .limit(5),
     ]);
@@ -729,6 +758,7 @@ function mapCompanyProfile(
     minProjectValue: company.min_project_value ? Number(company.min_project_value) : "",
     maxProjectValue: company.max_project_value ? Number(company.max_project_value) : "",
     allowUnknownValue: Boolean(company.allow_unknown_value),
+    autoAlertMode: String(company.auto_alert_mode || "auto_safe_only"),
   };
 }
 
@@ -986,6 +1016,102 @@ function calculateMatch(profile: Record<string, unknown>, opportunity: Record<st
       "Prepare questions before the deadline",
     ],
   };
+}
+
+function classifyMatchSafety(profile: Record<string, unknown>, match: Record<string, unknown>, sourceName = "") {
+  const payload = match.raw_payload && typeof match.raw_payload === "object"
+    ? match.raw_payload as Record<string, unknown>
+    : {};
+  const adminStatus = String(payload.admin_report_status || "").toLowerCase();
+  if (adminStatus === "include") {
+    return {
+      safety_status: "auto_approved",
+      safety_reasons: ["Admin override includes this opportunity in customer reports"],
+      alert_eligible: true,
+      review_required: false,
+    };
+  }
+  if (!isVisibleOpportunity(match, sourceName) || !isCustomerMatchEligibleOpportunity(match, sourceName)) {
+    return {
+      safety_status: "hidden",
+      safety_reasons: ["Excluded by customer eligibility, duplicate, stale, hidden, demo, or expired filters"],
+      alert_eligible: false,
+      review_required: false,
+    };
+  }
+
+  const reasons: string[] = [];
+  const deadline = String(match.deadline || "");
+  const hasFutureDeadline = Boolean(deadline) && daysUntilDeadline(deadline) >= 0;
+  const risks = Array.isArray(match.risks) ? match.risks.map(String) : [];
+  const hasStrongWorkTypeFit = hasStrongWorkTypeMatch(match);
+  if (!deadline) reasons.push("No reliable deadline was found");
+  if (risks.some((risk) => /broad construction|low confidence/i.test(risk))) reasons.push("Match depends on broad or low-confidence terms");
+  if (risks.some((risk) => /indoor|finishing|outside your core civil services/i.test(risk))) reasons.push("Possible service mismatch for this company profile");
+  if (containsReviewOnlyTerms(match) && !companyExplicitlyAllowsReviewOnlyWork(profile)) {
+    reasons.push("Mentions design, consulting, supervision, or project management terms");
+  }
+
+  const autoApproved = hasFutureDeadline &&
+    hasStrongWorkTypeFit &&
+    !reasons.some((reason) => /missing|generic|broad|mismatch|consulting|supervision|project management/i.test(reason));
+
+  if (autoApproved) {
+    return {
+      safety_status: "auto_approved",
+      safety_reasons: ["Valid future deadline found", "Strong service/work-type fit"],
+      alert_eligible: String(profile.autoAlertMode || "auto_safe_only") !== "dashboard_only",
+      review_required: false,
+    };
+  }
+
+  return {
+    safety_status: "needs_review",
+    safety_reasons: [...new Set(reasons.length ? reasons : ["Current opportunity is plausible but needs review before customer alerts"])],
+    alert_eligible: false,
+    review_required: true,
+  };
+}
+
+function applyReviewedSafetyOverride(safety: Record<string, unknown>, existing?: Record<string, unknown>) {
+  if (!existing?.reviewed_at) return safety;
+  return {
+    safety_status: String(existing.safety_status || safety.safety_status || "needs_review"),
+    safety_reasons: Array.isArray(existing.safety_reasons) ? existing.safety_reasons.map(String) : safety.safety_reasons,
+    alert_eligible: Boolean(existing.alert_eligible),
+    review_required: Boolean(existing.review_required),
+    reviewed_at: String(existing.reviewed_at || ""),
+    reviewed_by: String(existing.reviewed_by || ""),
+    review_note: String(existing.review_note || ""),
+  };
+}
+
+function hasStrongWorkTypeMatch(match: Record<string, unknown>) {
+  const reasons = Array.isArray(match.matchReasons) ? match.matchReasons.map(String).join(" ") : "";
+  const text = normalizeText([
+    reasons,
+    match.title,
+    match.description,
+    match.category,
+    match.location,
+    ...(Array.isArray(match.keywords) ? match.keywords : []),
+  ].join(" "));
+  return CIVIL_STRONG_SERVICE_TERMS.some((term) => text.includes(normalizeText(term))) ||
+    (containsAnyPhrase(normalizeText(reasons), ["service", "keyword"]) && !CIVIL_WEAK_GENERIC_TERMS.some((term) => normalizeText(reasons).includes(normalizeText(term))));
+}
+
+function containsReviewOnlyTerms(opportunity: Record<string, unknown>) {
+  const text = normalizeText(`${opportunity.title || ""} ${opportunity.description || ""} ${opportunity.category || ""}`);
+  return containsAnyPhrase(text, ["umsjon", "eftirlit", "honnun", "radgjof", "verkefnastjorn"]);
+}
+
+function companyExplicitlyAllowsReviewOnlyWork(profile: Record<string, unknown>) {
+  const text = normalizeText([
+    profile.industry,
+    ...asArray(profile.services),
+    ...asArray(profile.includeKeywords),
+  ].join(" "));
+  return containsAnyPhrase(text, ["umsjon", "eftirlit", "honnun", "radgjof", "verkefnastjorn", "verkfraediradgjof"]);
 }
 
 function selectedProfileLocations(profile: Record<string, unknown>) {

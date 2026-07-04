@@ -2304,6 +2304,20 @@ async function refreshMatchesForAllCompanies(
       keywordsResult.data || [],
     );
 
+    const visibleOpportunityIds = visibleOpportunities.map((opportunity) => String(opportunity.id || "")).filter(Boolean);
+    const existingSafety = new Map<string, Record<string, unknown>>();
+    if (visibleOpportunityIds.length) {
+      const { data: existingSafetyRows, error: existingSafetyError } = await supabase
+        .from("opportunity_matches")
+        .select("opportunity_id, safety_status, safety_reasons, alert_eligible, review_required, reviewed_at, reviewed_by, review_note")
+        .eq("company_id", company.id)
+        .in("opportunity_id", visibleOpportunityIds);
+      if (existingSafetyError) throw existingSafetyError;
+      for (const row of existingSafetyRows || []) {
+        if (row.reviewed_at) existingSafety.set(String(row.opportunity_id || ""), row);
+      }
+    }
+
     const rows: Array<Record<string, unknown>> = [];
     for (const opportunity of visibleOpportunities) {
       const match = calculateMatch(profile, opportunity);
@@ -2320,6 +2334,10 @@ async function refreshMatchesForAllCompanies(
         });
         continue;
       }
+      const safety = applyReviewedSafetyOverride(
+        classifyMatchSafety(profile, opportunity, match),
+        existingSafety.get(String(match.opportunity_id || "")),
+      );
 
       rows.push({
         company_id: company.id,
@@ -2329,6 +2347,13 @@ async function refreshMatchesForAllCompanies(
         match_reasons: match.match_reasons,
         risks: match.risks,
         next_steps: match.next_steps,
+        safety_status: safety.safety_status,
+        safety_reasons: safety.safety_reasons,
+        alert_eligible: safety.alert_eligible,
+        review_required: safety.review_required,
+        reviewed_at: safety.reviewed_at || null,
+        reviewed_by: safety.reviewed_by || null,
+        review_note: safety.review_note || null,
         calculated_at: new Date().toISOString(),
       });
     }
@@ -2369,6 +2394,7 @@ function mapCompanyProfile(
     minProjectValue: company.min_project_value == null ? null : Number(company.min_project_value),
     maxProjectValue: company.max_project_value == null ? null : Number(company.max_project_value),
     allowUnknownValue: Boolean(company.allow_unknown_value),
+    autoAlertMode: String(company.auto_alert_mode || "auto_safe_only"),
   };
 }
 
@@ -2653,6 +2679,182 @@ function calculateMatch(profile: Record<string, unknown>, opportunity: Record<st
   };
 }
 
+function classifyMatchSafety(
+  profile: Record<string, unknown>,
+  opportunity: Record<string, unknown>,
+  match: Record<string, unknown>,
+) {
+  const reasons: string[] = [];
+  const payload = opportunity.raw_payload && typeof opportunity.raw_payload === "object"
+    ? opportunity.raw_payload as Record<string, unknown>
+    : {};
+  const adminStatus = String(payload.admin_report_status || "").toLowerCase();
+  if (adminStatus === "include") {
+    return {
+      safety_status: "auto_approved",
+      safety_reasons: ["Admin override includes this opportunity in customer reports"],
+      alert_eligible: true,
+      review_required: false,
+    };
+  }
+  if (!isVisibleOpportunity(opportunity) || !isCustomerMatchEligibleOpportunity(opportunity)) {
+    return {
+      safety_status: "hidden",
+      safety_reasons: ["Excluded by customer eligibility, duplicate, stale, hidden, demo, or expired filters"],
+      alert_eligible: false,
+      review_required: false,
+    };
+  }
+
+  const deadline = String(opportunity.deadline || "");
+  const hasFutureDeadline = Boolean(deadline) && daysUntil(deadline) >= 0;
+  const qualityText = getSafetyQualityText(opportunity);
+  const risks = Array.isArray(match.risks) ? match.risks.map(String) : [];
+  const hasRecentHighIntentSignal = isRecentOpportunity(opportunity, isHighIntentSource(opportunity) ? 30 : 14) &&
+    (hasProcurementIntent(qualityText) || hasUpcomingTenderIntentText(qualityText) || isHighIntentSource(opportunity));
+  const hasStrongWorkTypeFit = hasStrongWorkTypeMatch(opportunity, match);
+
+  if (!deadline) reasons.push("No reliable deadline was found");
+  if (isUnknownBuyer(opportunity)) reasons.push("Buyer is missing or generic");
+  if (risks.some((risk) => /broad construction|low confidence/i.test(risk))) reasons.push("Match depends on broad or low-confidence terms");
+  if (risks.some((risk) => /indoor|finishing|outside your core civil services/i.test(risk))) reasons.push("Possible service mismatch for this company profile");
+  if (containsReviewOnlyTerms(opportunity) && !companyExplicitlyAllowsReviewOnlyWork(profile)) {
+    reasons.push("Mentions design, consulting, supervision, or project management terms");
+  }
+
+  const tenderState = String(payload.tender_state || "").toLowerCase();
+  if (["tender_awarded", "awarded", "already_awarded", "already_tendered"].includes(tenderState)) {
+    reasons.push("Tender appears already awarded or already tendered");
+  }
+  if (isStaleCustomerOpportunity(opportunity)) reasons.push("Stale or expired opportunity signal");
+
+  if (reasons.some((reason) => /awarded|already tendered|stale|expired/i.test(reason))) {
+    return {
+      safety_status: "hidden",
+      safety_reasons: Array.from(new Set(reasons)),
+      alert_eligible: false,
+      review_required: false,
+    };
+  }
+
+  const autoApproved = (hasFutureDeadline || hasRecentHighIntentSignal) &&
+    hasStrongWorkTypeFit &&
+    !reasons.some((reason) => /missing|generic|broad|mismatch|consulting|supervision|project management/i.test(reason));
+
+  if (autoApproved) {
+    return {
+      safety_status: "auto_approved",
+      safety_reasons: [
+        hasFutureDeadline ? "Valid future deadline found" : "Recent high-intent procurement signal",
+        "Strong service/work-type fit",
+      ],
+      alert_eligible: String(profile.autoAlertMode || "auto_safe_only") !== "dashboard_only",
+      review_required: false,
+    };
+  }
+
+  return {
+    safety_status: "needs_review",
+    safety_reasons: Array.from(new Set(reasons.length ? reasons : ["Current opportunity is plausible but needs review before customer alerts"])),
+    alert_eligible: false,
+    review_required: true,
+  };
+}
+
+function applyReviewedSafetyOverride(safety: Record<string, unknown>, existing?: Record<string, unknown>) {
+  if (!existing?.reviewed_at) return safety;
+  return {
+    safety_status: String(existing.safety_status || safety.safety_status || "needs_review"),
+    safety_reasons: Array.isArray(existing.safety_reasons) ? existing.safety_reasons.map(String) : safety.safety_reasons,
+    alert_eligible: Boolean(existing.alert_eligible),
+    review_required: Boolean(existing.review_required),
+    reviewed_at: String(existing.reviewed_at || ""),
+    reviewed_by: String(existing.reviewed_by || ""),
+    review_note: String(existing.review_note || ""),
+  };
+}
+
+function getSafetyQualityText(opportunity: Record<string, unknown>) {
+  return [
+    opportunity.title,
+    opportunity.description,
+    opportunity.category,
+    opportunity.type,
+    opportunity.location,
+    Array.isArray(opportunity.keywords) ? opportunity.keywords.join(" ") : "",
+  ].filter(Boolean).join(" ");
+}
+
+function isRecentOpportunity(opportunity: Record<string, unknown>, maxAgeDays: number) {
+  const published = String(opportunity.published_date || opportunity.publishedDate || "");
+  if (!published) return false;
+  const date = new Date(`${published.slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return false;
+  return (Date.now() - date.getTime()) / 86400000 <= maxAgeDays;
+}
+
+function isHighIntentSource(opportunity: Record<string, unknown>) {
+  const source = opportunity.sources && typeof opportunity.sources === "object"
+    ? opportunity.sources as Record<string, unknown>
+    : {};
+  const text = normalize(`${String(source.name || "")} ${String(source.source_type || "")} ${String(opportunity.category || "")}`);
+  return ["utbodsvefur", "ríkiskaup", "rikiskaup", "útboð", "utbod", "procurement", "tender"].some((term) => text.includes(normalize(term)));
+}
+
+function hasProcurementIntent(text: string) {
+  return normalizedIncludesAny(text, ["útboð", "utbod", "tilboð", "tilboðum", "óskað eftir tilboðum", "verðfyrirspurn", "skilafrestur", "útboðsgögn", "forval"]);
+}
+
+function hasUpcomingTenderIntentText(text: string) {
+  return normalizedIncludesAny(text, ["senn í útboð", "senn i utbod", "áætlað útboð", "aaetlad utbod", "fyrirhugað útboð", "fyrirhugad utbod"]);
+}
+
+function hasStrongWorkTypeMatch(opportunity: Record<string, unknown>, match: Record<string, unknown>) {
+  const reasons = Array.isArray(match.match_reasons) ? match.match_reasons.map(String).join(" ") : "";
+  const text = `${reasons} ${getSafetyQualityText(opportunity)}`;
+  return normalizedIncludesAny(text, CIVIL_STRONG_SERVICE_TERMS) ||
+    (normalizedIncludesAny(reasons, ["service:", "keyword:"]) && !normalizedIncludesAny(reasons, CIVIL_WEAK_GENERIC_TERMS));
+}
+
+function isUnknownBuyer(opportunity: Record<string, unknown>) {
+  const buyer = normalize(String(opportunity.buyer || ""));
+  return !buyer || ["unknown buyer", "óþekktur kaupandi", "admin", "administrator", "editor", "ritstjóri", "noreply"].includes(buyer);
+}
+
+function containsReviewOnlyTerms(opportunity: Record<string, unknown>) {
+  return normalizedIncludesAny(getSafetyQualityText(opportunity), [
+    "umsjón",
+    "umsjon",
+    "eftirlit",
+    "hönnun",
+    "honnun",
+    "ráðgjöf",
+    "radgjof",
+    "verkefnastjórn",
+    "verkefnastjorn",
+  ]);
+}
+
+function companyExplicitlyAllowsReviewOnlyWork(profile: Record<string, unknown>) {
+  return normalizedIncludesAny([
+    profile.industry,
+    ...asArray(profile.services),
+    ...asArray(profile.includeKeywords),
+  ].join(" "), [
+    "umsjón",
+    "umsjon",
+    "eftirlit",
+    "hönnun",
+    "honnun",
+    "ráðgjöf",
+    "radgjof",
+    "verkefnastjórn",
+    "verkefnastjorn",
+    "verkfræðiráðgjöf",
+    "verkfraediradgjof",
+  ]);
+}
+
 function getOpportunityMissingDeadlineRisk(opportunity: Record<string, unknown>) {
   const rawPayload = opportunity.raw_payload && typeof opportunity.raw_payload === "object"
     ? opportunity.raw_payload as Record<string, unknown>
@@ -2931,9 +3133,11 @@ async function generateWeeklyReports(supabase: ReturnType<typeof createClient>) 
 
     const { data: matches, error: matchesError } = await supabase
       .from("opportunity_matches")
-      .select("match_score, opportunities(id, title, buyer, description, deadline, status, raw_payload, sources(name))")
+      .select("match_score, safety_status, alert_eligible, opportunities(id, title, buyer, description, deadline, status, raw_payload, sources(name))")
       .eq("company_id", company.id)
       .gte("match_score", MIN_MATCH_SCORE)
+      .eq("safety_status", "auto_approved")
+      .eq("alert_eligible", true)
       .order("match_score", { ascending: false })
       .limit(30);
 
@@ -2980,6 +3184,7 @@ async function generateWeeklyReports(supabase: ReturnType<typeof createClient>) 
 }
 
 function isCustomerReportMatch(match: Record<string, unknown>) {
+  if (String(match.safety_status || "") !== "auto_approved" || match.alert_eligible === false) return false;
   const opportunity = match.opportunities as Record<string, unknown> | undefined;
   if (!opportunity?.id) return false;
   if (String(opportunity.status || "open") !== "open") return false;
