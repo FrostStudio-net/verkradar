@@ -46,12 +46,12 @@ const translations = {
     loadingLabel: "Hleð VerkRadar",
     heroEyebrow: "Útboðsgreind fyrir verktaka og þjónustufyrirtæki",
     heroTitle: "Finnið verðmæt útboð áður en skilafresturinn rennur út.",
-    heroText: "VerkRadar vaktar útboðsvefi, sveitarfélög og opinberar heimildir og raðar tækifærum eftir því hvað skiptir ykkar fyrirtæki máli.",
+    heroText: "VerkRadar vaktar opinberar heimildir og skilar stuttu yfirliti yfir verkefni sem passa við ykkar verkflokka og svæði.",
     createFreeDemoProfile: "Fá ókeypis prufu-yfirlit",
     viewSampleReport: "Skoða sýnishorn",
     proofStrong: "Fyrir verktaka, iðnfyrirtæki og þjónustuaðila.",
     proofText: "Vöktun á opinberum heimildum, sveitarfélögum og útboðsvefjum - sett fram sem forgangsraðað yfirlit.",
-    bestOpenMatch: "Vöktun í dag",
+    bestOpenMatch: "Stutt yfirlit",
     tender: "Útboð",
     deadlineRisk: "Rennur út fljótlega",
     daysLeft: "{count} dagar eftir",
@@ -275,12 +275,12 @@ const translations = {
     loadingLabel: "Loading VerkRadar",
     heroEyebrow: "Tender intelligence for working contractors",
     heroTitle: "Stop losing valuable jobs to tabs you never opened.",
-    heroText: "VerkRadar checks tender portals, municipal pages and public sources, then ranks the jobs worth pricing before the deadline moves on.",
+    heroText: "VerkRadar monitors public sources and returns a short project shortlist matched to your trades and service areas.",
     createFreeDemoProfile: "Get a free trial report",
     viewSampleReport: "View sample report",
     proofStrong: "Contractors find relevant opportunities faster.",
     proofText: "Top matches often include tenders outside the main databases.",
-    bestOpenMatch: "New opportunities",
+    bestOpenMatch: "Shortlist",
     tender: "Tender",
     deadlineRisk: "Deadline risk",
     daysLeft: "{count} days left",
@@ -6778,14 +6778,14 @@ function renderLanding() {
   const isIcelandic = state.language === "is";
   const heroSamples = isIcelandic
     ? [
-        { title: "Sementsreitur - Gatnagerð og lagnir", type: "Útboð", score: "86% samsvörun", value: "5 ný tækifæri" },
-        { title: "Vífilstaðavegur - gatnagerð og lagnir", type: "Útboð", score: "Sterk samsvörun" },
-        { title: "Verðfyrirspurn - Sandbakki - gatnagerð", type: "Verðfyrirspurn", score: "2 rennur út fljótlega" }
+        { title: "Gatnagerð og lagnir við nýtt hverfi", type: "1", score: "Sterk samsvörun · Skilafrestur eftir 10 daga" },
+        { title: "Lóðarframkvæmdir við skóla", type: "2", score: "Passar við lóðarvinnu · Staðfesta gögn" },
+        { title: "Bílastæði og yfirborðsfrágangur", type: "3", score: "Möguleg samsvörun · Opna heimild" }
       ]
     : [
-        { title: "Civil works and utilities at Sementsreitur", type: "Tender", score: "86% match", value: "5 new opportunities" },
-        { title: "Roadworks and utilities on Vífilstaðavegur", type: "Tender", score: "Strong match" },
-        { title: "Quote request - Sandbakki roadworks", type: "Quote request", score: "2 closing soon" }
+        { title: "Roadworks and utilities for a new neighborhood", type: "1", score: "Strong match · Deadline in 10 days" },
+        { title: "Site works at a school", type: "2", score: "Fits site work · Verify documents" },
+        { title: "Parking area and surface finishing", type: "3", score: "Possible match · Open source" }
       ];
   const targetCards = isIcelandic
     ? [
@@ -6823,32 +6823,32 @@ function renderLanding() {
       </div>
       <div class="product-shot hero-card" aria-label="VerkRadar product preview">
         <div class="shot-topbar">
-          <span>VERKRADAR / JARÐTÆKNI EHF.</span>
-          <span>${new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}</span>
+          <span>VERKRADAR / ${escapeHtml(isIcelandic ? "JARÐVINNUFYRIRTÆKI EHF." : "CIVIL CONTRACTOR LTD.")}</span>
+          <span>${new Date().toLocaleDateString(isIcelandic ? "is-IS" : "en-GB", { day: "2-digit", month: "short" })}</span>
         </div>
         <div class="shot-metric">
           <span>${escapeHtml(t("bestOpenMatch"))}</span>
-          <strong>${escapeHtml(isIcelandic ? "5 ný tækifæri" : "5 new opportunities")}</strong>
+          <strong>${escapeHtml(isIcelandic ? "3 verkefni sem passa" : "3 matching projects")}</strong>
         </div>
         <div class="shot-row is-active">
           <div>
             <span class="shot-label">${escapeHtml(heroSamples[0].type)}</span>
             <h3>${escapeHtml(heroSamples[0].title)}</h3>
+            <p>${escapeHtml(heroSamples[0].score)}</p>
           </div>
-          <strong>${escapeHtml(heroSamples[0].score)}</strong>
         </div>
         ${heroSamples.slice(1, 3).map((opp) => `
           <div class="shot-row">
             <div>
               <span class="shot-label">${escapeHtml(opp.type)}</span>
               <h3>${escapeHtml(opp.title)}</h3>
+              <p>${escapeHtml(opp.score)}</p>
             </div>
-            <strong>${escapeHtml(opp.score)}</strong>
           </div>
         `).join("")}
         <div class="shot-footer">
           <span>${escapeHtml(t("deadlineRisk"))}</span>
-          <strong>${escapeHtml(isIcelandic ? "2 tækifæri" : "2 items")}</strong>
+          <strong>${escapeHtml(isIcelandic ? "2 verkefni" : "2 projects")}</strong>
         </div>
       </div>
     </section>

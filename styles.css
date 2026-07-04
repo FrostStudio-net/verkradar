@@ -626,9 +626,12 @@ h3 {
 }
 
 .shot-metric strong {
-  font-size: clamp(52px, 7vw, 84px);
-  line-height: 0.8;
-  letter-spacing: -0.07em;
+  max-width: 360px;
+  color: #111111;
+  font-size: clamp(30px, 3.4vw, 44px);
+  line-height: 0.96;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
 }
 
 .shot-row {
@@ -649,6 +652,14 @@ h3 {
   font-size: 17px;
   line-height: 1.1;
   letter-spacing: -0.035em;
+}
+
+.shot-row p {
+  margin: 7px 0 0;
+  color: #525252;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.25;
 }
 
 .shot-row strong {
