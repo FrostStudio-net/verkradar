@@ -42,6 +42,7 @@ const translations = {
     dataSources: "Gagnaheimildir",
     cookies: "Vafrakökur",
     security: "Öryggi",
+    contact: "Hafa samband",
     footerText: "Vöktun útboða og viðskiptatækifæra fyrir fyrirtæki. VerkRadar hjálpar ykkur að finna og yfirfara opinber tækifæri, en frumgögn eru alltaf endanleg heimild.",
     loadingLabel: "Hleð VerkRadar",
     heroEyebrow: "Útboðsgreind fyrir verktaka og þjónustufyrirtæki",
@@ -266,11 +267,12 @@ const translations = {
     noCompanyProfile: "No company profile",
     openMenu: "Open menu",
     closeMenu: "Close menu",
-    privacyPolicy: "Privacy Policy",
-    termsOfService: "Terms of Service",
-    dataSources: "Data Sources",
+    privacyPolicy: "Privacy",
+    termsOfService: "Terms",
+    dataSources: "Data sources",
     cookies: "Cookies",
     security: "Security",
+    contact: "Contact",
     footerText: "Tender and opportunity monitoring for businesses. VerkRadar helps you find and review public opportunities, but source documents remain the authority.",
     loadingLabel: "Loading VerkRadar",
     heroEyebrow: "Tender intelligence for working contractors",
@@ -5223,6 +5225,7 @@ function render() {
   else if (route === "/data-sources") html = renderDataSourcesPage();
   else if (route === "/cookies") html = renderCookiePolicy();
   else if (route === "/security") html = renderSecurityPage();
+  else if (route === "/contact") html = renderContactPage();
   else if (route === "/settings") html = state.user ? renderSettings() : requireAuthPage();
   else if (route === "/admin") html = state.user ? (state.isAdmin ? renderAdmin() : requireAdminPage()) : requireAuthPage();
   else html = renderLanding();
@@ -5321,8 +5324,8 @@ function renderFooter() {
     [t("privacyPolicy"), "/privacy"],
     [t("termsOfService"), "/terms"],
     [t("dataSources"), "/data-sources"],
-    [t("cookies"), "/cookies"],
-    [t("security"), "/security"]
+    [t("security"), "/security"],
+    [t("contact"), "/contact"]
   ];
   return `
     <footer class="site-footer">
@@ -5338,13 +5341,15 @@ function renderFooter() {
 }
 
 function renderLegalPage({ eyebrow, title, intro, sections }) {
+  const updatedLabel = state.language === "is" ? "Síðast uppfært" : "Last updated";
+  const updatedDate = state.language === "is" ? "4. júní 2026" : "June 4, 2026";
   return renderShell(`
     <section class="legal-page">
       <div class="legal-hero">
         <p class="eyebrow">${escapeHtml(eyebrow)}</p>
         <h1>${escapeHtml(title)}</h1>
         <p>${escapeHtml(intro)}</p>
-        <span>Last updated: June 4, 2026</span>
+        <span>${escapeHtml(updatedLabel)}: ${escapeHtml(updatedDate)}</span>
       </div>
       <div class="legal-layout">
         ${sections.map((section) => `
@@ -5366,291 +5371,169 @@ function legalList(items) {
   return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
 }
 
-function renderPrivacyPolicy() {
+function legalPageData(key) {
+  const is = state.language === "is";
+  const pages = {
+    privacy: is ? {
+      eyebrow: "Lög og traust",
+      title: "Persónuvernd",
+      intro: "Hér er útskýrt á einföldu máli hvaða gögn VerkRadar vistar og hvernig þau eru notuð til að veita þjónustuna.",
+      sections: [
+        ["Persónuvernd", ["VerkRadar er vöktunar- og yfirlitskerfi fyrir fyrirtæki. Kerfið notar gögn sem notandi setur inn og opinber gögn um útboð og verkefni til að hjálpa fyrirtækjum að finna það sem gæti passað."]],
+        ["Hvaða gögn eru vistuð", ["VerkRadar getur vistað fyrirtækjaheiti, tengiliðanetfang, vefslóð, atvinnugrein, þjónustuflokka, staðsetningar, leitarorð, stillingar, vistuð og hunsuð verkefni, samsvaranir og yfirlit.", "Kerfið vistar einnig innskráningar- og lotugögn sem þarf til að halda notendum innskráðum og vernda aðgang."]],
+        ["Innskráning og aðgangur", ["Notendur skrá sig inn með auðkenndum aðgangi. Aðgangur að mælaborði, stillingum og skýrslum er tengdur við notanda og fyrirtæki eftir því sem við á."]],
+        ["Fyrirtækjaprófíll og stillingar", ["Fyrirtækjaprófíllinn er notaður til að bera opinber verkefni saman við þjónustu, svæði, lykilorð og óskir fyrirtækisins. Betri prófíll gefur yfirleitt betri samsvörun."]],
+        ["Vistuð og hunsuð tækifæri", ["VerkRadar getur vistað hvaða verkefni notandi vistar, fylgist með eða hunsar. Þetta er notað til að bæta upplifun, síur og yfirlit."]],
+        ["Vafrakökur og vafrageymsla", ["VerkRadar notar nauðsynlega vafrageymslu, lotugeymslu og sambærilega virkni fyrir innskráningu, Supabase Auth lotur, tungumál, stillingar og grunnvirkni appsins.", "Við gerum ekki ráð fyrir auglýsinga- eða rekjanlegri markaðssetningargeymslu í þessari útgáfu. Ef greiningar eða auglýsingatól verða síðar bætt við þarf að uppfæra þessa lýsingu."]],
+        ["Hafa samband", ["Spurningar um persónuvernd eða gögn má senda á info@froststudio.net."]]
+      ]
+    } : {
+      eyebrow: "Legal and trust",
+      title: "Privacy",
+      intro: "This page explains in practical terms what VerkRadar stores and how that data is used to provide the service.",
+      sections: [
+        ["Privacy", ["VerkRadar is a monitoring and reporting tool for businesses. It uses user-entered company data and public tender/project data to help companies find relevant opportunities."]],
+        ["What data is stored", ["VerkRadar may store company name, contact email, website, industry, service categories, locations, keywords, settings, saved and ignored opportunities, matches, and reports.", "The system also stores login and session data needed to keep users signed in and protect account access."]],
+        ["Login and access", ["Users log in with authenticated accounts. Access to dashboards, settings, and reports is connected to the user and company where applicable."]],
+        ["Company profile and settings", ["The company profile is used to compare public opportunities against services, locations, keywords, and company preferences. A better profile usually creates better matches."]],
+        ["Saved and ignored opportunities", ["VerkRadar may store which opportunities a user saves, watches, or ignores. This is used to improve the experience, filters, and reports."]],
+        ["Cookies and browser storage", ["VerkRadar uses essential browser storage, session storage, and similar functionality for login, Supabase Auth sessions, language, preferences, and core app functionality.", "We do not currently claim to use advertising or marketing tracking storage in this version. If analytics or advertising tools are added later, this section should be updated."]],
+        ["Contact", ["Questions about privacy or data can be sent to info@froststudio.net."]]
+      ]
+    },
+    terms: is ? {
+      eyebrow: "Lög og traust",
+      title: "Skilmálar",
+      intro: "Þessir skilmálar lýsa notkun VerkRadar á einföldu máli. Þeir eru ekki endanleg lögfræðiráðgjöf.",
+      sections: [
+        ["Skilmálar", ["Með því að nota VerkRadar samþykkir notandi að nota þjónustuna á ábyrgan hátt og staðfesta alltaf upplýsingar á upprunalegri heimild áður en brugðist er við."]],
+        ["Þjónustan", ["VerkRadar vaktar opinberar heimildir, útboðsvefi, sveitarfélagssíður og aðrar heimildir þar sem það er heimilt og tæknilega mögulegt. Kerfið raðar verkefnum eftir fyrirtækjaprófíl og býr til mælaborð eða yfirlit."]],
+        ["Upprunaleg gögn eru endanleg heimild", ["VerkRadar hjálpar til við að forgangsraða yfirferð opinberra tækifæra. Upprunaleg útboðsgögn, skilafrestir, kröfur og hæfisskilyrði á upprunalegri heimild eru alltaf endanleg heimild."]],
+        ["Engin trygging um fullkomna vöktun", ["VerkRadar tryggir ekki að öll útboð finnist, að öll gögn séu fullkomin, að samsvörun sé alltaf rétt eða að fyrirtæki uppfylli skilyrði eða vinni verk."]],
+        ["Prufuaðgangur og verð", ["Prufuaðgangur, verð, greiðslur og uppsagnir ráðast af verðsíðu, pöntunarsíðu eða skriflegu samkomulagi hverju sinni."]],
+        ["Uppsögn", ["Notandi getur óskað eftir lokun eða breytingu á aðgangi. VerkRadar getur takmarkað aðgang ef þjónustan er misnotuð, greiðslur vantar eða öryggisáhætta kemur upp."]],
+        ["Ábyrgðartakmörkun", ["VerkRadar ber ekki ábyrgð á töpuðum skilafrestum, röngum upplýsingum á upprunalegum heimildum, viðskiptatapi eða ákvörðunum sem teknar eru út frá yfirlitum án staðfestingar á frumgögnum."]],
+        ["Hafa samband", ["Spurningar um skilmála má senda á info@froststudio.net."]]
+      ]
+    } : {
+      eyebrow: "Legal and trust",
+      title: "Terms",
+      intro: "These terms describe VerkRadar use in plain language. They are not final legal advice.",
+      sections: [
+        ["Terms", ["By using VerkRadar, users agree to use the service responsibly and always verify information at the original source before acting."]],
+        ["The service", ["VerkRadar monitors public sources, procurement portals, municipal pages, and other sources where allowed and technically feasible. The system ranks opportunities against company profiles and creates dashboards or reports."]],
+        ["Original data is the final authority", ["VerkRadar helps prioritize review of public opportunities. Original tender documents, deadlines, requirements, and eligibility criteria at the original source are always the final authority."]],
+        ["No guarantee of complete monitoring", ["VerkRadar does not guarantee that every tender is found, that all data is complete, that matching is always correct, or that a company is eligible for or will win any contract."]],
+        ["Trial access and pricing", ["Trial access, pricing, billing, and cancellation are governed by the pricing page, order page, or written agreement in effect at the time."]],
+        ["Cancellation", ["A user may request account changes or cancellation. VerkRadar may restrict access if the service is misused, payment is missing, or a security risk arises."]],
+        ["Limitation of liability", ["VerkRadar is not responsible for missed deadlines, incorrect information at original sources, business losses, or decisions made from reports without checking source documents."]],
+        ["Contact", ["Questions about these terms can be sent to info@froststudio.net."]]
+      ]
+    },
+    data: is ? {
+      eyebrow: "Gagnaheimildir",
+      title: "Gagnaheimildir",
+      intro: "VerkRadar notar opinberar heimildir til að hjálpa fyrirtækjum að finna verkefni sem gætu skipt máli.",
+      sections: [
+        ["Gagnaheimildir", ["Kerfið safnar og samræmir opinberar upplýsingar þar sem slíkt er heimilt og tæknilega mögulegt."]],
+        ["Opinberar heimildir", ["Heimildir geta verið útboðsvefir, opinberar stofnanir, RSS straumar, sveitarfélagssíður og aðrar opinberar síður."]],
+        ["Sveitarfélög og útboðsvefir", ["VerkRadar getur vaktað sveitarfélög, innkaupa- og útboðsvefi og sértækar síður fyrir framkvæmdir, þjónustu eða innkaup."]],
+        ["Evrópsk útboð ef við á", ["Evrópsk útboð geta verið sótt úr TED eða sambærilegum heimildum þegar þau eiga við markaðinn og fyrirtækjaprófíla."]],
+        ["Takmarkanir gagna", ["Sumar heimildir veita ekki fulla skilafresti, verðmæti, kaupanda eða útboðsgögn í véllesanlegu formi. Gögn geta verið seinkuð, ófullkomin, tvítekin eða breytt á upprunalegri síðu."]],
+        ["Leiðréttingar", ["Ef þú sérð rangar eða úreltar upplýsingar má senda ábendingu á info@froststudio.net. Opnið alltaf upprunalega heimild áður en brugðist er við."]]
+      ]
+    } : {
+      eyebrow: "Data sources",
+      title: "Data sources",
+      intro: "VerkRadar uses public sources to help businesses find projects that may matter.",
+      sections: [
+        ["Data sources", ["The system collects and normalizes public information where allowed and technically feasible."]],
+        ["Public sources", ["Sources can include procurement portals, public institutions, RSS feeds, municipal pages, and other official public pages."]],
+        ["Municipalities and procurement portals", ["VerkRadar may monitor municipalities, procurement/tender portals, and specific pages for construction, services, or purchasing."]],
+        ["European tenders where applicable", ["European tenders may be imported from TED or similar sources when relevant to the market and company profiles."]],
+        ["Data limitations", ["Some sources do not provide full deadlines, values, buyer data, or tender documents in machine-readable form. Data may be delayed, incomplete, duplicated, or changed at the original source."]],
+        ["Corrections", ["If you see incorrect or outdated information, send a correction to info@froststudio.net. Always open the original source before acting."]]
+      ]
+    },
+    security: is ? {
+      eyebrow: "Öryggi",
+      title: "Öryggi",
+      intro: "VerkRadar notar innskráningu, aðgangsstýringu og aðskilnað gagna til að vernda fyrirtækjaupplýsingar.",
+      sections: [
+        ["Öryggi", ["Við reynum að halda öryggisupplýsingum hagnýtum og heiðarlegum. VerkRadar fullyrðir ekki um vottanir sem hafa ekki verið fengnar."]],
+        ["Innskráning", ["Notendur skrá sig inn með auðkenndum aðgangi. Innskráning og lotur eru hluti af grunnvirkni appsins."]],
+        ["Aðgangsstýring", ["Aðgangur að fyrirtækjagögnum, samsvörunum og skýrslum er aðgreindur eftir notanda og fyrirtæki þar sem það á við."]],
+        ["Fyrirtækjagögn", ["Fyrirtækjaprófílar, stillingar og vistuð/hunsuð verkefni eru notuð til að veita þjónustuna og ættu ekki að vera sýnileg öðrum viðskiptavinum."]],
+        ["Admin aðgangur", ["Admin verkfæri eru takmörkuð við skilgreinda stjórnendur og eru notuð til að fylgjast með heimildum, innflutningi, fyrirtækjum og handvirkri yfirferð."]],
+        ["Tilkynna vandamál", ["Öryggisspurningar eða ábendingar má senda á info@froststudio.net."]]
+      ]
+    } : {
+      eyebrow: "Security",
+      title: "Security",
+      intro: "VerkRadar uses authentication, access control, and data separation to protect company information.",
+      sections: [
+        ["Security", ["We try to keep security information practical and honest. VerkRadar does not claim certifications it has not obtained."]],
+        ["Login", ["Users log in with authenticated accounts. Login and sessions are part of the app’s core functionality."]],
+        ["Access control", ["Access to company data, matches, and reports is separated by user and company where applicable."]],
+        ["Company data", ["Company profiles, settings, and saved/ignored opportunities are used to provide the service and should not be visible to other customers."]],
+        ["Admin access", ["Admin tools are restricted to defined administrators and are used to monitor sources, imports, companies, and manual review."]],
+        ["Report an issue", ["Security questions or reports can be sent to info@froststudio.net."]]
+      ]
+    },
+    contact: is ? {
+      eyebrow: "Hafa samband",
+      title: "Hafa samband",
+      intro: "Viltu prófa VerkRadar, spyrja um vöktun eða benda á leiðréttingu?",
+      sections: [
+        ["VerkRadar / Frost Studio", ["Netfang: info@froststudio.net", "Tengiliður: Kristján Jakob"]]
+      ]
+    } : {
+      eyebrow: "Contact",
+      title: "Contact",
+      intro: "Want to try VerkRadar, ask about monitoring, or report a correction?",
+      sections: [
+        ["VerkRadar / Frost Studio", ["Email: info@froststudio.net", "Contact person: Kristján Jakob"]]
+      ]
+    }
+  };
+  return pages[key];
+}
+
+function renderLegalDataPage(key) {
+  const data = legalPageData(key);
   return renderLegalPage({
-    eyebrow: "Legal",
-    title: "Privacy Policy",
-    intro: "This policy explains how VerkRadar handles account, company profile and opportunity matching data. It is written for clarity and is not a substitute for final legal advice.",
-    sections: [
-      {
-        title: "Who operates VerkRadar",
-        content: legalParagraphs([
-          "VerkRadar is operated by [LEGAL COMPANY NAME], located in Iceland. You can contact us at support@verkradar.is.",
-          "VerkRadar is a B2B tender and opportunity monitoring tool. Businesses use it to create company profiles, monitor public sources, match opportunities and generate reports."
-        ])
-      },
-      {
-        title: "Data we collect",
-        content: legalParagraphs([
-          "We collect account and authentication data, such as email address, login session information and security-related records.",
-          "We collect company profile data, including company name, contact email, website, industry, services, keywords, locations, project value preferences and report preferences.",
-          "We store product activity needed to run the service, including saved or ignored opportunities, matching results, generated reports, import runs and admin review actions."
-        ])
-      },
-      {
-        title: "Public opportunity data",
-        content: legalParagraphs([
-          "VerkRadar imports and stores public procurement and opportunity data from sources such as EU TED, Útboðsvefur, municipal pages, public tender portals, public websites and manual entries.",
-          "This source data may include buyer names, titles, descriptions, deadlines, locations, estimated values, CPV codes, source links and original source payloads."
-        ])
-      },
-      {
-        title: "How we use data",
-        content: legalList([
-          "To create and manage user accounts.",
-          "To match public opportunities against company profiles.",
-          "To generate dashboards, reports and saved opportunity lists.",
-          "To provide support, troubleshoot issues and protect the service.",
-          "To improve source quality, matching logic and service reliability."
-        ])
-      },
-      {
-        title: "Legal basis in the EEA",
-        content: legalParagraphs([
-          "For GDPR/EEA purposes, we process data mainly to deliver the service requested by users and companies.",
-          "We may also process data based on legitimate interests, such as securing the service, improving matching quality and maintaining import logs. Where a legal obligation applies, we process data to meet that obligation. Where consent is required, we will ask for it."
-        ])
-      },
-      {
-        title: "Storage and processors",
-        content: legalParagraphs([
-          "VerkRadar uses Supabase for database, authentication and related infrastructure. We may use other service providers for hosting, monitoring, email or support as the product develops.",
-          "We do not sell company profile data. We share data only where needed to operate the service, comply with law or protect VerkRadar and its users."
-        ])
-      },
-      {
-        title: "Retention",
-        content: legalParagraphs([
-          "We keep account and company data while the account is active or while needed to provide the service.",
-          "When deletion is requested, we will delete or anonymize data where legally and technically possible. Some records may be retained for security, audit, billing or legal reasons."
-        ])
-      },
-      {
-        title: "Your rights",
-        content: legalParagraphs([
-          "Depending on your location, you may have rights to access, correct, delete, restrict or receive a copy of your data, object to processing and complain to a data protection authority.",
-          "To exercise rights, contact support@verkradar.is. We may need to verify your identity before acting on a request."
-        ])
-      },
-      {
-        title: "Security",
-        content: legalParagraphs([
-          "We use authentication, access controls, database row-level security, Edge Function secrets and limited admin access to protect data.",
-          "No system is perfectly secure. If you believe you found a vulnerability, contact support@verkradar.is."
-        ])
-      },
-      {
-        title: "Contact",
-        content: legalParagraphs([
-          "General support and legal contact: support@verkradar.is",
-        ])
-      }
-    ]
+    eyebrow: data.eyebrow,
+    title: data.title,
+    intro: data.intro,
+    sections: data.sections.map(([title, paragraphs]) => ({
+      title,
+      content: legalParagraphs(paragraphs)
+    }))
   });
+}
+
+function renderPrivacyPolicy() {
+  return renderLegalDataPage("privacy");
 }
 
 function renderTermsOfService() {
-  return renderLegalPage({
-    eyebrow: "Legal",
-    title: "Terms of Service",
-    intro: "These terms describe how businesses may use VerkRadar. They are plain-language product terms and include placeholders that should be reviewed before production use.",
-    sections: [
-      {
-        title: "Service scope",
-        content: legalParagraphs([
-          "VerkRadar monitors public tender and opportunity sources, matches opportunities to company profiles and generates dashboards or reports.",
-          "The service is an assistance and monitoring tool. It does not replace reading the original tender documents or getting professional advice."
-        ])
-      },
-      {
-        title: "User responsibilities",
-        content: legalList([
-          "Provide accurate account and company profile information.",
-          "Check original source documents, requirements, certifications, deadlines, pricing and eligibility before acting.",
-          "Keep login credentials secure and use the service only for lawful business purposes."
-        ])
-      },
-      {
-        title: "No professional advice",
-        content: legalParagraphs([
-          "VerkRadar does not provide legal, procurement, financial, tax or bidding advice.",
-          "Reports and match scores are recommendations to help prioritise review. They are not final decisions and do not confirm eligibility or compliance."
-        ])
-      },
-      {
-        title: "No guarantees",
-        content: legalParagraphs([
-          "We do not guarantee complete source coverage, perfect data, perfect matching, eligibility for any tender, contract award, uninterrupted uptime or financial results.",
-          "Deadlines, values and requirements may change at the original source. Users must verify the source before making business decisions."
-        ])
-      },
-      {
-        title: "Acceptable use",
-        content: legalList([
-          "Do not misuse the service, attempt unauthorized access or interfere with systems.",
-          "Do not reverse engineer, scrape abusively, spam, upload illegal content or use VerkRadar for unlawful activity.",
-          "Do not attempt to bypass access controls, rate limits or security features."
-        ])
-      },
-      {
-        title: "Subscriptions, billing and cancellation",
-        content: legalParagraphs([
-          "Pricing, billing, cancellation and refund terms are defined on the pricing/order page or in a written agreement with the customer.",
-          "If paid plans are introduced or changed, applicable commercial terms will be shown before purchase or renewal where required."
-        ])
-      },
-      {
-        title: "Suspension and termination",
-        content: legalParagraphs([
-          "Users may cancel according to the applicable subscription or written agreement.",
-          "VerkRadar may suspend or terminate access for misuse, non-payment, security risk or violation of these terms."
-        ])
-      },
-      {
-        title: "Limitation of liability",
-        content: legalParagraphs([
-          "To the maximum extent allowed by law, VerkRadar is not liable for missed deadlines, incorrect source data, lost business, lost profits or decisions made based on reports or matches.",
-          "Users remain responsible for tender review, bidding decisions and compliance with procurement requirements."
-        ])
-      },
-      {
-        title: "Changes and governing law",
-        content: legalParagraphs([
-          "We may update these terms by posting a new version or notifying users where appropriate.",
-          "These terms are governed by Icelandic law, unless another law is required by applicable mandatory rules."
-        ])
-      },
-      {
-        title: "Contact",
-        content: legalParagraphs([
-          "General support and legal contact: support@verkradar.is",
-        ])
-      }
-    ]
-  });
+  return renderLegalDataPage("terms");
 }
 
 function renderDataSourcesPage() {
-  return renderLegalPage({
-    eyebrow: "Trust",
-    title: "Data Sources & Accuracy Disclaimer",
-    intro: "VerkRadar helps businesses monitor public opportunities, but the original source remains the authority.",
-    sections: [
-      {
-        title: "Sources we may monitor",
-        content: legalParagraphs([
-          "Sources may include EU TED, Útboðsvefur, municipal pages, public tender portals, public websites and manually added opportunities.",
-          "The set of sources may change over time as we add, remove or improve import coverage."
-        ])
-      },
-      {
-        title: "Source data can be imperfect",
-        content: legalList([
-          "Source data may be incomplete, delayed, duplicated or changed after import.",
-          "Some notices may appear in their original language.",
-          "Deadlines, values, locations, buyer names and requirements can change at the original source.",
-          "Imported fields may be missing or normalized differently depending on the source."
-        ])
-      },
-      {
-        title: "Matching scores are recommendations",
-        content: legalParagraphs([
-          "Match scores are designed to help users prioritize review. They are not guarantees of relevance, eligibility, compliance or contract success.",
-          "A low score may still be worth reviewing, and a high score may still be unsuitable after reading the source documents."
-        ])
-      },
-      {
-        title: "Always open the source document",
-        content: legalParagraphs([
-          "Before acting on any opportunity, open the original source link and review the official documents, deadline, submission method, certifications, pricing requirements and eligibility criteria.",
-          "Use VerkRadar as a shortlist and monitoring layer, not as the final procurement record."
-        ])
-      }
-    ]
-  });
+  return renderLegalDataPage("data");
 }
 
 function renderCookiePolicy() {
-  return renderLegalPage({
-    eyebrow: "Legal",
-    title: "Cookie Policy",
-    intro: "This page explains how VerkRadar uses cookies and browser storage. At this stage, the product uses essential storage for authentication and app functionality.",
-    sections: [
-      {
-        title: "Essential cookies and storage",
-        content: legalParagraphs([
-          "VerkRadar uses essential browser storage for login sessions, Supabase Auth/session handling and app preferences needed to provide the service.",
-          "Local storage may also be used for saved interface state, demo profile data or basic product preferences."
-        ])
-      },
-      {
-        title: "Analytics and tracking",
-        content: legalParagraphs([
-          "If analytics, advertising or optional tracking tools are added later, this policy should be updated to explain what is used and whether consent is required.",
-          "Do not assume analytics are active unless they are clearly listed here or in the product."
-        ])
-      },
-      {
-        title: "Controlling storage",
-        content: legalParagraphs([
-          "You can control or clear cookies and local storage in your browser settings.",
-          "Disabling essential cookies or storage may prevent login, session persistence or parts of the app from working correctly."
-        ])
-      }
-    ]
-  });
+  return renderPrivacyPolicy();
 }
 
 function renderSecurityPage() {
-  return renderLegalPage({
-    eyebrow: "Trust",
-    title: "Security & Data Handling",
-    intro: "This page explains the practical controls VerkRadar uses to handle account, company and opportunity data. It does not claim certifications that VerkRadar has not obtained.",
-    sections: [
-      {
-        title: "Authentication and account access",
-        content: legalParagraphs([
-          "User access is handled through Supabase Auth. Users must sign in to access protected dashboard, report, settings and admin areas.",
-          "Company profiles are connected to account ownership so users only manage their own company data unless they have admin access."
-        ])
-      },
-      {
-        title: "Role-based and admin access",
-        content: legalParagraphs([
-          "Admin access is limited to users listed as administrators. Admin tools are used to monitor imports, review opportunities and manage manual entries.",
-          "Admin access should be granted only to people who need it for operations or support."
-        ])
-      },
-      {
-        title: "Database policies",
-        content: legalParagraphs([
-          "The application uses database row-level security policies to separate user-owned data from admin operations.",
-          "Public opportunity data may be visible to authenticated or public users depending on the product view, while company-specific profile and report data is protected."
-        ])
-      },
-      {
-        title: "Secrets and automation",
-        content: legalParagraphs([
-          "Automation runs through server-side functions. Secrets for Edge Functions and scheduled imports are kept server-side and should not be exposed in browser code.",
-          "Import runs are logged so administrators can review success, errors, inserted rows, matches and generated reports."
-        ])
-      },
-      {
-        title: "Backups, logs and monitoring",
-        content: legalParagraphs([
-          "Infrastructure providers such as Supabase may maintain backups, logs and operational records according to their platform settings and policies.",
-          "VerkRadar keeps operational logs where needed to troubleshoot imports, matching, reports and security issues."
-        ])
-      },
-      {
-        title: "Responsible disclosure",
-        content: legalParagraphs([
-          "If you believe you found a security issue, contact support@verkradar.is with a clear description and steps to reproduce.",
-          "Please do not access, modify or delete data that does not belong to you while investigating a potential issue."
-        ])
-      }
-    ]
-  });
+  return renderLegalDataPage("security");
+}
+
+function renderContactPage() {
+  return renderLegalDataPage("contact");
 }
 
 function renderMobileMenuPanel(navItems, headerCta, isLoggedIn) {
