@@ -3178,6 +3178,19 @@ body.modal-open {
   line-height: 1.35;
 }
 
+.auth-message-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.auth-message-actions .btn {
+  min-height: 38px;
+  padding: 9px 13px;
+  font-size: 13px;
+}
+
 .pricing-card.highlighted {
   border-color: rgba(215,255,63,0.45);
   transform: translateY(-8px);

@@ -130,6 +130,17 @@ const translations = {
     createAccountSubtitle: "Byrjið á að stofna aðgang. Síðan stofnið þið fyrirtækjaprófíl.",
     authRequiredTitle: "Skráðu þig inn til að halda áfram",
     authRequiredText: "Þessi síða er aðgengileg eftir innskráningu.",
+    alreadyLoggedInTitle: "Þú ert þegar skráð(ur) inn",
+    alreadyLoggedInText: "Beini þér á næsta skref.",
+    signupCreatedConfirm: "Aðgangur stofnaður. Athugaðu tölvupóstinn þinn til að staðfesta aðganginn.",
+    signupExistingAccount: "Þetta netfang er þegar með aðgang. Skráðu þig inn eða endurstilltu lykilorð.",
+    signupNeutralNextSteps: "Ef aðgangur er til fyrir þetta netfang færðu tölvupóst með næstu skrefum. Annars hefur nýr aðgangur verið stofnaður.",
+    emailOrPasswordIncorrect: "Netfang eða lykilorð er rangt.",
+    confirmEmailBeforeLogin: "Staðfestu netfangið þitt áður en þú skráir þig inn.",
+    passwordTooShort: "Lykilorð þarf að vera að minnsta kosti 6 stafir.",
+    tooManyAttempts: "Of margar tilraunir. Bíddu aðeins og reyndu aftur.",
+    couldNotCreateAccount: "Gat ekki stofnað aðgang. Athugaðu netfang og lykilorð.",
+    couldNotLogin: "Gat ekki skráð þig inn. Reyndu aftur.",
     creating: "Stofna...",
     alreadyHaveAccount: "Ertu þegar með aðgang?",
     passwordReset: "Endurstilla lykilorð",
@@ -389,6 +400,17 @@ const translations = {
     createAccountSubtitle: "Start by creating an account. Then you’ll create your company profile.",
     authRequiredTitle: "Log in to continue",
     authRequiredText: "This page is available after you sign in.",
+    alreadyLoggedInTitle: "Already logged in",
+    alreadyLoggedInText: "Redirecting you to the next step.",
+    signupCreatedConfirm: "Account created. Check your email to confirm your account.",
+    signupExistingAccount: "This email already has an account. Log in or reset your password.",
+    signupNeutralNextSteps: "If an account exists for this email, you’ll receive an email with next steps. Otherwise, a new account has been created.",
+    emailOrPasswordIncorrect: "Email or password is incorrect.",
+    confirmEmailBeforeLogin: "Please confirm your email before logging in.",
+    passwordTooShort: "Password must be at least 6 characters.",
+    tooManyAttempts: "Too many attempts. Please wait a moment and try again.",
+    couldNotCreateAccount: "Could not create account. Please check your email and password.",
+    couldNotLogin: "Could not log in. Please try again.",
     creating: "Creating...",
     alreadyHaveAccount: "Already have an account?",
     passwordReset: "Password reset",
@@ -3109,6 +3131,18 @@ function getPasswordResetRedirectUrl() {
   return `${window.location.origin}/#/reset-password`;
 }
 
+function isExistingSignupResponse(data) {
+  const identities = data?.user?.identities;
+  return Array.isArray(identities) && identities.length === 0;
+}
+
+function getExistingAccountAuthActions() {
+  return [
+    { label: t("login"), href: "/login", variant: "primary" },
+    { label: t("forgotPassword"), href: "/forgot-password", variant: "secondary" }
+  ];
+}
+
 async function signUp(email, password) {
   state.authSubmitting = true;
   state.authMessage = null;
@@ -3125,10 +3159,27 @@ async function signUp(email, password) {
     });
     if (error) throw error;
     clearLocalProfileState();
+    if (isExistingSignupResponse(data)) {
+      state.user = null;
+      state.currentUser = null;
+      state.authMessage = {
+        type: "error",
+        text: t("signupExistingAccount"),
+        actions: getExistingAccountAuthActions()
+      };
+      state.authForm.password = "";
+      render();
+      return;
+    }
     if (!data.session?.user) {
       state.user = null;
-      state.authMessage = { type: "success", text: "Account created. Check your email to confirm your account." };
-      clearAuthForm();
+      state.currentUser = null;
+      const hasConfirmedNewIdentity = Array.isArray(data?.user?.identities) && data.user.identities.length > 0;
+      state.authMessage = {
+        type: "success",
+        text: hasConfirmedNewIdentity ? t("signupCreatedConfirm") : t("signupNeutralNextSteps")
+      };
+      state.authForm.password = "";
       render();
       return;
     }
@@ -3137,13 +3188,18 @@ async function signUp(email, password) {
     state.profileDraft = null;
     state.profileDraftDirty = false;
     await checkAdminAccess(state.user);
-    state.authMessage = { type: "success", text: "Account created." };
+    state.authMessage = { type: "success", text: t("signupCreatedConfirm") };
     await loadProfileFromSupabase({ overwriteDraft: true });
     clearAuthForm();
     navigate(getPostAuthRoute());
   } catch (error) {
     console.error("Signup failed:", error);
-    state.authMessage = { type: "error", text: formatAuthError(error, "signup") };
+    const isExistingAccount = isExistingAccountError(error);
+    state.authMessage = {
+      type: "error",
+      text: formatAuthError(error, "signup"),
+      actions: isExistingAccount ? getExistingAccountAuthActions() : []
+    };
     render();
   } finally {
     state.authSubmitting = false;
@@ -4330,30 +4386,42 @@ function formatAuthError(error, mode = "login") {
     message.includes("invalid_credentials") ||
     code.includes("invalid_credentials")
   ) {
-    return "Email or password is incorrect.";
+    return t("emailOrPasswordIncorrect");
   }
 
   if (message.includes("email not confirmed")) {
-    return "Please confirm your email before logging in.";
+    return t("confirmEmailBeforeLogin");
   }
 
-  if (message.includes("user already registered") || message.includes("already registered")) {
-    return "An account with this email already exists. Try logging in instead.";
+  if (isExistingAccountError(error)) {
+    return t("signupExistingAccount");
   }
 
   if (message.includes("password") && message.includes("characters")) {
-    return "Password must be at least 6 characters.";
+    return t("passwordTooShort");
   }
 
   if (message.includes("rate limit") || message.includes("too many")) {
-    return "Too many attempts. Please wait a moment and try again.";
+    return t("tooManyAttempts");
   }
 
   if (mode === "signup") {
-    return "Could not create account. Please check your email and password.";
+    return t("couldNotCreateAccount");
   }
 
-  return "Could not log in. Please try again.";
+  return t("couldNotLogin");
+}
+
+function isExistingAccountError(error) {
+  const message = String(error?.message || error || "").toLowerCase();
+  const code = String(error?.code || error?.status || "").toLowerCase();
+  return (
+    message.includes("user already registered") ||
+    message.includes("already registered") ||
+    message.includes("already exists") ||
+    code.includes("user_already_exists") ||
+    code.includes("email_exists")
+  );
 }
 
 function showToast(message, type = "success") {
@@ -6070,9 +6138,19 @@ function requireProfilePage(title, message) {
 
 function renderAuthMessage() {
   if (!state.authMessage) return "";
+  const actions = Array.isArray(state.authMessage.actions) ? state.authMessage.actions : [];
   return `
     <div class="admin-message ${state.authMessage.type === "error" ? "is-error" : "is-success"}">
-      ${escapeHtml(state.authMessage.text)}
+      <span>${escapeHtml(state.authMessage.text)}</span>
+      ${actions.length ? `
+        <div class="auth-message-actions">
+          ${actions.map((action) => `
+            <button type="button" class="btn btn-${action.variant === "primary" ? "primary" : "secondary"}" data-action="go" data-href="${escapeHtml(action.href)}">
+              ${escapeHtml(action.label)}
+            </button>
+          `).join("")}
+        </div>
+      ` : ""}
     </div>
   `;
 }
@@ -6167,7 +6245,16 @@ function renderResetPassword() {
 }
 
 function renderSignup() {
-  if (state.user) return requireProfilePage(state.language === "is" ? "Þú ert þegar skráð(ur) inn" : "Already logged in", state.language === "is" ? "Opnaðu mælaborðið eða breyttu fyrirtækjaprófílnum." : "Open your dashboard or edit your company profile.");
+  if (state.user) {
+    const route = getPostAuthRoute();
+    setTimeout(() => navigate(route), 0);
+    return renderShell(`
+      <section class="empty-state">
+        <h1>${escapeHtml(t("alreadyLoggedInTitle"))}</h1>
+        <p>${escapeHtml(t("alreadyLoggedInText"))}</p>
+      </section>
+    `);
+  }
 
   return renderShell(`
     <section class="auth-page">
