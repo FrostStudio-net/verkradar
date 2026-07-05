@@ -7877,7 +7877,7 @@ function formatSafetyReason(reason) {
     "Buyer is missing or generic": "Kaupandi vantar eða er of almennur",
     "Match depends on broad or low-confidence terms": "Samsvörun byggir á breiðum eða óvissum orðum",
     "Possible service mismatch for this company profile": "Mögulegt ósamræmi við þjónustu fyrirtækisins",
-    "Mentions design, consulting, supervision, or project management terms": "Nefnir hönnun, ráðgjöf, eftirlit eða verkefnastjórn",
+    "Mentions design, consulting, supervision, or project management terms": "Inniheldur orð tengd hönnun, ráðgjöf, eftirliti eða verkefnastjórnun",
     "Tender appears already awarded or already tendered": "Útboð virðist þegar auglýst eða útboði lokið",
     "Stale or expired opportunity signal": "Gamalt eða útrunnið tækifæri",
     "Current opportunity is plausible but needs review before customer alerts": "Tækifærið gæti átt við en þarf yfirferð áður en það fer í tilkynningu",
@@ -8054,7 +8054,7 @@ function renderAdminTabs() {
   const tabs = [
     ["overview", "Overview"],
     ["companies", "Companies"],
-    ["review", "Review Queue"],
+    ["review", state.language === "is" ? "Yfirferð" : "Review Queue"],
     ["sources", "Sources/imports"],
     ["opportunities", "Opportunities"],
     ["reports", "Reports"]
@@ -8121,78 +8121,145 @@ function renderAdminOverview() {
 
 function renderAdminReviewQueue() {
   const rows = state.adminReviewMatches || [];
+  const labels = getAdminReviewLabels();
   return `
     <section class="ops-card">
       <div class="card-header">
         <div>
-          <h2>Review Queue</h2>
-          <p>${state.adminReviewLoading ? "Loading review queue..." : `${rows.length} uncertain match${rows.length === 1 ? "" : "es"} need review.`}</p>
+          <h2>${escapeHtml(labels.title)}</h2>
+          <p>${state.adminReviewLoading ? escapeHtml(labels.loading) : escapeHtml(labels.count(rows.length))}</p>
         </div>
         <button class="btn btn-ghost btn-small" type="button" data-action="refresh-admin-status">Refresh</button>
       </div>
       ${state.adminReviewError ? `<div class="admin-message is-error">${escapeHtml(state.adminReviewError)}</div>` : ""}
-      ${state.adminReviewLoading && !rows.length ? `<div class="empty-card">Loading review queue...</div>` : rows.length ? `
-        <div class="ops-table-wrap">
-          <table class="ops-table admin-review-table">
-            <thead>
-              <tr>
-                <th>Opportunity</th>
-                <th>Company</th>
-                <th>Source</th>
-                <th>Buyer</th>
-                <th>Deadline</th>
-                <th>Score</th>
-                <th>Safety</th>
-                <th>Safety reasons</th>
-                <th>Match reasons</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rows.map(renderAdminReviewRow).join("")}
-            </tbody>
-          </table>
+      ${state.adminReviewLoading && !rows.length ? `<div class="empty-card">${escapeHtml(labels.loading)}</div>` : rows.length ? `
+        <div class="admin-review-list">
+          ${rows.map(renderAdminReviewCard).join("")}
         </div>
-      ` : `<div class="empty-card">No matches need review right now.</div>`}
+      ` : `<div class="empty-card">${escapeHtml(labels.empty)}</div>`}
     </section>
   `;
 }
 
-function renderAdminReviewRow(item) {
+function getAdminReviewLabels() {
+  if (state.language === "is") {
+    return {
+      title: "Yfirferð",
+      loading: "Hleð yfirferð...",
+      empty: "Engar óvissar samsvaranir bíða yfirferðar.",
+      count: (count) => `${count} óviss${count === 1 ? "" : "ar"} samsvörun${count === 1 ? "" : "ir"} þarfnast yfirferðar`,
+      opportunity: "Tækifæri",
+      company: "Fyrirtæki",
+      source: "Heimild",
+      buyer: "Kaupandi",
+      region: "Svæði",
+      deadline: "Skilafrestur",
+      score: "Samsvörun",
+      safety: "Öryggisflokkun",
+      alert: "Tilkynning",
+      safetyReasons: "Ástæður yfirferðar",
+      matchReasons: "Ástæður samsvörunar",
+      approve: "Samþykkja",
+      approving: "Samþykki...",
+      reject: "Hafna",
+      rejecting: "Hafna...",
+      noSource: "Heimildartengil vantar",
+      hidden: "Falið í yfirlitum",
+      notHidden: "Ekki falið í yfirlitum",
+      sourceUrl: "Slóð heimildar",
+    };
+  }
+  return {
+    title: "Review Queue",
+    loading: "Loading review queue...",
+    empty: "No uncertain matches need review.",
+    count: (count) => `${count} uncertain match${count === 1 ? "" : "es"} need review.`,
+    opportunity: "Opportunity",
+    company: "Company",
+    source: "Source",
+    buyer: "Buyer",
+    region: "Region",
+    deadline: "Deadline",
+    score: "Score",
+    safety: "Safety",
+    alert: "Alert",
+    safetyReasons: "Safety reasons",
+    matchReasons: "Match reasons",
+    approve: "Approve",
+    approving: "Approving...",
+    reject: "Reject",
+    rejecting: "Rejecting...",
+    noSource: "No source URL",
+    hidden: "Hidden from reports",
+    notHidden: "Not hidden from reports",
+    sourceUrl: "Source URL",
+  };
+}
+
+function renderAdminReviewCard(item) {
   const opp = item.opportunity || {};
   const busy = state.adminReviewActions?.[item.id] || "";
   const deadline = getOpportunityDeadlineDisplay(opp);
   const sourceUrl = getSafeExternalUrl(opp.url);
+  const labels = getAdminReviewLabels();
+  const safetyReasons = item.safetyReasons.length ? item.safetyReasons : ["Needs admin review"];
+  const matchReasons = item.matchReasons.length ? item.matchReasons : ["Profile match"];
   return `
-    <tr>
-      <td>
-        <strong>${escapeHtml(opp.title || "Untitled opportunity")}</strong>
-        <p>${escapeHtml(formatOpportunityLocation(opp))}</p>
-        ${sourceUrl ? `<a class="btn btn-ghost btn-small" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener">${escapeHtml(t("openSource"))} ↗</a>` : `<span class="admin-chip">${escapeHtml(state.language === "is" ? "Heimildartengil vantar" : "No source URL")}</span>`}
-      </td>
-      <td>${escapeHtml(item.companyName)}</td>
-      <td>
-        <strong>${escapeHtml(opp.source || "Unknown source")}</strong>
-        ${sourceUrl ? `<p class="admin-source-url">${escapeHtml(sourceUrl)}</p>` : ""}
-      </td>
-      <td>${escapeHtml(formatOpportunityBuyer(opp))}</td>
-      <td>${escapeHtml(deadline.label || "Not found")}</td>
-      <td>${escapeHtml(formatReportMatchLabel(item.matchLabel))} · ${Number(item.matchScore || 0)}</td>
-      <td>
-        <span class="admin-chip">${escapeHtml(formatSafetyStatus(item.safetyStatus))}</span>
-        <span class="admin-chip">${escapeHtml(formatAlertEligible(item.alertEligible))}</span>
-        <span class="admin-chip">${escapeHtml(item.reviewRequired ? (state.language === "is" ? "Yfirferð nauðsynleg" : "Review required") : (state.language === "is" ? "Yfirferð ekki nauðsynleg" : "Review not required"))}</span>
-        <span class="admin-chip">${escapeHtml(opp.rawPayload?.hidden_from_reports === true ? "hidden_from_reports=true" : "hidden_from_reports=false")}</span>
-      </td>
-      <td>${(item.safetyReasons.length ? item.safetyReasons : ["Needs admin review"]).map((reason) => `<span class="admin-chip">${escapeHtml(formatSafetyReason(reason))}</span>`).join(" ")}</td>
-      <td>${(item.matchReasons.length ? item.matchReasons : ["Profile match"]).map((reason) => `<span class="admin-chip">${escapeHtml(formatReportReason(reason))}</span>`).join(" ")}</td>
-      <td>
-        <div class="admin-row-actions">
-          <button class="btn btn-ghost btn-small" data-action="admin-review-match" data-review-action="approve" data-id="${escapeHtml(item.id)}" data-company-id="${escapeHtml(item.companyId)}" ${busy ? "disabled" : ""}>${busy === "approve" ? "Approving..." : "Approve"}</button>
-          <button class="btn btn-ghost btn-small" data-action="admin-review-match" data-review-action="reject" data-id="${escapeHtml(item.id)}" data-company-id="${escapeHtml(item.companyId)}" ${busy ? "disabled" : ""}>${busy === "reject" ? "Rejecting..." : "Reject"}</button>
+    <article class="admin-review-card">
+      <div class="admin-review-card-top">
+        <div class="admin-review-title-block">
+          <span class="eyebrow">${escapeHtml(labels.opportunity)}</span>
+          <h3>${escapeHtml(opp.title || "Untitled opportunity")}</h3>
+          <p>${escapeHtml(labels.company)}: <strong>${escapeHtml(item.companyName)}</strong></p>
+          <p>${escapeHtml(labels.source)}: <strong>${escapeHtml(opp.source || "Unknown source")}</strong></p>
+          ${sourceUrl ? `<p class="admin-source-url"><span>${escapeHtml(labels.sourceUrl)}:</span> ${escapeHtml(sourceUrl)}</p>` : ""}
         </div>
-      </td>
-    </tr>
+        <div class="admin-review-source-action">
+          ${sourceUrl ? `<a class="btn btn-secondary btn-small" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener">${escapeHtml(t("openSource"))} ↗</a>` : `<span class="admin-chip">${escapeHtml(labels.noSource)}</span>`}
+        </div>
+      </div>
+
+      <div class="admin-review-meta-grid">
+        ${renderAdminReviewMeta(labels.buyer, formatOpportunityBuyer(opp))}
+        ${renderAdminReviewMeta(labels.region, formatOpportunityLocation(opp))}
+        ${renderAdminReviewMeta(labels.deadline, deadline.label || t("notFound"))}
+        ${renderAdminReviewMeta(labels.score, `${formatReportMatchLabel(item.matchLabel)} · ${Number(item.matchScore || 0)}`)}
+        ${renderAdminReviewMeta(labels.safety, formatSafetyStatus(item.safetyStatus))}
+        ${renderAdminReviewMeta(labels.alert, `${formatAlertEligible(item.alertEligible)} · ${item.reviewRequired ? (state.language === "is" ? "Þarfnast yfirferðar" : "Review required") : (state.language === "is" ? "Yfirferð ekki nauðsynleg" : "Review not required")}`)}
+      </div>
+
+      <div class="admin-review-reasons">
+        <section class="admin-review-reason-box is-warning">
+          <h4>${escapeHtml(labels.safetyReasons)}</h4>
+          <ul>
+            ${safetyReasons.map((reason) => `<li>${escapeHtml(formatSafetyReason(reason))}</li>`).join("")}
+          </ul>
+        </section>
+        <section class="admin-review-reason-box">
+          <h4>${escapeHtml(labels.matchReasons)}</h4>
+          <ul>
+            ${matchReasons.map((reason) => `<li>${escapeHtml(formatReportReason(reason))}</li>`).join("")}
+          </ul>
+        </section>
+      </div>
+
+      <div class="admin-review-actions">
+        <span class="admin-review-hidden-state">${escapeHtml(opp.rawPayload?.hidden_from_reports === true ? labels.hidden : labels.notHidden)}</span>
+        <div class="admin-row-actions">
+          <button class="btn btn-ghost btn-small" data-action="admin-review-match" data-review-action="approve" data-id="${escapeHtml(item.id)}" data-company-id="${escapeHtml(item.companyId)}" ${busy ? "disabled" : ""}>${busy === "approve" ? escapeHtml(labels.approving) : escapeHtml(labels.approve)}</button>
+          <button class="btn btn-ghost btn-small" data-action="admin-review-match" data-review-action="reject" data-id="${escapeHtml(item.id)}" data-company-id="${escapeHtml(item.companyId)}" ${busy ? "disabled" : ""}>${busy === "reject" ? escapeHtml(labels.rejecting) : escapeHtml(labels.reject)}</button>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function renderAdminReviewMeta(label, value) {
+  return `
+    <div class="admin-review-meta-item">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value || "—")}</strong>
+    </div>
   `;
 }
 
