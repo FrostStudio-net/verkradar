@@ -182,7 +182,7 @@ const VEGAGERDIN_SOURCE_NAME = "Vegagerðin";
 const VEGAGERDIN_PROJECT_EXTRACTION_METHOD = "vegagerdin_article_project_parser";
 const GARDABAER_SOURCE_NAME = "Garðabær Municipality";
 const FAXAFLOAHAFNIR_SOURCE_NAME = "Faxaflóahafnir útboð";
-const MISSING_DEADLINE_RISK = "Deadline not available in feed — verify on source page.";
+const MISSING_DEADLINE_RISK = "Deadline not available in imported data — verify on source page.";
 const STRONG_OPPORTUNITY_KEYWORDS = [
   "útboð",
   "utbod",
@@ -1641,19 +1641,36 @@ function buildConnectorDescription(options: {
 }) {
   const bestText = [options.cleanDescription, options.content]
     .map((value) => cleanConnectorText(value, ""))
-    .find((value) => value && normalizeSearchText(value) !== normalizeSearchText(options.title));
+    .find((value) =>
+      value &&
+      normalizeSearchText(value) !== normalizeSearchText(options.title) &&
+      !(options.sourceName === RIKISKAUP_SOURCE_NAME && isPollutedUtbodsvefurText(value))
+    );
 
   if (bestText) return bestText;
 
   if (options.sourceName === RIKISKAUP_SOURCE_NAME) {
     return [
-      "Procurement notice imported from Útboðsvefur.",
-      options.category ? `Category: ${options.category}.` : "",
-      "Open the source page for full buyer details, deadline, requirements and tender documents.",
+      "Útboðstilkynning flutt inn af Útboðsvef.",
+      options.category ? `Flokkur: ${options.category}.` : "",
+      "Opnið upprunasíðuna til að staðfesta kaupanda, skilafrest, kröfur og útboðsgögn.",
     ].filter(Boolean).join(" ");
   }
 
   return options.title;
+}
+
+function isPollutedUtbodsvefurText(value: string) {
+  const text = String(value || "");
+  const signals = [
+    "Útboðsvefur.is - Opinber útboð",
+    "Fjöldi útboð",
+    "Framkvæmdasýslan",
+    "Ríkiseignir",
+    "Grímsnes",
+    "Garðabær",
+  ].filter((term) => text.includes(term)).length;
+  return signals >= 3 || /^Útboðsvefur\s+Útboðsvefur\.is/i.test(text);
 }
 
 function getConnectorItemBuyer(item: Record<string, unknown>, connectorType: ConnectorType, sourceName = "", title = "") {
@@ -1704,6 +1721,7 @@ async function enrichRikiskaupOpportunityFromDetailPage(opportunity: NormalizedO
       detail_page_url: url,
       ...(detail.buyer ? { buyer: detail.buyer, extracted_buyer: detail.buyer } : {}),
       ...(detail.type ? { tender_type: detail.type } : {}),
+      ...(detail.tenderNumber ? { tender_number: detail.tenderNumber } : {}),
       ...(detail.deadline ? { extracted_deadline_text: detail.deadlineRaw, deadline_at: detail.deadlineAt || null } : {}),
       ...(detail.openingDate ? { opening_date: detail.openingDate } : {}),
       ...(detail.documentsDate ? { tender_documents_date: detail.documentsDate } : {}),
@@ -1722,7 +1740,8 @@ async function enrichRikiskaupOpportunityFromDetailPage(opportunity: NormalizedO
 }
 
 function parseRikiskaupTenderDetailPage(html: string) {
-  const text = cleanConnectorText(html, "");
+  const mainHtml = extractRikiskaupTenderMainHtml(html);
+  const text = cleanConnectorText(mainHtml, "");
   const buyer = cleanBuyerName(
     extractLabeledValue(text, ["Útboðsaðili", "Utboðsaðili", "Utbodsaðili", "Utbodsadili"]) ||
     extractRikiskaupBuyerFromText(text),
@@ -1733,11 +1752,13 @@ function parseRikiskaupTenderDetailPage(html: string) {
   const openingDate = parseDeadline(extractLabeledValue(text, ["Opnun tilboða", "Opnun tilboda"]) || "");
   const documentsDate = parseDeadline(extractLabeledValue(text, ["Útboðsgögn afhent", "Utbodsgogn afhent"]) || "");
   const completionDate = extractCompletionDateText(text);
-  const description = buildRikiskaupDetailDescription(text);
+  const tenderNumber = extractTenderNumber(text);
+  const description = buildRikiskaupDetailDescription(text, deadlineRaw);
   return {
     buyer,
     type: type || "tender",
     category: type || "public procurement",
+    tenderNumber,
     deadline,
     deadlineRaw: deadlineRaw || null,
     deadlineAt: deadline ? buildDeadlineAt(deadline, deadlineRaw) : null,
@@ -1747,6 +1768,21 @@ function parseRikiskaupTenderDetailPage(html: string) {
     description,
     hasUsefulDetail: Boolean(buyer || deadline || description),
   };
+}
+
+function extractRikiskaupTenderMainHtml(html: string) {
+  const body = String(html || "")
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<nav\b[^>]*>[\s\S]*?<\/nav>/gi, " ")
+    .replace(/<header\b[^>]*>[\s\S]*?<\/header>/gi, " ")
+    .replace(/<footer\b[^>]*>[\s\S]*?<\/footer>/gi, " ")
+    .replace(/<aside\b[^>]*>[\s\S]*?<\/aside>/gi, " ");
+  const mainMatch = body.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i);
+  const articleMatch = body.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i);
+  const content = articleMatch?.[1] || mainMatch?.[1] || body;
+  const titleStart = content.search(/<h1\b|Útboðsaðili|Utbodsadili|Skilafrestur|F\.h\./i);
+  return titleStart >= 0 ? content.slice(titleStart) : content;
 }
 
 function extractLabeledValue(text: string, labels: string[]) {
@@ -1764,26 +1800,53 @@ function extractLabeledValue(text: string, labels: string[]) {
     "Verkinu skal",
     "Nánari upplýsingar",
   ].map(escapeRegex).join("|");
-  const match = compact.match(new RegExp(`(?:${labelPattern})\\s*:?\\s*([\\s\\S]{1,240}?)(?=\\s+(?:${stopLabels})\\s*:|$)`, "i"));
-  return match ? match[1].replace(/\s+/g, " ").trim() : "";
+  const match = compact.match(new RegExp(`(?:${labelPattern})\\s*:?\\s*([\\s\\S]{1,240}?)(?=\\s+(?:${stopLabels})\\s*:?|$)`, "i"));
+  return match ? cleanLabeledValue(match[1]) : "";
+}
+
+function cleanLabeledValue(value: string) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/^(Útboðsaðili|Utbodsadili|Tegund|Skilafrestur|Opnun tilboða|Opnun tilboda)\s*:?/i, "")
+    .trim();
 }
 
 function extractRikiskaupBuyerFromText(text: string) {
-  const match = String(text || "").match(/F\.h\.\s+([^,.]{3,120}?Reykjavíkurborgar)/i);
+  const value = String(text || "");
+  if (/Reykjavíkurborg/i.test(value)) return "Reykjavíkurborg";
+  const match = value.match(/F\.h\.\s+([^,.]{3,120}?Reykjavíkurborgar)/i);
   return match ? match[1].trim() : "";
 }
 
-function buildRikiskaupDetailDescription(text: string) {
+function buildRikiskaupDetailDescription(text: string, deadlineRaw = "") {
   const compact = String(text || "").replace(/\s+/g, " ").trim();
-  const start = compact.search(/óskar eftir tilboðum|oskar eftir tilbodum|verkið felur|verkefnið felur|gatna-|gatnagerð|stígagerð/i);
+  const startMatches = [
+    compact.search(/F\.h\.[^.]{0,260}ósk(?:að|ar) eftir tilboðum/i),
+    compact.search(/(?:Reykjavíkurborg|sveitarfélag|bærinn|kaupandi)[^.]{0,260}ósk(?:að|ar) eftir tilboðum/i),
+    compact.search(/óskar eftir tilboðum|óskað eftir tilboðum|oskar eftir tilbodum|oskad eftir tilbodum/i),
+    compact.search(/verkið felur|verkefnið felur|gatna-|gatnagerð|stígagerð/i),
+  ].filter((index) => index >= 0);
+  const start = startMatches.length ? Math.min(...startMatches) : -1;
   if (start < 0) return "";
-  const slice = compact.slice(start, start + 900);
-  return slice.replace(/\s+(Nánari upplýsingar|Skilafrestur|Opnun tilboða).*$/i, "").trim();
+  const stop = compact.slice(start).search(/\s+(Nánari upplýsingar|Útboðsgögn afhent|Opnun tilboða|Opnun tilboda|Auglýsandi|Flokkar|Tengdar fréttir)\b/i);
+  const end = stop > 120 ? start + stop : start + 1200;
+  const parts = [compact.slice(start, end).trim()];
+  if (deadlineRaw) parts.push(`Skilafrestur: ${deadlineRaw}`);
+  return uniqueStrings(parts)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .slice(0, 1400)
+    .trim();
 }
 
 function extractCompletionDateText(text: string) {
   const match = String(text || "").match(/Verkinu skal[^.]{0,180}\./i);
   return match ? match[0].trim() : "";
+}
+
+function extractTenderNumber(text: string) {
+  const match = String(text || "").match(/\b(?:útboð\s*nr\.?|nr\.?)\s*(\d{3,})\b/i);
+  return match?.[1] || "";
 }
 
 function buildDeadlineAt(deadline: string, rawText: string | null) {
@@ -1878,10 +1941,12 @@ function inferBuyerFromTitle(title: string) {
 }
 
 function cleanBuyerName(value: string) {
-  return stripHtml(value)
+  const cleaned = stripHtml(value)
     .replace(/^(?:útboð|utbod|verðfyrirspurn|verdfyrirspurn)\s+/i, "")
     .replace(/[,:–-]\s*$/g, "")
     .trim();
+  if (/reykjavíkurborg/i.test(cleaned)) return "Reykjavíkurborg";
+  return cleaned;
 }
 
 function getConnectorOpportunityQuality(text: string) {
@@ -2554,8 +2619,16 @@ const CIVIL_STRONG_SERVICE_TERMS = [
   "kantsteinn",
   "kantsteinar",
   "landmótun",
-  "snjómokstur",
   "gatnaframkvæmdir",
+];
+
+const CIVIL_OPTIONAL_WINTER_SERVICE_TERMS = [
+  "snjómokstur",
+  "snjóruðningur",
+  "hálkuvarnir",
+  "vetrarþjónusta",
+  "gangstéttir",
+  "stofnanalóðir",
 ];
 
 const CIVIL_WEAK_GENERIC_TERMS = [
@@ -2612,6 +2685,7 @@ function rankMatchTerm(value: string) {
   const normalized = normalize(String(value || ""));
   if (CIVIL_STRONG_SERVICE_TERMS.some((term) => normalized === normalize(term))) return 0;
   if (CIVIL_STRONG_SERVICE_TERMS.some((term) => normalized.includes(normalize(term)) || normalize(term).includes(normalized))) return 1;
+  if (CIVIL_OPTIONAL_WINTER_SERVICE_TERMS.some((term) => normalized === normalize(term))) return 2;
   if (isCivilWeakGenericTerm(value)) return 10;
   return 3;
 }
@@ -2623,6 +2697,11 @@ function sortMatchTermsBySpecificity(values: string[]) {
 function getStrongCivilTermsInText(text: string) {
   const normalizedText = normalize(String(text || ""));
   return CIVIL_STRONG_SERVICE_TERMS.filter((term) => normalizedText.includes(normalize(term)));
+}
+
+function getOptionalWinterTermsInText(text: string) {
+  const normalizedText = normalize(String(text || ""));
+  return CIVIL_OPTIONAL_WINTER_SERVICE_TERMS.filter((term) => normalizedText.includes(normalize(term)));
 }
 
 function promoteWeakGenericHitsToSpecificCivilTerms(hits: string[], opportunityTextValue: string) {
@@ -2640,12 +2719,21 @@ function isCivilContractorProfile(profile: Record<string, unknown>) {
   ].filter(Boolean).join(" ");
   return normalizedIncludesAny(profileText, [
     ...CIVIL_STRONG_SERVICE_TERMS,
+    ...CIVIL_OPTIONAL_WINTER_SERVICE_TERMS,
     "construction",
     "contractor",
     "verktaki",
     "mannvirki",
     "jarðtækni",
   ]);
+}
+
+function hasExplicitWinterService(profile: Record<string, unknown>) {
+  const profileText = [
+    ...asArray(profile.services),
+    ...asArray(profile.includeKeywords),
+  ].filter(Boolean).join(" ");
+  return normalizedIncludesAny(profileText, CIVIL_OPTIONAL_WINTER_SERVICE_TERMS);
 }
 
 function hasExplicitIndoorService(profile: Record<string, unknown>) {
@@ -2680,20 +2768,25 @@ function getCivilContractorFit(
     ...asArray(opportunity.keywords),
   ].join(" ");
   const hasStrongCivilTerm = normalizedIncludesAny(opportunityTextValue, CIVIL_STRONG_SERVICE_TERMS);
+  const hasWinterTerm = normalizedIncludesAny(opportunityTextValue, CIVIL_OPTIONAL_WINTER_SERVICE_TERMS);
+  const allowsWinterWork = hasExplicitWinterService(profile);
+  const hasEligibleWinterTerm = hasWinterTerm && allowsWinterWork;
   const hasIndoorTerm = normalizedIncludesAny(opportunityTextValue, CIVIL_INDOOR_DOWNGRADE_TERMS);
   const allowsIndoorWork = hasExplicitIndoorService(profile);
   const detectedStrongTerms = getStrongCivilTermsInText(opportunityTextValue);
+  const detectedWinterTerms = hasEligibleWinterTerm ? getOptionalWinterTermsInText(opportunityTextValue) : [];
   const serviceHitsAreWeakOnly = serviceHits.length > 0 && serviceHits.every(isCivilWeakGenericTerm);
   const keywordHitsAreWeakOnly = keywordHits.length > 0 && keywordHits.every(isCivilWeakGenericTerm);
   const hasAnySpecificHit = [...serviceHits, ...keywordHits].some((hit) => !isCivilWeakGenericTerm(hit));
-  const expandedServiceHits = hasStrongCivilTerm ? Array.from(new Set([...serviceHits, ...detectedStrongTerms])) : serviceHits;
-  const shouldScoreWeakTerms = hasStrongCivilTerm || hasAnySpecificHit;
+  const expandedServiceHits = (hasStrongCivilTerm || hasEligibleWinterTerm) ? Array.from(new Set([...serviceHits, ...detectedStrongTerms, ...detectedWinterTerms])) : serviceHits;
+  const shouldScoreWeakTerms = hasStrongCivilTerm || hasEligibleWinterTerm || hasAnySpecificHit;
 
   return {
     serviceHits: sortMatchTermsBySpecificity(shouldScoreWeakTerms ? promoteWeakGenericHitsToSpecificCivilTerms(expandedServiceHits, opportunityTextValue) : expandedServiceHits.filter((service) => !isCivilWeakGenericTerm(service))),
     keywordHits: sortMatchTermsBySpecificity(shouldScoreWeakTerms ? promoteWeakGenericHitsToSpecificCivilTerms(keywordHits, opportunityTextValue) : keywordHits.filter((keyword) => !isCivilWeakGenericTerm(keyword))),
-    hasWeakOnlyFit: !hasStrongCivilTerm && !hasAnySpecificHit && (serviceHitsAreWeakOnly || keywordHitsAreWeakOnly),
+    hasWeakOnlyFit: !hasStrongCivilTerm && !hasEligibleWinterTerm && !hasAnySpecificHit && (serviceHitsAreWeakOnly || keywordHitsAreWeakOnly),
     hasIndoorMismatch: hasIndoorTerm && !hasStrongCivilTerm && !allowsIndoorWork,
+    hasWinterOnlyFit: hasEligibleWinterTerm && !hasStrongCivilTerm,
   };
 }
 
@@ -2796,6 +2889,11 @@ function calculateMatch(profile: Record<string, unknown>, opportunity: Record<st
   if (civilFit.hasIndoorMismatch) {
     score = Math.min(score - 20, 40);
     risks.push("Appears to be indoor/building finishing work outside your core civil services");
+  }
+
+  if (civilFit.hasWinterOnlyFit) {
+    score = Math.min(score, 68);
+    risks.push("Winter/snow service fit; verify capacity and scope");
   }
 
   score = Math.max(0, Math.min(100, score));

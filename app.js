@@ -11,7 +11,7 @@ const supabaseClient =
     ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
     : null;
 
-const MISSING_DEADLINE_RISK = "Deadline not available in feed — verify on source page.";
+const MISSING_DEADLINE_RISK = "Deadline not available in imported data — verify on source page.";
 const EXTRACTED_PROJECT_DEADLINE_RISK = "No formal tender deadline extracted — verify source article.";
 
 const STORAGE_KEYS = {
@@ -2192,7 +2192,7 @@ function mapSupabaseOpportunity(row) {
     source: sourceName,
     sourceType: row.sources?.source_type || "",
     title: row.title || "",
-    description: row.description || "",
+    description: sanitizeOpportunityDescription(row.description || "", rawPayload, sourceName, row.title || ""),
     rawPayload
   });
   const intent = getOpportunityIntent({
@@ -2210,7 +2210,7 @@ function mapSupabaseOpportunity(row) {
     externalId: row.external_id || "",
     countryCode: row.country_code || "",
     title: row.title,
-    buyer: getCleanOpportunityBuyer(row.buyer, sourceName),
+    buyer: getCleanOpportunityBuyer(row.buyer, sourceName, rawPayload),
     source: sourceName || "Supabase",
     sourceType: row.sources?.source_type || "",
     category: row.category || "Other",
@@ -2219,7 +2219,7 @@ function mapSupabaseOpportunity(row) {
     deadline: row.deadline,
     publishedDate: row.published_date,
     createdAt: row.created_at,
-    location: row.location || "Unknown",
+    location: sanitizeOpportunityLocation(row.location || "Unknown", rawPayload, sourceName, row.title || "", row.description || ""),
     estimatedValue: row.estimated_value,
     currency: row.currency || "ISK",
     url: row.url || "",
@@ -2250,6 +2250,80 @@ function mapStoredMatch(row) {
     reviewedAt: row.reviewed_at || "",
     reviewNote: row.review_note || ""
   };
+}
+
+function sanitizeOpportunityDescription(description, rawPayload = {}, sourceName = "", title = "") {
+  const text = String(description || "").replace(/\s+/g, " ").trim();
+  const source = normalizeLocationText(sourceName);
+  if (!text) return "";
+
+  if (source.includes("rikiskaup") || source.includes("utbodsvefur")) {
+    const cleaned = extractUsefulUtbodsvefurDescription(text, rawPayload, title);
+    if (cleaned) return cleaned;
+    if (isGenericUtbodsvefurDescription(text) || isPollutedUtbodsvefurDescription(text)) {
+      return state.language === "is"
+        ? "Útboðstilkynning flutt inn af Útboðsvef. Opnið upprunasíðuna til að staðfesta kaupanda, skilafrest, kröfur og útboðsgögn."
+        : "Procurement notice imported from Útboðsvefur. Open the source page to confirm buyer, deadline, requirements and tender documents.";
+    }
+  }
+
+  return text;
+}
+
+function extractUsefulUtbodsvefurDescription(text, rawPayload = {}, title = "") {
+  const compact = String(text || "").replace(/\s+/g, " ").trim();
+  const starts = [
+    compact.search(/F\.h\.[^.]{0,280}ósk(?:að|ar) eftir tilboðum/i),
+    compact.search(/(?:Reykjavíkurborg|sveitarfélag|bærinn|kaupandi)[^.]{0,280}ósk(?:að|ar) eftir tilboðum/i),
+    compact.search(/óskar eftir tilboðum|óskað eftir tilboðum|oskar eftir tilbodum|oskad eftir tilbodum/i),
+    compact.search(/verkefnið felst|verkið felst|verkið felur|gatna-|gatnagerð|stígagerð/i),
+  ].filter((index) => index >= 0);
+  if (!starts.length) return "";
+  const start = Math.min(...starts);
+  const stop = compact.slice(start).search(/\s+(Nánari upplýsingar|Útboðsgögn afhent|Opnun tilboða|Opnun tilboda|Auglýsandi|Flokkar|Tengdar fréttir|Fjöldi útboð)\b/i);
+  const end = stop > 120 ? start + stop : start + 1200;
+  const parts = [compact.slice(start, end).trim()];
+  const deadlineText = rawPayload.extracted_deadline_text || rawPayload.deadline_text || "";
+  if (deadlineText && !parts[0].includes(String(deadlineText))) parts.push(`Skilafrestur: ${deadlineText}`);
+  const cleaned = uniqueStrings(parts)
+    .join(" ")
+    .replace(/^(Útboðsvefur\s*){1,}/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (isPollutedUtbodsvefurDescription(cleaned)) return "";
+  return cleaned || title;
+}
+
+function isGenericUtbodsvefurDescription(text) {
+  return /Procurement notice imported from Útboðsvefur|Open the source page for full buyer details/i.test(String(text || ""));
+}
+
+function isPollutedUtbodsvefurDescription(text) {
+  const compact = String(text || "");
+  const organizationSignals = [
+    "Framkvæmdasýslan",
+    "Ríkiseignir",
+    "Garðabær",
+    "Grímsnes",
+    "Fjöldi útboð",
+    "Útboðsvefur.is - Opinber útboð",
+  ].filter((term) => compact.includes(term)).length;
+  return organizationSignals >= 3 || /^Útboðsvefur\s+Útboðsvefur\.is/i.test(compact);
+}
+
+function sanitizeOpportunityLocation(location, rawPayload = {}, sourceName = "", title = "", description = "") {
+  const inferred = inferLocationFromOpportunityText(`${title} ${description} ${JSON.stringify(rawPayload || {})}`);
+  const current = String(location || "").trim();
+  if (inferred && (!current || /unknown|all iceland|iceland/i.test(current))) return inferred;
+  return current || inferred || "Unknown";
+}
+
+function inferLocationFromOpportunityText(text) {
+  const normalized = normalizeLocationText(text);
+  if (normalized.includes("vogabyggd") || normalized.includes("reykjavikurborg") || normalized.includes("strandstigur")) {
+    return "Reykjavík / Höfuðborgarsvæðið";
+  }
+  return "";
 }
 
 function isDashboardVisibleOpportunity(opp) {
@@ -4521,8 +4595,16 @@ const CIVIL_STRONG_SERVICE_TERMS = [
   "kantsteinn",
   "kantsteinar",
   "landmótun",
-  "snjómokstur",
   "gatnaframkvæmdir"
+];
+
+const CIVIL_OPTIONAL_WINTER_SERVICE_TERMS = [
+  "snjómokstur",
+  "snjóruðningur",
+  "hálkuvarnir",
+  "vetrarþjónusta",
+  "gangstéttir",
+  "stofnanalóðir"
 ];
 
 const CIVIL_WEAK_GENERIC_TERMS = [
@@ -4583,6 +4665,7 @@ function rankMatchTerm(value) {
   const normalized = normalizeMatchText(value);
   if (CIVIL_STRONG_SERVICE_TERMS.some((term) => normalized === normalizeMatchText(term))) return 0;
   if (CIVIL_STRONG_SERVICE_TERMS.some((term) => normalized.includes(normalizeMatchText(term)) || normalizeMatchText(term).includes(normalized))) return 1;
+  if (CIVIL_OPTIONAL_WINTER_SERVICE_TERMS.some((term) => normalized === normalizeMatchText(term))) return 2;
   if (isCivilWeakGenericTerm(value)) return 10;
   return 3;
 }
@@ -4594,6 +4677,11 @@ function sortMatchTermsBySpecificity(values) {
 function getStrongCivilTermsInText(text) {
   const normalizedText = normalizeMatchText(text);
   return CIVIL_STRONG_SERVICE_TERMS.filter((term) => normalizedText.includes(normalizeMatchText(term)));
+}
+
+function getOptionalWinterTermsInText(text) {
+  const normalizedText = normalizeMatchText(text);
+  return CIVIL_OPTIONAL_WINTER_SERVICE_TERMS.filter((term) => normalizedText.includes(normalizeMatchText(term)));
 }
 
 function promoteWeakGenericHitsToSpecificCivilTerms(hits, opportunityTextValue) {
@@ -4611,12 +4699,21 @@ function isCivilContractorProfile(profile = {}) {
   ].filter(Boolean).join(" ");
   return normalizedContainsAny(profileText, [
     ...CIVIL_STRONG_SERVICE_TERMS,
+    ...CIVIL_OPTIONAL_WINTER_SERVICE_TERMS,
     "construction",
     "contractor",
     "verktaki",
     "mannvirki",
     "jarðtækni"
   ]);
+}
+
+function hasExplicitWinterService(profile = {}) {
+  const profileText = [
+    ...(Array.isArray(profile.services) ? profile.services : []),
+    ...(Array.isArray(profile.includeKeywords) ? profile.includeKeywords : [])
+  ].filter(Boolean).join(" ");
+  return normalizedContainsAny(profileText, CIVIL_OPTIONAL_WINTER_SERVICE_TERMS);
 }
 
 function hasExplicitIndoorService(profile = {}) {
@@ -4641,15 +4738,19 @@ function getCivilContractorFit(profile, opp, serviceHits, keywordHits) {
 
   const text = opportunityText(opp);
   const hasStrongCivilTerm = normalizedContainsAny(text, CIVIL_STRONG_SERVICE_TERMS);
+  const hasWinterTerm = normalizedContainsAny(text, CIVIL_OPTIONAL_WINTER_SERVICE_TERMS);
+  const allowsWinterWork = hasExplicitWinterService(profile);
+  const hasEligibleWinterTerm = hasWinterTerm && allowsWinterWork;
   const hasIndoorTerm = normalizedContainsAny(text, CIVIL_INDOOR_DOWNGRADE_TERMS);
   const allowsIndoorWork = hasExplicitIndoorService(profile);
   const detectedStrongTerms = getStrongCivilTermsInText(text);
+  const detectedWinterTerms = hasEligibleWinterTerm ? getOptionalWinterTermsInText(text) : [];
   const serviceHitsAreWeakOnly = serviceHits.length > 0 && serviceHits.every(isCivilWeakGenericTerm);
   const keywordHitsAreWeakOnly = keywordHits.length > 0 && keywordHits.every(isCivilWeakGenericTerm);
   const hasAnySpecificHit = [...serviceHits, ...keywordHits].some((hit) => !isCivilWeakGenericTerm(hit));
-  const expandedServiceHits = hasStrongCivilTerm ? [...new Set([...serviceHits, ...detectedStrongTerms])] : serviceHits;
+  const expandedServiceHits = (hasStrongCivilTerm || hasEligibleWinterTerm) ? [...new Set([...serviceHits, ...detectedStrongTerms, ...detectedWinterTerms])] : serviceHits;
 
-  const shouldScoreWeakTerms = hasStrongCivilTerm || hasAnySpecificHit;
+  const shouldScoreWeakTerms = hasStrongCivilTerm || hasEligibleWinterTerm || hasAnySpecificHit;
   const filteredServiceHits = shouldScoreWeakTerms
     ? promoteWeakGenericHitsToSpecificCivilTerms(expandedServiceHits, text)
     : expandedServiceHits.filter((service) => !isCivilWeakGenericTerm(service));
@@ -4661,8 +4762,9 @@ function getCivilContractorFit(profile, opp, serviceHits, keywordHits) {
     isCivilProfile: true,
     serviceHits: sortMatchTermsBySpecificity(filteredServiceHits),
     keywordHits: sortMatchTermsBySpecificity(filteredKeywordHits),
-    hasWeakOnlyFit: !hasStrongCivilTerm && !hasAnySpecificHit && (serviceHitsAreWeakOnly || keywordHitsAreWeakOnly),
-    hasIndoorMismatch: hasIndoorTerm && !hasStrongCivilTerm && !allowsIndoorWork
+    hasWeakOnlyFit: !hasStrongCivilTerm && !hasEligibleWinterTerm && !hasAnySpecificHit && (serviceHitsAreWeakOnly || keywordHitsAreWeakOnly),
+    hasIndoorMismatch: hasIndoorTerm && !hasStrongCivilTerm && !allowsIndoorWork,
+    hasWinterOnlyFit: hasEligibleWinterTerm && !hasStrongCivilTerm
   };
 }
 
@@ -4889,6 +4991,11 @@ function calculateMatch(profile, opp) {
   if (civilFit.hasIndoorMismatch) {
     score = Math.min(score - 20, 40);
     risks.push("Appears to be indoor/building finishing work outside your core civil services");
+  }
+
+  if (civilFit.hasWinterOnlyFit) {
+    score = Math.min(score, 68);
+    risks.push("Winter/snow service fit; verify capacity and scope");
   }
 
   score = Math.max(0, Math.min(100, Math.round(score)));
@@ -5277,7 +5384,7 @@ function daysUntilDeadline(dateString) {
 function getDeadlineDisplay(value) {
   if (!value) {
     return {
-      label: MISSING_DEADLINE_RISK,
+      label: formatReportRisk(MISSING_DEADLINE_RISK),
       className: "deadline danger"
     };
   }
@@ -5285,19 +5392,19 @@ function getDeadlineDisplay(value) {
   const days = daysUntilDeadline(value);
   if (days === 999) {
     return {
-      label: MISSING_DEADLINE_RISK,
+      label: formatReportRisk(MISSING_DEADLINE_RISK),
       className: "deadline danger"
     };
   }
 
   return {
-    label: `${days} days left`,
+    label: t("daysLeft", { count: days }),
     className: days <= 14 ? "deadline danger" : "deadline"
   };
 }
 
 function formatOpportunityDeadline(value) {
-  return value ? formatShortDate(value) : MISSING_DEADLINE_RISK;
+  return value ? formatShortDate(value) : formatReportRisk(MISSING_DEADLINE_RISK);
 }
 
 function formatOpportunityDeadlineForReport(opp) {
@@ -7882,7 +7989,7 @@ function renderOpportunityModal(opp) {
 
               <h3>${escapeHtml(t("recommendedNextSteps"))}</h3>
               <ol class="steps-list">
-                ${(nextSteps.length ? nextSteps : [t("openSourceAndConfirm")]).map((s) => `<li>${escapeHtml(s)}</li>`).join("")}
+                ${(nextSteps.length ? nextSteps : [t("openSourceAndConfirm")]).map((s) => `<li>${escapeHtml(formatNextStep(s))}</li>`).join("")}
               </ol>
 
               <div class="button-stack">
@@ -8019,6 +8126,7 @@ function renderAdminReviewQueue() {
                 <th>Opportunity</th>
                 <th>Company</th>
                 <th>Source</th>
+                <th>Buyer</th>
                 <th>Deadline</th>
                 <th>Score</th>
                 <th>Safety</th>
@@ -8041,14 +8149,20 @@ function renderAdminReviewRow(item) {
   const opp = item.opportunity || {};
   const busy = state.adminReviewActions?.[item.id] || "";
   const deadline = getOpportunityDeadlineDisplay(opp);
+  const sourceUrl = getSafeExternalUrl(opp.url);
   return `
     <tr>
       <td>
         <strong>${escapeHtml(opp.title || "Untitled opportunity")}</strong>
-        <p>${escapeHtml(formatOpportunityBuyer(opp))} · ${escapeHtml(formatOpportunityLocation(opp))}</p>
+        <p>${escapeHtml(formatOpportunityLocation(opp))}</p>
+        ${sourceUrl ? `<a class="btn btn-ghost btn-small" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener">${escapeHtml(t("openSource"))} ↗</a>` : `<span class="admin-chip">${escapeHtml(state.language === "is" ? "Heimildartengil vantar" : "No source URL")}</span>`}
       </td>
       <td>${escapeHtml(item.companyName)}</td>
-      <td>${escapeHtml(opp.source || "Unknown source")}</td>
+      <td>
+        <strong>${escapeHtml(opp.source || "Unknown source")}</strong>
+        ${sourceUrl ? `<p class="admin-source-url">${escapeHtml(sourceUrl)}</p>` : ""}
+      </td>
+      <td>${escapeHtml(formatOpportunityBuyer(opp))}</td>
       <td>${escapeHtml(deadline.label || "Not found")}</td>
       <td>${escapeHtml(formatReportMatchLabel(item.matchLabel))} · ${Number(item.matchScore || 0)}</td>
       <td>
@@ -8377,16 +8491,62 @@ function renderAdminOpportunityMatchDebug(opp) {
   const excludedReasons = getAdminOpportunityExclusionReasons(opp, match);
   const serviceText = cleanStringArray(company.services).join(", ") || "No services";
   const keywordText = cleanStringArray(company.includeKeywords).join(", ") || "No include keywords";
+  const matchedTerms = getAdminDebugMatchedTerms(company, opp);
+  const missingTerms = getAdminDebugMissingTerms(company, opp);
+  const scoreContributions = getAdminDebugScoreContributions(company, opp, match);
+  const safety = classifyMatchSafety(company, match);
   return `
     <div class="admin-debug-panel">
       <p><strong>Match debug for ${escapeHtml(company.companyName)}:</strong> score ${Number(match.matchScore || 0)} · ${escapeHtml(formatReportMatchLabel(match.matchLabel))}</p>
       <p><strong>Services:</strong> ${escapeHtml(serviceText)}</p>
       <p><strong>Keywords:</strong> ${escapeHtml(keywordText)}</p>
+      <p><strong>Matched terms:</strong> ${matchedTerms.length ? matchedTerms.map((term) => `<span class="admin-chip">${escapeHtml(term)}</span>`).join(" ") : "None"}</p>
+      <p><strong>Missing profile terms:</strong> ${missingTerms.length ? missingTerms.map((term) => `<span class="admin-chip">${escapeHtml(term)}</span>`).join(" ") : "None"}</p>
+      <p><strong>Score contribution:</strong> ${scoreContributions.map((item) => `<span class="admin-chip">${escapeHtml(item)}</span>`).join(" ")}</p>
       <p><strong>Matched terms/reasons:</strong> ${(match.matchReasons || []).map((reason) => `<span class="admin-chip">${escapeHtml(formatReportReason(reason))}</span>`).join(" ") || "None"}</p>
       <p><strong>Risks:</strong> ${(match.risks || []).map((risk) => `<span class="admin-chip">${escapeHtml(formatReportRisk(risk))}</span>`).join(" ") || "None"}</p>
+      <p><strong>Safety:</strong> <span class="admin-chip">${escapeHtml(formatSafetyStatus(safety.safetyStatus))}</span> <span class="admin-chip">${escapeHtml(formatAlertEligible(safety.alertEligible))}</span> ${(safety.safetyReasons || []).map((reason) => `<span class="admin-chip">${escapeHtml(formatSafetyReason(reason))}</span>`).join(" ")}</p>
       <p><strong>Excluded by:</strong> ${excludedReasons.length ? excludedReasons.map((reason) => `<span class="admin-chip">${escapeHtml(reason)}</span>`).join(" ") : "<span class=\"admin-chip\">Not excluded by local dashboard/report filters</span>"}</p>
     </div>
   `;
+}
+
+function getAdminDebugMatchedTerms(company, opp) {
+  const text = opportunityText(opp);
+  return sortMatchTermsBySpecificity(uniqueStrings([
+    ...cleanStringArray(company.services).filter((term) => textIncludes(text, term)),
+    ...cleanStringArray(company.includeKeywords).filter((term) => textIncludes(text, term)),
+    ...getStrongCivilTermsInText(text),
+    ...(hasExplicitWinterService(company) ? getOptionalWinterTermsInText(text) : []),
+  ]));
+}
+
+function getAdminDebugMissingTerms(company, opp) {
+  const text = opportunityText(opp);
+  return sortMatchTermsBySpecificity(uniqueStrings([
+    ...cleanStringArray(company.services),
+    ...cleanStringArray(company.includeKeywords),
+  ].filter((term) => term && !textIncludes(text, term)))).slice(0, 12);
+}
+
+function getAdminDebugScoreContributions(company, opp, match) {
+  const items = [];
+  const serviceCount = (match.matchReasons || []).filter((reason) => /^Mentions your service:/i.test(reason)).length;
+  const keywordCount = (match.matchReasons || []).filter((reason) => /^Contains your keyword:/i.test(reason)).length;
+  if (categoryMatches(company, opp)) items.push("+35 industry/category");
+  if (serviceCount) items.push(`+${Math.min(35, serviceCount * 10)} services`);
+  if (keywordCount) items.push(`+${Math.min(25, keywordCount * 8)} keywords`);
+  const locationCategory = getLocationMatchCategory(company, opp);
+  if (locationCategory === "local_match") items.push("+22 local");
+  else if (locationCategory === "national_match") items.push("+16 national");
+  else if (locationCategory === "remote_match") items.push("+14 remote");
+  else if (locationCategory === "outside_area_possible") items.push("+4 travel possible");
+  else items.push("-8 low-confidence location");
+  if (opp.deadline && daysUntilDeadline(opp.deadline) >= 0 && daysUntilDeadline(opp.deadline) <= 30) items.push("+8 closing soon");
+  if ((match.risks || []).some((risk) => /broad construction/i.test(risk))) items.push("capped broad fit");
+  if ((match.risks || []).some((risk) => /winter|snow/i.test(risk))) items.push("capped winter fit");
+  if ((match.risks || []).some((risk) => /indoor|finishing/i.test(risk))) items.push("downgraded indoor mismatch");
+  return items.length ? items : ["No positive score contribution"];
 }
 
 function getAdminOpportunityExclusionReasons(opp, match) {
@@ -8395,6 +8555,8 @@ function getAdminOpportunityExclusionReasons(opp, match) {
   if (!isCustomerMatchEligibleOpportunity(opp)) reasons.push("customer_match_ineligible");
   if (!isDashboardVisibleOpportunity(opp)) reasons.push("dashboard_not_visible");
   if (getSafetyStatus(opp) === "hidden") reasons.push("safety_status_hidden");
+  if (isNeedsReviewWrongTypeForProfile(state.adminCompanies?.find((item) => item.id === state.adminOpportunityFilters?.debugCompanyId) || {}, opp)) reasons.push("needs_review_wrong_type_for_company");
+  if (isDesignConsultingOnlyForProfile(state.adminCompanies?.find((item) => item.id === state.adminOpportunityFilters?.debugCompanyId) || {}, opp)) reasons.push("design_consulting_or_supervision_only");
   if (opp.rawPayload?.hidden_from_reports === true) reasons.push("hidden_from_reports");
   if (isSecondaryDuplicateOpportunity(opp)) reasons.push("duplicate_secondary");
   if (isStaleCustomerOpportunity(opp)) reasons.push("stale_or_expired");
@@ -8543,7 +8705,7 @@ function renderSavedReportPreview(savedReport, profile, options = {}) {
     : normalizeSavedReportHtml(savedReport);
   const textContent = detailedMatches.length
     ? generateSavedReportText(savedReport, companyName, detailedMatches)
-    : savedReport.text_content || "";
+    : localizeLegacyReportText(savedReport.text_content || "");
   return renderReportPreview({
     title: getCustomerReportTitle(savedReport, companyName),
     periodStart,
@@ -8560,13 +8722,13 @@ function renderSavedReportPreview(savedReport, profile, options = {}) {
 
 function normalizeSavedReportHtml(savedReport) {
   if (savedReport.html_content && savedReport.html_content.includes("report-cover")) {
-    return sanitizeReportHtml(savedReport.html_content);
+    return localizeLegacyReportHtml(sanitizeReportHtml(savedReport.html_content));
   }
 
   const periodStart = savedReport.period_start || savedReport.created_at?.slice(0, 10) || new Date().toISOString().slice(0, 10);
   const periodEnd = savedReport.period_end || savedReport.created_at?.slice(0, 10) || new Date().toISOString().slice(0, 10);
   const fallbackContent = savedReport.html_content
-    ? sanitizeReportHtml(savedReport.html_content)
+    ? localizeLegacyReportHtml(sanitizeReportHtml(savedReport.html_content))
     : `<pre>${escapeHtml(savedReport.text_content || "Ekkert efni var vistað fyrir þetta yfirlit.")}</pre>`;
   return `
     <div class="report-cover">
@@ -8580,6 +8742,64 @@ function normalizeSavedReportHtml(savedReport) {
       ${fallbackContent}
     </div>
   `;
+}
+
+function localizeLegacyReportHtml(html) {
+  if (state.language !== "is") return html;
+  return String(html || "")
+    .replaceAll("Tender and opportunity report", "Útboðs- og verkefnayfirlit")
+    .replaceAll("Weekly Opportunity Report", "Útboðs- og verkefnayfirlit")
+    .replaceAll("Open tenders / quote requests", "Opin útboð / verðfyrirspurnir")
+    .replaceAll("Possible upcoming opportunities", "Möguleg væntanleg tækifæri")
+    .replaceAll("Needs review", "Þarfnast staðfestingar")
+    .replaceAll("Strong match", "Sterk samsvörun")
+    .replaceAll("Good match", "Góð samsvörun")
+    .replaceAll("Possible match", "Möguleg samsvörun")
+    .replaceAll("Weak match", "Veik samsvörun")
+    .replaceAll("Quality", "Gæði")
+    .replaceAll("Buyer", "Kaupandi")
+    .replaceAll("Source", "Heimild")
+    .replaceAll("Location", "Svæði")
+    .replaceAll("Deadline", "Skilafrestur")
+    .replaceAll("Estimated value", "Áætlað verðmæti")
+    .replaceAll("Value", "Áætlað verðmæti")
+    .replaceAll("Why this matters", "Af hverju þetta gæti skipt máli")
+    .replaceAll("Why this fits", "Af hverju þetta gæti skipt máli")
+    .replaceAll("Risks / things to check", "Atriði til að staðfesta")
+    .replaceAll("Open source", "Opna heimild")
+    .replaceAll("Unknown buyer", "Óþekktur kaupandi")
+    .replaceAll("All Iceland", "Allt landið")
+    .replaceAll("Not found", "Fannst ekki")
+    .replaceAll("Not listed", "Ekki gefið upp");
+}
+
+function localizeLegacyReportText(text) {
+  if (state.language !== "is") return text;
+  return String(text || "")
+    .replaceAll("Tender and opportunity report", "Útboðs- og verkefnayfirlit")
+    .replaceAll("Weekly Opportunity Report", "Útboðs- og verkefnayfirlit")
+    .replaceAll("Open tenders / quote requests", "Opin útboð / verðfyrirspurnir")
+    .replaceAll("Possible upcoming opportunities", "Möguleg væntanleg tækifæri")
+    .replaceAll("Needs review", "Þarfnast staðfestingar")
+    .replaceAll("Strong match", "Sterk samsvörun")
+    .replaceAll("Good match", "Góð samsvörun")
+    .replaceAll("Possible match", "Möguleg samsvörun")
+    .replaceAll("Weak match", "Veik samsvörun")
+    .replaceAll("Quality", "Gæði")
+    .replaceAll("Buyer", "Kaupandi")
+    .replaceAll("Source", "Heimild")
+    .replaceAll("Location", "Svæði")
+    .replaceAll("Deadline", "Skilafrestur")
+    .replaceAll("Estimated value", "Áætlað verðmæti")
+    .replaceAll("Value", "Áætlað verðmæti")
+    .replaceAll("Why this matters", "Af hverju þetta gæti skipt máli")
+    .replaceAll("Why this fits", "Af hverju þetta gæti skipt máli")
+    .replaceAll("Risks / things to check", "Atriði til að staðfesta")
+    .replaceAll("Open source", "Opna heimild")
+    .replaceAll("Unknown buyer", "Óþekktur kaupandi")
+    .replaceAll("All Iceland", "Allt landið")
+    .replaceAll("Not found", "Fannst ekki")
+    .replaceAll("Not listed", "Ekki gefið upp");
 }
 
 function getCustomerReportTitle(report, companyName) {
@@ -8828,6 +9048,7 @@ function isStrictCustomerReportEligible(opp) {
   if (isCustomerReportExcludedIntent(opp)) return false;
   if (isAlreadyAwardedOrTenderedReportItem(opp)) return false;
   if (isDesignConsultingOnlyForCurrentProfile(opp)) return false;
+  if (isNeedsReviewWrongTypeForCurrentProfile(opp)) return false;
   if (containsTitleNewsIntent(opp.title || "") && !hasOpenTenderOrQuoteIntent(opp)) return false;
 
   const intent = getOpportunityIntent(opp);
@@ -8954,6 +9175,22 @@ function isDesignConsultingOnlyForCurrentProfile(opp) {
   return isDesignConsultingOnlyForProfile(state.profile || {}, opp);
 }
 
+function isNeedsReviewWrongTypeForCurrentProfile(opp) {
+  return isNeedsReviewWrongTypeForProfile(state.profile || {}, opp);
+}
+
+function isNeedsReviewWrongTypeForProfile(profile, opp) {
+  if (getSafetyStatus(opp) !== "needs_review") return false;
+  const reasonText = [
+    ...(Array.isArray(opp?.safetyReasons) ? opp.safetyReasons : []),
+    ...(Array.isArray(opp?.risks) ? opp.risks : []),
+    ...(Array.isArray(opp?.rawPayload?.safety_reasons) ? opp.rawPayload.safety_reasons : []),
+    ...(Array.isArray(opp?.rawPayload?.risks) ? opp.rawPayload.risks : []),
+  ].filter(Boolean).join(" ");
+  if (!containsReviewOnlyTerms(reasonText)) return false;
+  return !profileExplicitlyAllowsReviewOnlyWork(profile);
+}
+
 function isDesignConsultingOnlyForProfile(profile, opp) {
   const text = getOpportunityQualityText(opp);
   const hasDesignOnlyTerm = containsAnyNormalizedPhrase(text, [
@@ -8967,36 +9204,54 @@ function isDesignConsultingOnlyForProfile(profile, opp) {
     "verkfraediradgjof",
     "ráðgjöf",
     "radgjof",
+    "umsjón",
+    "umsjon",
+    "verkefnastjórn",
+    "verkefnastjorn",
     "útboðsgögn hönnun",
     "utbodsgogn honnun",
   ]);
   const hasGeneralDesignTerm = containsAnyNormalizedPhrase(text, ["hönnun", "honnun"]);
   const hasPhysicalWorkTerm = containsAnyNormalizedPhrase(text, [
-    "framkvæmdir",
-    "framkvaemdir",
     "lóðarframkvæmdir",
     "lodarframkvaemdir",
     "gatnagerð",
     "gatnagerd",
+    "stígagerð",
+    "stigagerd",
     "lagnir",
+    "regnvatnslagnir",
     "jarðvinna",
     "jardvinna",
+    "jarðvegsskipti",
+    "jardvegsskipti",
+    "fyllingar",
+    "grjóthleðsla",
+    "grjothledsla",
     "malbikun",
-    "bygging",
-    "viðhald",
-    "vidhald",
-    "endurbætur",
-    "endurbaetur",
+    "hellulögn",
+    "hellulogn",
+    "kantsteinar",
+    "landmótun",
+    "landmotun",
+    "yfirborðsfrágangur",
+    "yfirbordsfragangur",
+    "bílastæði",
+    "bilastaedi",
   ]);
-  const supervisionOnly = containsAnyNormalizedPhrase(text, ["eftirlit"]) && !hasPhysicalWorkTerm;
+  const supervisionOnly = containsAnyNormalizedPhrase(text, ["eftirlit", "umsjón", "umsjon", "verkefnastjórn", "verkefnastjorn"]) && !hasPhysicalWorkTerm;
 
   if (!hasDesignOnlyTerm && !(hasGeneralDesignTerm && !hasPhysicalWorkTerm) && !supervisionOnly) return false;
 
-  const profileServiceText = normalizeLocationText([
+  return !profileExplicitlyAllowsReviewOnlyWork(profile);
+}
+
+function profileExplicitlyAllowsReviewOnlyWork(profile = {}) {
+  return containsAnyNormalizedPhrase([
     profile.industry,
     ...(Array.isArray(profile.services) ? profile.services : []),
-  ].filter(Boolean).join(" "));
-  return !containsAnyNormalizedPhrase(profileServiceText, [
+    ...(Array.isArray(profile.includeKeywords) ? profile.includeKeywords : []),
+  ].filter(Boolean).join(" "), [
     "hönnun",
     "honnun",
     "ráðgjöf",
@@ -9015,6 +9270,27 @@ function isDesignConsultingOnlyForProfile(profile, opp) {
     "consulting",
     "project management",
     "supervision",
+  ]);
+}
+
+function containsReviewOnlyTerms(text) {
+  return containsAnyNormalizedPhrase(String(text || ""), [
+    "hönnun",
+    "honnun",
+    "ráðgjöf",
+    "radgjof",
+    "verkfræðiráðgjöf",
+    "verkfraediradgjof",
+    "eftirlit",
+    "umsjón",
+    "umsjon",
+    "verkefnastjórn",
+    "verkefnastjorn",
+    "design",
+    "consulting",
+    "supervision",
+    "inspection",
+    "project management",
   ]);
 }
 
@@ -9258,15 +9534,19 @@ function inferBuyerFromSourceName(sourceName) {
   return "";
 }
 
-function getCleanOpportunityBuyer(buyer, sourceName) {
+function getCleanOpportunityBuyer(buyer, sourceName, rawPayload = {}) {
   const text = String(buyer || "").trim();
+  if (/reykjavíkurborg/i.test(text)) return "Reykjavíkurborg";
   if (text && !isInvalidBuyerName(text) && text.toLowerCase() !== "unknown buyer") return text;
+  const payloadBuyer = String(rawPayload.extracted_buyer || rawPayload.buyer || "").trim();
+  if (/reykjavíkurborg/i.test(payloadBuyer)) return "Reykjavíkurborg";
+  if (payloadBuyer && !isInvalidBuyerName(payloadBuyer) && payloadBuyer.toLowerCase() !== "unknown buyer") return payloadBuyer;
   return inferBuyerFromSourceName(sourceName) || "Unknown buyer";
 }
 
 function formatOpportunityBuyer(opp) {
   const sourceName = opp?.source || opp?.rawPayload?.source_name || "";
-  return formatReportMetadataValue("buyer", getCleanOpportunityBuyer(opp?.buyer, sourceName));
+  return formatReportMetadataValue("buyer", getCleanOpportunityBuyer(opp?.buyer, sourceName, opp?.rawPayload || {}));
 }
 
 function formatOpportunityLocation(opp) {
@@ -9342,7 +9622,8 @@ function formatReportReason(reason) {
 function formatReportRisk(risk) {
   if (state.language !== "is") return risk || "";
   const map = {
-    "Deadline not available in feed — verify on source page.": "Skilafrestur fannst ekki í gögnunum — staðfestið á upprunasíðu.",
+    "Deadline not available in feed — verify on source page.": "Skilafrestur fannst ekki í innfluttum gögnum — staðfestið á upprunasíðu.",
+    "Deadline not available in imported data — verify on source page.": "Skilafrestur fannst ekki í innfluttum gögnum — staðfestið á upprunasíðu.",
     "Deadline not available in source — verify page.": "Skilafrestur fannst ekki í heimild - staðfestið á upprunalegri síðu.",
     "No formal tender deadline extracted — verify source article.": "Formlegur skilafrestur fannst ekki - staðfestið í heimildargrein.",
     "Formal tender deadline not found yet — monitor source article.": "Formlegur skilafrestur fannst ekki enn - fylgist með heimildargrein.",
@@ -9353,6 +9634,18 @@ function formatReportRisk(risk) {
     "Imported from broad feed — verify that this is a real tender or business opportunity.": "Innflutt úr breiðum fréttastraumi - staðfestið að þetta sé raunverulegt útboð eða viðskiptatækifæri."
   };
   return map[risk] || risk || "";
+}
+
+function formatNextStep(step) {
+  if (state.language !== "is") return step || "";
+  const map = {
+    "Open the source documents": "Opna útboðsgögn",
+    "Confirm mandatory requirements": "Staðfesta kröfur og hæfisskilyrði",
+    "Check capacity and profitability": "Meta getu og arðsemi",
+    "Prepare questions before the deadline": "Undirbúa fyrirspurnir fyrir skilafrest",
+    "Open source documents and confirm requirements.": "Opna útboðsgögn og staðfesta kröfur.",
+  };
+  return map[step] || step || "";
 }
 
 function getReportRisks(opp) {

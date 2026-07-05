@@ -453,8 +453,16 @@ const CIVIL_STRONG_SERVICE_TERMS = [
   "kantsteinn",
   "kantsteinar",
   "landmótun",
-  "snjómokstur",
   "gatnaframkvæmdir",
+];
+
+const CIVIL_OPTIONAL_WINTER_SERVICE_TERMS = [
+  "snjómokstur",
+  "snjóruðningur",
+  "hálkuvarnir",
+  "vetrarþjónusta",
+  "gangstéttir",
+  "stofnanalóðir",
 ];
 
 const CIVIL_WEAK_GENERIC_TERMS = [
@@ -511,6 +519,7 @@ function rankMatchTerm(value: string) {
   const normalized = normalizeText(value);
   if (CIVIL_STRONG_SERVICE_TERMS.some((term) => normalized === normalizeText(term))) return 0;
   if (CIVIL_STRONG_SERVICE_TERMS.some((term) => normalized.includes(normalizeText(term)) || normalizeText(term).includes(normalized))) return 1;
+  if (CIVIL_OPTIONAL_WINTER_SERVICE_TERMS.some((term) => normalized === normalizeText(term))) return 2;
   if (isCivilWeakGenericTerm(value)) return 10;
   return 3;
 }
@@ -522,6 +531,11 @@ function sortMatchTermsBySpecificity(values: string[]) {
 function getStrongCivilTermsInText(text: string) {
   const normalizedText = normalizeText(text);
   return CIVIL_STRONG_SERVICE_TERMS.filter((term) => normalizedText.includes(normalizeText(term)));
+}
+
+function getOptionalWinterTermsInText(text: string) {
+  const normalizedText = normalizeText(text);
+  return CIVIL_OPTIONAL_WINTER_SERVICE_TERMS.filter((term) => normalizedText.includes(normalizeText(term)));
 }
 
 function promoteWeakGenericHitsToSpecificCivilTerms(hits: string[], opportunityTextValue: string) {
@@ -539,12 +553,21 @@ function isCivilContractorProfile(profile: CompanyProfile) {
   ].filter(Boolean).join(" ");
   return normalizedIncludesAny(profileText, [
     ...CIVIL_STRONG_SERVICE_TERMS,
+    ...CIVIL_OPTIONAL_WINTER_SERVICE_TERMS,
     "construction",
     "contractor",
     "verktaki",
     "mannvirki",
     "jarðtækni",
   ]);
+}
+
+function hasExplicitWinterService(profile: CompanyProfile) {
+  const profileText = [
+    ...(Array.isArray(profile.services) ? profile.services : []),
+    ...(Array.isArray(profile.includeKeywords) ? profile.includeKeywords : []),
+  ].filter(Boolean).join(" ");
+  return normalizedIncludesAny(profileText, CIVIL_OPTIONAL_WINTER_SERVICE_TERMS);
 }
 
 function hasExplicitIndoorService(profile: CompanyProfile) {
@@ -572,20 +595,25 @@ function getCivilContractorFit(
 
   const opportunityTextValue = opportunityText(opportunity);
   const hasStrongCivilTerm = normalizedIncludesAny(opportunityTextValue, CIVIL_STRONG_SERVICE_TERMS);
+  const hasWinterTerm = normalizedIncludesAny(opportunityTextValue, CIVIL_OPTIONAL_WINTER_SERVICE_TERMS);
+  const allowsWinterWork = hasExplicitWinterService(profile);
+  const hasEligibleWinterTerm = hasWinterTerm && allowsWinterWork;
   const hasIndoorTerm = normalizedIncludesAny(opportunityTextValue, CIVIL_INDOOR_DOWNGRADE_TERMS);
   const allowsIndoorWork = hasExplicitIndoorService(profile);
   const detectedStrongTerms = getStrongCivilTermsInText(opportunityTextValue);
+  const detectedWinterTerms = hasEligibleWinterTerm ? getOptionalWinterTermsInText(opportunityTextValue) : [];
   const serviceHitsAreWeakOnly = serviceHits.length > 0 && serviceHits.every(isCivilWeakGenericTerm);
   const keywordHitsAreWeakOnly = keywordHits.length > 0 && keywordHits.every(isCivilWeakGenericTerm);
   const hasAnySpecificHit = [...serviceHits, ...keywordHits].some((hit) => !isCivilWeakGenericTerm(hit));
-  const expandedServiceHits = hasStrongCivilTerm ? Array.from(new Set([...serviceHits, ...detectedStrongTerms])) : serviceHits;
-  const shouldScoreWeakTerms = hasStrongCivilTerm || hasAnySpecificHit;
+  const expandedServiceHits = (hasStrongCivilTerm || hasEligibleWinterTerm) ? Array.from(new Set([...serviceHits, ...detectedStrongTerms, ...detectedWinterTerms])) : serviceHits;
+  const shouldScoreWeakTerms = hasStrongCivilTerm || hasEligibleWinterTerm || hasAnySpecificHit;
 
   return {
     serviceHits: sortMatchTermsBySpecificity(shouldScoreWeakTerms ? promoteWeakGenericHitsToSpecificCivilTerms(expandedServiceHits, opportunityTextValue) : expandedServiceHits.filter((service) => !isCivilWeakGenericTerm(service))),
     keywordHits: sortMatchTermsBySpecificity(shouldScoreWeakTerms ? promoteWeakGenericHitsToSpecificCivilTerms(keywordHits, opportunityTextValue) : keywordHits.filter((keyword) => !isCivilWeakGenericTerm(keyword))),
-    hasWeakOnlyFit: !hasStrongCivilTerm && !hasAnySpecificHit && (serviceHitsAreWeakOnly || keywordHitsAreWeakOnly),
+    hasWeakOnlyFit: !hasStrongCivilTerm && !hasEligibleWinterTerm && !hasAnySpecificHit && (serviceHitsAreWeakOnly || keywordHitsAreWeakOnly),
     hasIndoorMismatch: hasIndoorTerm && !hasStrongCivilTerm && !allowsIndoorWork,
+    hasWinterOnlyFit: hasEligibleWinterTerm && !hasStrongCivilTerm,
   };
 }
 
@@ -673,6 +701,11 @@ function calculateMatch(profile: CompanyProfile, opportunity: Record<string, unk
   if (civilFit.hasIndoorMismatch) {
     score = Math.min(score - 20, 40);
     risks.push("Appears to be indoor/building finishing work outside your core civil services");
+  }
+
+  if (civilFit.hasWinterOnlyFit) {
+    score = Math.min(score, 68);
+    risks.push("Winter/snow service fit; verify capacity and scope");
   }
 
   score = Math.max(0, Math.min(100, Math.round(score)));
@@ -935,6 +968,7 @@ function isStrictCustomerReportEligible(company: CompanyProfile, opportunity: Re
   if (!isCustomerMatchEligibleOpportunity(opportunity)) return false;
   if (isAlreadyAwardedOrTenderedReportItem(opportunity)) return false;
   if (isDesignConsultingOnlyForProfile(company, opportunity)) return false;
+  if (isNeedsReviewWrongTypeForProfile(company, opportunity)) return false;
   if (containsTitleNewsIntent(String(opportunity.title || "")) && !hasOpenTenderOrQuoteIntent(opportunity)) return false;
   const intent = getOpportunityIntent(opportunity);
   if (intent === "confirmed_tender") return hasOpenTenderOrQuoteIntent(opportunity) || isProcurementSource(opportunity);
@@ -958,28 +992,42 @@ function isDesignConsultingOnlyForProfile(company: CompanyProfile, opportunity: 
     "verkfraediradgjof",
     "ráðgjöf",
     "radgjof",
+    "umsjón",
+    "umsjon",
+    "verkefnastjórn",
+    "verkefnastjorn",
     "útboðsgögn hönnun",
     "utbodsgogn honnun",
   ]);
   const hasGeneralDesignTerm = containsAnyNormalizedPhrase(text, ["hönnun", "honnun"]);
   const hasPhysicalWorkTerm = containsAnyNormalizedPhrase(text, [
-    "framkvæmdir",
-    "framkvaemdir",
     "lóðarframkvæmdir",
     "lodarframkvaemdir",
     "gatnagerð",
     "gatnagerd",
+    "stígagerð",
+    "stigagerd",
     "lagnir",
+    "regnvatnslagnir",
     "jarðvinna",
     "jardvinna",
+    "jarðvegsskipti",
+    "jardvegsskipti",
+    "fyllingar",
+    "grjóthleðsla",
+    "grjothledsla",
     "malbikun",
-    "bygging",
-    "viðhald",
-    "vidhald",
-    "endurbætur",
-    "endurbaetur",
+    "hellulögn",
+    "hellulogn",
+    "kantsteinar",
+    "landmótun",
+    "landmotun",
+    "yfirborðsfrágangur",
+    "yfirbordsfragangur",
+    "bílastæði",
+    "bilastaedi",
   ]);
-  const supervisionOnly = containsAnyNormalizedPhrase(text, ["eftirlit"]) && !hasPhysicalWorkTerm;
+  const supervisionOnly = containsAnyNormalizedPhrase(text, ["eftirlit", "umsjón", "umsjon", "verkefnastjórn", "verkefnastjorn"]) && !hasPhysicalWorkTerm;
 
   if (!hasDesignOnlyTerm && !(hasGeneralDesignTerm && !hasPhysicalWorkTerm) && !supervisionOnly) return false;
 
@@ -1008,6 +1056,21 @@ function isDesignConsultingOnlyForProfile(company: CompanyProfile, opportunity: 
     "project management",
     "supervision",
   ]);
+}
+
+function isNeedsReviewWrongTypeForProfile(company: CompanyProfile, opportunity: Record<string, unknown>) {
+  if (getMatchSafetyStatus(opportunity) !== "needs_review") return false;
+  const payload = opportunity.rawPayload && typeof opportunity.rawPayload === "object"
+    ? opportunity.rawPayload as Record<string, unknown>
+    : {};
+  const reasonText = [
+    ...(Array.isArray(opportunity.safetyReasons) ? opportunity.safetyReasons.map(String) : []),
+    ...(Array.isArray(opportunity.risks) ? opportunity.risks.map(String) : []),
+    ...(Array.isArray(payload.safety_reasons) ? payload.safety_reasons.map(String) : []),
+    ...(Array.isArray(payload.risks) ? payload.risks.map(String) : []),
+  ].filter(Boolean).join(" ");
+  if (!containsReviewOnlyTerms({ title: reasonText, description: "" })) return false;
+  return !companyExplicitlyAllowsReviewOnlyWork(company);
 }
 
 function sortCustomerReportMatches(matches: Array<Record<string, unknown>>) {
@@ -1350,7 +1413,7 @@ function isDemoTestOpportunity(opportunity: Record<string, unknown>) {
 
 function getOpportunityMissingDeadlineRisk(opportunity: Record<string, unknown>) {
   const payload = opportunity.rawPayload && typeof opportunity.rawPayload === "object" ? opportunity.rawPayload as Record<string, unknown> : {};
-  return String(payload.deadline_warning || "Deadline not available in source — verify page.");
+  return String(payload.deadline_warning || "Deadline not available in imported data — verify on source page.");
 }
 
 function getMatchLabel(score: number) {
