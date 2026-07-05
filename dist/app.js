@@ -4953,22 +4953,13 @@ function getAvailableDashboardOpportunities() {
 
 function isStrictDashboardEligibleOpportunity(opp) {
   if (state.isAdmin && state.filters.label === "all_opportunities") return true;
-  const safety = getSafetyStatus(opp);
-  if (safety === "hidden") return false;
-  if (safety === "needs_review") {
-    return Boolean(state.profile?.includeLowConfidence) || state.filters.label === "all";
-  }
   return isStrictCustomerReportEligible(opp);
 }
 
 function isCustomerSafetyVisible(opp) {
   const safety = getSafetyStatus(opp);
   if (safety === "hidden") return false;
-  if (safety === "auto_approved") return true;
-  if (safety === "needs_review") {
-    return Boolean(state.profile?.includeLowConfidence) || state.filters.label === "all";
-  }
-  return true;
+  return safety === "auto_approved" || safety === "needs_review";
 }
 
 function getSafetyStatus(opp = {}) {
@@ -7962,6 +7953,7 @@ function renderAdminReviewQueue() {
                 <th>Source</th>
                 <th>Deadline</th>
                 <th>Score</th>
+                <th>Safety</th>
                 <th>Safety reasons</th>
                 <th>Match reasons</th>
                 <th>Actions</th>
@@ -7991,6 +7983,12 @@ function renderAdminReviewRow(item) {
       <td>${escapeHtml(opp.source || "Unknown source")}</td>
       <td>${escapeHtml(deadline.label || "Not found")}</td>
       <td>${escapeHtml(formatReportMatchLabel(item.matchLabel))} · ${Number(item.matchScore || 0)}</td>
+      <td>
+        <span class="admin-chip">${escapeHtml(formatSafetyStatus(item.safetyStatus))}</span>
+        <span class="admin-chip">${escapeHtml(formatAlertEligible(item.alertEligible))}</span>
+        <span class="admin-chip">${escapeHtml(item.reviewRequired ? (state.language === "is" ? "Yfirferð nauðsynleg" : "Review required") : (state.language === "is" ? "Yfirferð ekki nauðsynleg" : "Review not required"))}</span>
+        <span class="admin-chip">${escapeHtml(opp.rawPayload?.hidden_from_reports === true ? "hidden_from_reports=true" : "hidden_from_reports=false")}</span>
+      </td>
       <td>${(item.safetyReasons.length ? item.safetyReasons : ["Needs admin review"]).map((reason) => `<span class="admin-chip">${escapeHtml(formatSafetyReason(reason))}</span>`).join(" ")}</td>
       <td>${(item.matchReasons.length ? item.matchReasons : ["Profile match"]).map((reason) => `<span class="admin-chip">${escapeHtml(formatReportReason(reason))}</span>`).join(" ")}</td>
       <td>
@@ -8280,6 +8278,7 @@ function renderAdminOpportunityRow(opp) {
         <h3>${escapeHtml(opp.title)}</h3>
         <p>${escapeHtml(formatOpportunityBuyer(opp))} · ${escapeHtml(opp.source)} · ${escapeHtml(formatOpportunityLocation(opp))} · ${escapeHtml(opp.status)}</p>
         <p>Quality: ${escapeHtml(getOpportunityQualityLabel(opp))} · Intent: ${escapeHtml(formatOpportunityIntent(intent))}${hiddenFromReports ? " · Hidden from reports" : ""}${duplicateReason ? ` · Duplicate: ${escapeHtml(duplicateReason)}` : ""}${staleReason ? ` · Stale / expired: ${escapeHtml(staleReason)}` : ""}</p>
+        <p>Debug: hidden_from_reports=${opp.rawPayload?.hidden_from_reports === true ? "true" : "false"} · admin_report_status=${escapeHtml(opp.rawPayload?.admin_report_status || "none")} · stale_status=${escapeHtml(opp.rawPayload?.stale_status || "none")}</p>
       </div>
       <div class="admin-row-actions">
         <button class="btn btn-ghost btn-small" data-action="admin-report-override" data-override="confirmed_tender" data-id="${escapeHtml(opp.id)}" ${isUpdating ? "disabled" : ""}>Confirmed tender</button>
@@ -8582,7 +8581,7 @@ function getReportMatches(mode = "all_current", previouslyReportedIds = new Set(
 function buildCurrentReportMatches({ mode = "all_current", previouslyReportedIds = new Set() } = {}) {
   const matches = getMatchedOpportunities()
     .filter((opp) => opp.matchScore >= 50)
-    .filter(isStrictCustomerReportEligible);
+    .filter((opp) => isCustomerReportModeEligible(opp, mode));
   const modeMatches = mode === "new_only"
     ? matches.filter((opp) => !previouslyReportedIds.has(opp.id))
     : matches;
@@ -8711,9 +8710,17 @@ function isReportEligibleOpportunity(opp) {
   return isStrictCustomerReportEligible(opp);
 }
 
+function isCustomerReportModeEligible(opp, mode = "all_current") {
+  if (!isStrictCustomerReportEligible(opp)) return false;
+  if (mode === "new_only") {
+    return getSafetyStatus(opp) === "auto_approved" && opp.alertEligible !== false;
+  }
+  return getSafetyStatus(opp) !== "hidden";
+}
+
 function isStrictCustomerReportEligible(opp) {
   if (!opp || isDemoTestOpportunity(opp)) return false;
-  if (getSafetyStatus(opp) !== "auto_approved" || opp.alertEligible === false) return false;
+  if (getSafetyStatus(opp) === "hidden") return false;
   if (!isDashboardVisibleOpportunity(opp)) return false;
   if (isCustomerReportExcludedIntent(opp)) return false;
   if (isAlreadyAwardedOrTenderedReportItem(opp)) return false;

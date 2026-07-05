@@ -344,9 +344,16 @@ function buildCompanyReportMatches(
     : matches;
   const sections = getReportSections(company, modeMatches
     .filter((match) => !ignoredIds.has(String(match.id || "")))
-    .filter((match) => getMatchSafetyStatus(match) === "auto_approved" && match.alertEligible !== false)
+    .filter((match) => isReportModeSafetyEligible(match, reportMode))
   );
   return [...sections.confirmed, ...sections.early];
+}
+
+function isReportModeSafetyEligible(match: Record<string, unknown>, reportMode: ReportMode) {
+  const safety = getMatchSafetyStatus(match);
+  if (safety === "hidden") return false;
+  if (reportMode === "new_only") return safety === "auto_approved" && match.alertEligible !== false;
+  return safety === "auto_approved" || safety === "needs_review";
 }
 
 async function loadPreviouslyReportedOpportunityIds(supabase: ReturnType<typeof createClient>, companyId: string) {
