@@ -428,6 +428,9 @@ function mapOpportunity(row: Record<string, unknown>) {
 const CIVIL_STRONG_SERVICE_TERMS = [
   "jarðvinna",
   "gatnagerð",
+  "gatna- og stígagerð",
+  "gatna og stígagerð",
+  "stígagerð",
   "lóðarframkvæmdir",
   "lagnavinna",
   "lagnir",
@@ -441,11 +444,15 @@ const CIVIL_STRONG_SERVICE_TERMS = [
   "bílastæði",
   "vegagerð",
   "gröftur",
+  "fyllingar",
+  "grjóthleðsla",
   "jarðvegsskipti",
   "undirbygging",
   "yfirborðsfrágangur",
   "hellulögn",
   "kantsteinn",
+  "kantsteinar",
+  "landmótun",
   "snjómokstur",
   "gatnaframkvæmdir",
 ];
@@ -567,13 +574,15 @@ function getCivilContractorFit(
   const hasStrongCivilTerm = normalizedIncludesAny(opportunityTextValue, CIVIL_STRONG_SERVICE_TERMS);
   const hasIndoorTerm = normalizedIncludesAny(opportunityTextValue, CIVIL_INDOOR_DOWNGRADE_TERMS);
   const allowsIndoorWork = hasExplicitIndoorService(profile);
+  const detectedStrongTerms = getStrongCivilTermsInText(opportunityTextValue);
   const serviceHitsAreWeakOnly = serviceHits.length > 0 && serviceHits.every(isCivilWeakGenericTerm);
   const keywordHitsAreWeakOnly = keywordHits.length > 0 && keywordHits.every(isCivilWeakGenericTerm);
   const hasAnySpecificHit = [...serviceHits, ...keywordHits].some((hit) => !isCivilWeakGenericTerm(hit));
+  const expandedServiceHits = hasStrongCivilTerm ? Array.from(new Set([...serviceHits, ...detectedStrongTerms])) : serviceHits;
   const shouldScoreWeakTerms = hasStrongCivilTerm || hasAnySpecificHit;
 
   return {
-    serviceHits: sortMatchTermsBySpecificity(shouldScoreWeakTerms ? promoteWeakGenericHitsToSpecificCivilTerms(serviceHits, opportunityTextValue) : serviceHits.filter((service) => !isCivilWeakGenericTerm(service))),
+    serviceHits: sortMatchTermsBySpecificity(shouldScoreWeakTerms ? promoteWeakGenericHitsToSpecificCivilTerms(expandedServiceHits, opportunityTextValue) : expandedServiceHits.filter((service) => !isCivilWeakGenericTerm(service))),
     keywordHits: sortMatchTermsBySpecificity(shouldScoreWeakTerms ? promoteWeakGenericHitsToSpecificCivilTerms(keywordHits, opportunityTextValue) : keywordHits.filter((keyword) => !isCivilWeakGenericTerm(keyword))),
     hasWeakOnlyFit: !hasStrongCivilTerm && !hasAnySpecificHit && (serviceHitsAreWeakOnly || keywordHitsAreWeakOnly),
     hasIndoorMismatch: hasIndoorTerm && !hasStrongCivilTerm && !allowsIndoorWork,

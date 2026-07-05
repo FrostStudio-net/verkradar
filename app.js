@@ -646,6 +646,7 @@ let state = {
     status: "all",
     country: "all",
     search: "",
+    debugCompanyId: "",
     tedOnly: false,
     manualOnly: false,
     showDemoTest: false
@@ -1206,6 +1207,19 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", (event) => {
+  if (event.target.matches("[data-admin-filter]")) {
+    const key = event.target.dataset.adminFilter;
+    if (event.target.type === "checkbox") {
+      state.adminOpportunityFilters[key] = event.target.checked;
+      if (key === "tedOnly" && event.target.checked) state.adminOpportunityFilters.manualOnly = false;
+      if (key === "manualOnly" && event.target.checked) state.adminOpportunityFilters.tedOnly = false;
+    } else {
+      state.adminOpportunityFilters[key] = event.target.value;
+    }
+    renderPreservingInputAndScroll(event.target);
+    return;
+  }
+
   if (event.target.matches("[data-import-mode]")) {
     state.tedImportMode = event.target.value;
     render();
@@ -4482,6 +4496,9 @@ function opportunityText(opp) {
 const CIVIL_STRONG_SERVICE_TERMS = [
   "jarðvinna",
   "gatnagerð",
+  "gatna- og stígagerð",
+  "gatna og stígagerð",
+  "stígagerð",
   "lóðarframkvæmdir",
   "lagnavinna",
   "lagnir",
@@ -4495,11 +4512,15 @@ const CIVIL_STRONG_SERVICE_TERMS = [
   "bílastæði",
   "vegagerð",
   "gröftur",
+  "fyllingar",
+  "grjóthleðsla",
   "jarðvegsskipti",
   "undirbygging",
   "yfirborðsfrágangur",
   "hellulögn",
   "kantsteinn",
+  "kantsteinar",
+  "landmótun",
   "snjómokstur",
   "gatnaframkvæmdir"
 ];
@@ -4622,14 +4643,16 @@ function getCivilContractorFit(profile, opp, serviceHits, keywordHits) {
   const hasStrongCivilTerm = normalizedContainsAny(text, CIVIL_STRONG_SERVICE_TERMS);
   const hasIndoorTerm = normalizedContainsAny(text, CIVIL_INDOOR_DOWNGRADE_TERMS);
   const allowsIndoorWork = hasExplicitIndoorService(profile);
+  const detectedStrongTerms = getStrongCivilTermsInText(text);
   const serviceHitsAreWeakOnly = serviceHits.length > 0 && serviceHits.every(isCivilWeakGenericTerm);
   const keywordHitsAreWeakOnly = keywordHits.length > 0 && keywordHits.every(isCivilWeakGenericTerm);
   const hasAnySpecificHit = [...serviceHits, ...keywordHits].some((hit) => !isCivilWeakGenericTerm(hit));
+  const expandedServiceHits = hasStrongCivilTerm ? [...new Set([...serviceHits, ...detectedStrongTerms])] : serviceHits;
 
   const shouldScoreWeakTerms = hasStrongCivilTerm || hasAnySpecificHit;
   const filteredServiceHits = shouldScoreWeakTerms
-    ? promoteWeakGenericHitsToSpecificCivilTerms(serviceHits, text)
-    : serviceHits.filter((service) => !isCivilWeakGenericTerm(service));
+    ? promoteWeakGenericHitsToSpecificCivilTerms(expandedServiceHits, text)
+    : expandedServiceHits.filter((service) => !isCivilWeakGenericTerm(service));
   const filteredKeywordHits = shouldScoreWeakTerms
     ? promoteWeakGenericHitsToSpecificCivilTerms(keywordHits, text)
     : keywordHits.filter((keyword) => !isCivilWeakGenericTerm(keyword));
@@ -6829,6 +6852,7 @@ function renderAdminOpportunityFilters(opportunities) {
   const sources = getAdminFilterOptions(state.opportunities || [], (opp) => opp.source || "Unknown");
   const statuses = getAdminFilterOptions(state.opportunities || [], (opp) => opp.status || "Unknown");
   const countries = getAdminFilterOptions(state.opportunities || [], (opp) => getOpportunityCountryCode(opp) || opp.countryCode || "Unknown");
+  const companies = state.adminCompanies || [];
   return `
     <div class="admin-filters">
       <input data-admin-filter="search" value="${escapeHtml(filters.search)}" placeholder="Search title, buyer, external ID..." />
@@ -6843,6 +6867,10 @@ function renderAdminOpportunityFilters(opportunities) {
       <select data-admin-filter="country">
         <option value="all">All countries</option>
         ${countries.map((country) => `<option value="${escapeHtml(country)}" ${filters.country === country ? "selected" : ""}>${escapeHtml(country)}</option>`).join("")}
+      </select>
+      <select data-admin-filter="debugCompanyId">
+        <option value="">Match debug company...</option>
+        ${companies.map((company) => `<option value="${escapeHtml(company.id)}" ${filters.debugCompanyId === company.id ? "selected" : ""}>${escapeHtml(company.companyName)}</option>`).join("")}
       </select>
       <label class="checkbox compact"><input type="checkbox" data-admin-filter="tedOnly" ${filters.tedOnly ? "checked" : ""}/><span>TED only</span></label>
       <label class="checkbox compact"><input type="checkbox" data-admin-filter="manualOnly" ${filters.manualOnly ? "checked" : ""}/><span>Manual only</span></label>
@@ -8319,6 +8347,7 @@ function renderAdminOpportunityRow(opp) {
         <p>${escapeHtml(formatOpportunityBuyer(opp))} · ${escapeHtml(opp.source)} · ${escapeHtml(formatOpportunityLocation(opp))} · ${escapeHtml(opp.status)}</p>
         <p>Quality: ${escapeHtml(getOpportunityQualityLabel(opp))} · Intent: ${escapeHtml(formatOpportunityIntent(intent))}${hiddenFromReports ? " · Hidden from reports" : ""}${duplicateReason ? ` · Duplicate: ${escapeHtml(duplicateReason)}` : ""}${staleReason ? ` · Stale / expired: ${escapeHtml(staleReason)}` : ""}</p>
         <p>Debug: hidden_from_reports=${opp.rawPayload?.hidden_from_reports === true ? "true" : "false"} · admin_report_status=${escapeHtml(opp.rawPayload?.admin_report_status || "none")} · stale_status=${escapeHtml(opp.rawPayload?.stale_status || "none")}</p>
+        ${renderAdminOpportunityMatchDebug(opp)}
       </div>
       <div class="admin-row-actions">
         <button class="btn btn-ghost btn-small" data-action="admin-report-override" data-override="confirmed_tender" data-id="${escapeHtml(opp.id)}" ${isUpdating ? "disabled" : ""}>Confirmed tender</button>
@@ -8337,6 +8366,40 @@ function renderAdminOpportunityRow(opp) {
       </div>
     </div>
   `;
+}
+
+function renderAdminOpportunityMatchDebug(opp) {
+  const companyId = state.adminOpportunityFilters?.debugCompanyId || "";
+  if (!companyId) return "";
+  const company = (state.adminCompanies || []).find((item) => item.id === companyId);
+  if (!company) return `<div class="admin-debug-panel">Match debug: selected company not loaded.</div>`;
+  const match = calculateMatch(company, opp);
+  const excludedReasons = getAdminOpportunityExclusionReasons(opp, match);
+  const serviceText = cleanStringArray(company.services).join(", ") || "No services";
+  const keywordText = cleanStringArray(company.includeKeywords).join(", ") || "No include keywords";
+  return `
+    <div class="admin-debug-panel">
+      <p><strong>Match debug for ${escapeHtml(company.companyName)}:</strong> score ${Number(match.matchScore || 0)} · ${escapeHtml(formatReportMatchLabel(match.matchLabel))}</p>
+      <p><strong>Services:</strong> ${escapeHtml(serviceText)}</p>
+      <p><strong>Keywords:</strong> ${escapeHtml(keywordText)}</p>
+      <p><strong>Matched terms/reasons:</strong> ${(match.matchReasons || []).map((reason) => `<span class="admin-chip">${escapeHtml(formatReportReason(reason))}</span>`).join(" ") || "None"}</p>
+      <p><strong>Risks:</strong> ${(match.risks || []).map((risk) => `<span class="admin-chip">${escapeHtml(formatReportRisk(risk))}</span>`).join(" ") || "None"}</p>
+      <p><strong>Excluded by:</strong> ${excludedReasons.length ? excludedReasons.map((reason) => `<span class="admin-chip">${escapeHtml(reason)}</span>`).join(" ") : "<span class=\"admin-chip\">Not excluded by local dashboard/report filters</span>"}</p>
+    </div>
+  `;
+}
+
+function getAdminOpportunityExclusionReasons(opp, match) {
+  const reasons = [];
+  if (Number(match.matchScore || 0) < 50) reasons.push(`score_below_50 (${Number(match.matchScore || 0)})`);
+  if (!isCustomerMatchEligibleOpportunity(opp)) reasons.push("customer_match_ineligible");
+  if (!isDashboardVisibleOpportunity(opp)) reasons.push("dashboard_not_visible");
+  if (getSafetyStatus(opp) === "hidden") reasons.push("safety_status_hidden");
+  if (opp.rawPayload?.hidden_from_reports === true) reasons.push("hidden_from_reports");
+  if (isSecondaryDuplicateOpportunity(opp)) reasons.push("duplicate_secondary");
+  if (isStaleCustomerOpportunity(opp)) reasons.push("stale_or_expired");
+  if (isDemoTestOpportunity(opp)) reasons.push("demo_or_test");
+  return reasons;
 }
 
 function renderReport() {

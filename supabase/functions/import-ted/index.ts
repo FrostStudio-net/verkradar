@@ -765,6 +765,9 @@ function mapCompanyProfile(
 const CIVIL_STRONG_SERVICE_TERMS = [
   "jarðvinna",
   "gatnagerð",
+  "gatna- og stígagerð",
+  "gatna og stígagerð",
+  "stígagerð",
   "lóðarframkvæmdir",
   "lagnavinna",
   "lagnir",
@@ -778,11 +781,15 @@ const CIVIL_STRONG_SERVICE_TERMS = [
   "bílastæði",
   "vegagerð",
   "gröftur",
+  "fyllingar",
+  "grjóthleðsla",
   "jarðvegsskipti",
   "undirbygging",
   "yfirborðsfrágangur",
   "hellulögn",
   "kantsteinn",
+  "kantsteinar",
+  "landmótun",
   "snjómokstur",
   "gatnaframkvæmdir",
 ];
@@ -886,13 +893,17 @@ function getCivilContractorFit(
   const hasStrongCivilTerm = normalizedIncludesAny(opportunityTextValue, CIVIL_STRONG_SERVICE_TERMS);
   const hasIndoorTerm = normalizedIncludesAny(opportunityTextValue, CIVIL_INDOOR_DOWNGRADE_TERMS);
   const allowsIndoorWork = hasExplicitIndoorService(profile);
+  const detectedStrongTerms = hasStrongCivilTerm
+    ? CIVIL_STRONG_SERVICE_TERMS.filter((term) => normalizeText(opportunityTextValue).includes(normalizeText(term)))
+    : [];
   const serviceHitsAreWeakOnly = serviceHits.length > 0 && serviceHits.every(isCivilWeakGenericTerm);
   const keywordHitsAreWeakOnly = keywordHits.length > 0 && keywordHits.every(isCivilWeakGenericTerm);
   const hasAnySpecificHit = [...serviceHits, ...keywordHits].some((hit) => !isCivilWeakGenericTerm(hit));
+  const expandedServiceHits = hasStrongCivilTerm ? Array.from(new Set([...serviceHits, ...detectedStrongTerms])) : serviceHits;
   const shouldScoreWeakTerms = hasStrongCivilTerm || hasAnySpecificHit;
 
   return {
-    serviceHits: shouldScoreWeakTerms ? serviceHits : serviceHits.filter((service) => !isCivilWeakGenericTerm(service)),
+    serviceHits: shouldScoreWeakTerms ? expandedServiceHits : expandedServiceHits.filter((service) => !isCivilWeakGenericTerm(service)),
     keywordHits: shouldScoreWeakTerms ? keywordHits : keywordHits.filter((keyword) => !isCivilWeakGenericTerm(keyword)),
     hasWeakOnlyFit: !hasStrongCivilTerm && !hasAnySpecificHit && (serviceHitsAreWeakOnly || keywordHitsAreWeakOnly),
     hasIndoorMismatch: hasIndoorTerm && !hasStrongCivilTerm && !allowsIndoorWork,

@@ -1157,6 +1157,9 @@ async function normalizeConnectorItems(
 ): Promise<NormalizedOpportunity[]> {
   const parent = normalizeConnectorItem(item, connector, source);
   if (!parent) return [];
+  if (source.name === RIKISKAUP_SOURCE_NAME && connector.connector_type === "wordpress_rest") {
+    await enrichRikiskaupOpportunityFromDetailPage(parent);
+  }
 
   const children = await extractVegagerdinArticleProjects(item, connector, source, parent);
   if (!children.length) return [parent];
@@ -1666,6 +1669,131 @@ function getConnectorItemBuyer(item: Record<string, unknown>, connectorType: Con
   }
 
   return sanitizeConnectorBuyer(stripHtml(String(item.buyer || item.creator || "")), sourceName);
+}
+
+async function enrichRikiskaupOpportunityFromDetailPage(opportunity: NormalizedOpportunity) {
+  const url = String(opportunity.url || "");
+  if (!url) return;
+  try {
+    const pageUrl = new URL(url);
+    if (pageUrl.hostname.replace(/^www\./i, "") !== "utbodsvefur.is") return;
+    const response = await fetch(pageUrl.toString(), {
+      headers: {
+        accept: "text/html,application/xhtml+xml",
+        "user-agent": "VerkRadar source connector (+support@verkradar.is)",
+      },
+    });
+    if (!response.ok) throw new Error(`Ríkiskaup detail fetch failed (${response.status})`);
+    const html = await response.text();
+    const detail = parseRikiskaupTenderDetailPage(html);
+    if (!detail.hasUsefulDetail) return;
+
+    if (detail.buyer) opportunity.buyer = detail.buyer;
+    if (detail.deadline) {
+      opportunity.deadline = detail.deadline;
+      opportunity.status = daysUntil(detail.deadline) < 0 ? "hidden" : "open";
+    }
+    if (detail.type) opportunity.type = detail.type;
+    if (detail.category) opportunity.category = detail.category;
+    if (detail.description) opportunity.description = detail.description;
+
+    const isExpired = opportunity.deadline ? daysUntil(opportunity.deadline) < 0 : false;
+    opportunity.raw_payload = {
+      ...opportunity.raw_payload,
+      detail_page_enriched: true,
+      detail_page_url: url,
+      ...(detail.buyer ? { buyer: detail.buyer, extracted_buyer: detail.buyer } : {}),
+      ...(detail.type ? { tender_type: detail.type } : {}),
+      ...(detail.deadline ? { extracted_deadline_text: detail.deadlineRaw, deadline_at: detail.deadlineAt || null } : {}),
+      ...(detail.openingDate ? { opening_date: detail.openingDate } : {}),
+      ...(detail.documentsDate ? { tender_documents_date: detail.documentsDate } : {}),
+      ...(detail.completionDate ? { completion_date_text: detail.completionDate } : {}),
+      quality_status: detail.deadline ? "confirmed_tender" : opportunity.raw_payload.quality_status,
+      opportunity_intent: detail.deadline ? "confirmed_tender" : opportunity.raw_payload.opportunity_intent,
+      hidden_from_reports: isExpired ? true : opportunity.raw_payload.hidden_from_reports === true,
+      ...(isExpired ? { deadline_state: "passed", admin_report_status: "hidden" } : {}),
+    };
+  } catch (error) {
+    opportunity.raw_payload = {
+      ...opportunity.raw_payload,
+      detail_page_enrichment_error: errorMessage(error),
+    };
+  }
+}
+
+function parseRikiskaupTenderDetailPage(html: string) {
+  const text = cleanConnectorText(html, "");
+  const buyer = cleanBuyerName(
+    extractLabeledValue(text, ["Útboðsaðili", "Utboðsaðili", "Utbodsaðili", "Utbodsadili"]) ||
+    extractRikiskaupBuyerFromText(text),
+  );
+  const type = extractLabeledValue(text, ["Tegund"]) || "";
+  const deadlineRaw = extractLabeledValue(text, ["Skilafrestur"]) || "";
+  const deadline = deadlineRaw ? parseDeadline(deadlineRaw) : extractDeadline(text).date;
+  const openingDate = parseDeadline(extractLabeledValue(text, ["Opnun tilboða", "Opnun tilboda"]) || "");
+  const documentsDate = parseDeadline(extractLabeledValue(text, ["Útboðsgögn afhent", "Utbodsgogn afhent"]) || "");
+  const completionDate = extractCompletionDateText(text);
+  const description = buildRikiskaupDetailDescription(text);
+  return {
+    buyer,
+    type: type || "tender",
+    category: type || "public procurement",
+    deadline,
+    deadlineRaw: deadlineRaw || null,
+    deadlineAt: deadline ? buildDeadlineAt(deadline, deadlineRaw) : null,
+    openingDate,
+    documentsDate,
+    completionDate,
+    description,
+    hasUsefulDetail: Boolean(buyer || deadline || description),
+  };
+}
+
+function extractLabeledValue(text: string, labels: string[]) {
+  const compact = String(text || "").replace(/\s+/g, " ").trim();
+  const labelPattern = labels.map(escapeRegex).join("|");
+  const stopLabels = [
+    "Útboðsaðili",
+    "Utbodsadili",
+    "Tegund",
+    "Útboðsgögn afhent",
+    "Utbodsgogn afhent",
+    "Skilafrestur",
+    "Opnun tilboða",
+    "Opnun tilboda",
+    "Verkinu skal",
+    "Nánari upplýsingar",
+  ].map(escapeRegex).join("|");
+  const match = compact.match(new RegExp(`(?:${labelPattern})\\s*:?\\s*([\\s\\S]{1,240}?)(?=\\s+(?:${stopLabels})\\s*:|$)`, "i"));
+  return match ? match[1].replace(/\s+/g, " ").trim() : "";
+}
+
+function extractRikiskaupBuyerFromText(text: string) {
+  const match = String(text || "").match(/F\.h\.\s+([^,.]{3,120}?Reykjavíkurborgar)/i);
+  return match ? match[1].trim() : "";
+}
+
+function buildRikiskaupDetailDescription(text: string) {
+  const compact = String(text || "").replace(/\s+/g, " ").trim();
+  const start = compact.search(/óskar eftir tilboðum|oskar eftir tilbodum|verkið felur|verkefnið felur|gatna-|gatnagerð|stígagerð/i);
+  if (start < 0) return "";
+  const slice = compact.slice(start, start + 900);
+  return slice.replace(/\s+(Nánari upplýsingar|Skilafrestur|Opnun tilboða).*$/i, "").trim();
+}
+
+function extractCompletionDateText(text: string) {
+  const match = String(text || "").match(/Verkinu skal[^.]{0,180}\./i);
+  return match ? match[0].trim() : "";
+}
+
+function buildDeadlineAt(deadline: string, rawText: string | null) {
+  const timeMatch = String(rawText || "").match(/\bkl\.?\s*(\d{1,2})[:.](\d{2})\b/i);
+  if (!timeMatch) return null;
+  return `${deadline}T${timeMatch[1].padStart(2, "0")}:${timeMatch[2]}:00`;
+}
+
+function escapeRegex(value: string) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function sanitizeConnectorBuyer(value: string, sourceName = "") {
@@ -2401,6 +2529,9 @@ function mapCompanyProfile(
 const CIVIL_STRONG_SERVICE_TERMS = [
   "jarðvinna",
   "gatnagerð",
+  "gatna- og stígagerð",
+  "gatna og stígagerð",
+  "stígagerð",
   "lóðarframkvæmdir",
   "lagnavinna",
   "lagnir",
@@ -2414,11 +2545,15 @@ const CIVIL_STRONG_SERVICE_TERMS = [
   "bílastæði",
   "vegagerð",
   "gröftur",
+  "fyllingar",
+  "grjóthleðsla",
   "jarðvegsskipti",
   "undirbygging",
   "yfirborðsfrágangur",
   "hellulögn",
   "kantsteinn",
+  "kantsteinar",
+  "landmótun",
   "snjómokstur",
   "gatnaframkvæmdir",
 ];
@@ -2547,13 +2682,15 @@ function getCivilContractorFit(
   const hasStrongCivilTerm = normalizedIncludesAny(opportunityTextValue, CIVIL_STRONG_SERVICE_TERMS);
   const hasIndoorTerm = normalizedIncludesAny(opportunityTextValue, CIVIL_INDOOR_DOWNGRADE_TERMS);
   const allowsIndoorWork = hasExplicitIndoorService(profile);
+  const detectedStrongTerms = getStrongCivilTermsInText(opportunityTextValue);
   const serviceHitsAreWeakOnly = serviceHits.length > 0 && serviceHits.every(isCivilWeakGenericTerm);
   const keywordHitsAreWeakOnly = keywordHits.length > 0 && keywordHits.every(isCivilWeakGenericTerm);
   const hasAnySpecificHit = [...serviceHits, ...keywordHits].some((hit) => !isCivilWeakGenericTerm(hit));
+  const expandedServiceHits = hasStrongCivilTerm ? Array.from(new Set([...serviceHits, ...detectedStrongTerms])) : serviceHits;
   const shouldScoreWeakTerms = hasStrongCivilTerm || hasAnySpecificHit;
 
   return {
-    serviceHits: sortMatchTermsBySpecificity(shouldScoreWeakTerms ? promoteWeakGenericHitsToSpecificCivilTerms(serviceHits, opportunityTextValue) : serviceHits.filter((service) => !isCivilWeakGenericTerm(service))),
+    serviceHits: sortMatchTermsBySpecificity(shouldScoreWeakTerms ? promoteWeakGenericHitsToSpecificCivilTerms(expandedServiceHits, opportunityTextValue) : expandedServiceHits.filter((service) => !isCivilWeakGenericTerm(service))),
     keywordHits: sortMatchTermsBySpecificity(shouldScoreWeakTerms ? promoteWeakGenericHitsToSpecificCivilTerms(keywordHits, opportunityTextValue) : keywordHits.filter((keyword) => !isCivilWeakGenericTerm(keyword))),
     hasWeakOnlyFit: !hasStrongCivilTerm && !hasAnySpecificHit && (serviceHitsAreWeakOnly || keywordHitsAreWeakOnly),
     hasIndoorMismatch: hasIndoorTerm && !hasStrongCivilTerm && !allowsIndoorWork,
