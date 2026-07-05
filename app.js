@@ -2312,6 +2312,7 @@ function mapSupabaseOpportunity(row) {
     type: row.type || "tender",
     description: row.description || "",
     deadline: row.deadline,
+    deadlineAt: rawPayload.deadline_at || "",
     publishedDate: row.published_date,
     createdAt: row.created_at,
     location: sanitizeOpportunityLocation(row.location || "Unknown", rawPayload, sourceName, row.title || "", row.description || ""),
@@ -5547,11 +5548,19 @@ function getDeadlineDisplay(value) {
   };
 }
 
+function formatOpportunityDeadlineAt(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/);
+  if (!match) return "";
+  return `${formatCustomerReportDate(match[1])} kl. ${match[2]}:${match[3]}`;
+}
+
 function formatOpportunityDeadline(value) {
   return value ? formatShortDate(value) : formatReportRisk(MISSING_DEADLINE_RISK);
 }
 
 function formatOpportunityDeadlineForReport(opp) {
+  if (opp?.deadlineAt) return formatOpportunityDeadlineAt(opp.deadlineAt);
   return opp?.deadline ? formatCustomerReportDate(opp.deadline) : formatReportRisk(getOpportunityMissingDeadlineRisk(opp));
 }
 
@@ -5574,8 +5583,15 @@ function getOpportunityMissingDeadlineRisk(opp) {
 function getOpportunityDeadlineDisplay(opp) {
   if (!opp?.deadline) {
     return {
-      label: getOpportunityMissingDeadlineRisk(opp),
+      label: formatReportRisk(getOpportunityMissingDeadlineRisk(opp)),
       className: "deadline danger"
+    };
+  }
+  const deadlineAt = formatOpportunityDeadlineAt(opp.deadlineAt);
+  if (deadlineAt) {
+    return {
+      label: deadlineAt,
+      className: daysUntilDeadline(opp.deadline) <= 14 ? "deadline danger" : "deadline"
     };
   }
   return getDeadlineDisplay(opp.deadline);
@@ -9908,7 +9924,7 @@ ${state.language === "is" ? "Gæði" : "Quality"}: ${formatReportQualityLabel(ge
 ${t("buyer")}: ${formatOpportunityBuyer(opp)}
 ${t("source")}: ${formatReportMetadataValue("source", opp.source)}
 ${t("area")}: ${formatOpportunityLocation(opp)}
-${t("deadline")}: ${opp.deadline ? formatCustomerReportDate(opp.deadline) : t("notFound")}
+${t("deadline")}: ${formatOpportunityDeadlineForReport(opp)}
 ${t("estimatedValue")}: ${opp.estimatedValue ? formatISK(opp.estimatedValue) : t("notListed")}
 ${state.language === "is" ? "Samsvörun" : "Match"}: ${opp.matchScore}/100 (${formatReportMatchLabel(opp.matchLabel)})
 ${t("whyThisMatters")}:
@@ -9941,7 +9957,7 @@ ${state.language === "is" ? "Gæði" : "Quality"}: ${formatReportQualityLabel(ge
 ${t("buyer")}: ${formatOpportunityBuyer(opp)}
 ${t("source")}: ${formatReportMetadataValue("source", opp.source)}
 ${t("area")}: ${formatOpportunityLocation(opp)}
-${t("deadline")}: ${opp.deadline ? formatCustomerReportDate(opp.deadline) : t("notFound")}
+${t("deadline")}: ${formatOpportunityDeadlineForReport(opp)}
 ${t("estimatedValue")}: ${opp.estimatedValue ? formatISK(opp.estimatedValue) : t("notListed")}
 ${state.language === "is" ? "Samsvörun" : "Match"}: ${opp.matchScore}/100 (${formatReportMatchLabel(opp.matchLabel)})
 ${t("whyThisMatters")}:

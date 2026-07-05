@@ -1909,14 +1909,14 @@ function extractTenderNumber(text: string) {
 
 function inferRikiskaupLocation(text: string) {
   const normalized = normalize(String(text || ""));
-  if (normalized.includes("gardabaer") || normalized.includes("garðabær") || normalized.includes("vifilsstadavegur") || normalized.includes("vífilsstaðavegur")) {
-    return "Garðabær / Höfuðborgarsvæðið";
-  }
   if (normalized.includes("reykjavik") || normalized.includes("reykjavík") || normalized.includes("vogabyggd") || normalized.includes("vogabyggð")) {
     return "Reykjavík / Höfuðborgarsvæðið";
   }
   if (normalized.includes("stora hraun") || normalized.includes("gaulverjabaejarvegi") || normalized.includes("arborg")) {
     return "Árborg / Suðurland";
+  }
+  if (normalized.includes("gardabaer") || normalized.includes("garðabær") || normalized.includes("vifilsstadavegur") || normalized.includes("vifilsstaðavegur") || normalized.includes("vífilsstaðavegur")) {
+    return "Garðabær / Höfuðborgarsvæðið";
   }
   return "";
 }
