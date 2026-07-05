@@ -35,7 +35,7 @@ const translations = {
   is: {
     navDashboard: "Mælaborð",
     navReport: "Yfirlit",
-    navPricing: "Verð",
+    navPricing: "Verðskrá",
     navSettings: "Stillingar",
     navHowItWorks: "Hvernig virkar þetta",
     navSampleReport: "Sýnishorn",
@@ -88,6 +88,32 @@ const translations = {
     sampleReportTitle: "Stuttlisti sem sýnir hvað er þess virði að skoða.",
     sampleReportText: "Sýnishornið sýnir hvernig VerkRadar raðar útboðum og verkefnum eftir þjónustu, svæði, fresti og ástæðum samsvörunar.",
     sourceDisclaimer: "VerkRadar hjálpar til við að forgangsraða tækifærum. Upprunaleg útboðsgögn eru alltaf endanleg heimild.",
+    pricingEyebrow: "VERÐSKRÁ",
+    pricingHeadline: "Einföld verðskrá fyrir fyrstu útgáfu",
+    pricingSubtitle: "Byrjið með skýru yfirliti og bætið við sjálfvirkni eftir þörfum.",
+    pricingStarter: "Grunnur",
+    pricingGrowth: "Vöxtur",
+    pricingPro: "Sérsniðið",
+    pricingMonth: "/mán.",
+    pricingBadge: "Hentar flestum fyrirtækjum",
+    pricingCta: "Fá prufuaðgang",
+    pricingWeeklyReport: "Vikulegt yfirlit",
+    pricingFiveMatches: "Allt að 5 samsvaranir á viku",
+    pricingBasicMatching: "Grunnsamsvörun",
+    pricingDeadlineReminders: "Áminningar um skilafresti",
+    pricingOneProfile: "1 fyrirtækjaprófíll",
+    pricingEverythingStarter: "Allt í Grunni",
+    pricingMoreSources: "Fleiri heimildir",
+    pricingSummaries: "Stutt samantekt á tækifærum",
+    pricingLabels: "Sterk/góð/möguleg samsvörun",
+    pricingSaved: "Vistuð tækifæri",
+    pricingArchive: "Yfirlitssafn",
+    pricingEverythingGrowth: "Allt í Vexti",
+    pricingDocumentSummaries: "Samantektir útboðsgagna",
+    pricingRequirements: "Gátlisti fyrir kröfur",
+    pricingRiskWarnings: "Áhættuvísbendingar",
+    pricingBidChecklist: "Gátlisti fyrir tilboðsgerð",
+    pricingPrioritySupport: "Forgangsþjónusta",
     tryDemoTitle: "Prófið sýnimælaborðið.",
     tryDemoText: "Hlaðið sýnifyrirtæki og sjáið hvernig samsvörunin virkar.",
     loadDemoCompany: "Hlaða sýnifyrirtæki",
@@ -318,6 +344,32 @@ const translations = {
     sampleReportTitle: "A shortlist that shows what is worth checking.",
     sampleReportText: "Preview how VerkRadar ranks tenders and projects by services, region, deadline and match reasons.",
     sourceDisclaimer: "VerkRadar helps prioritize opportunity review. Original tender documents are always the final authority.",
+    pricingEyebrow: "PRICING",
+    pricingHeadline: "Simple pricing for the first version",
+    pricingSubtitle: "Start with a clear report and add automation as needed.",
+    pricingStarter: "Starter",
+    pricingGrowth: "Growth",
+    pricingPro: "Custom",
+    pricingMonth: "/month",
+    pricingBadge: "Best for most businesses",
+    pricingCta: "Get trial access",
+    pricingWeeklyReport: "Weekly report",
+    pricingFiveMatches: "Up to 5 matched opportunities/week",
+    pricingBasicMatching: "Basic matching",
+    pricingDeadlineReminders: "Deadline reminders",
+    pricingOneProfile: "1 company profile",
+    pricingEverythingStarter: "Everything in Starter",
+    pricingMoreSources: "More sources",
+    pricingSummaries: "Opportunity summaries",
+    pricingLabels: "Strong/Good/Possible match labels",
+    pricingSaved: "Saved opportunities",
+    pricingArchive: "Report archive",
+    pricingEverythingGrowth: "Everything in Growth",
+    pricingDocumentSummaries: "Tender document summaries",
+    pricingRequirements: "Requirements checklist",
+    pricingRiskWarnings: "Risk warnings",
+    pricingBidChecklist: "Bid preparation checklist",
+    pricingPrioritySupport: "Priority support",
     tryDemoTitle: "Try the demo dashboard now.",
     tryDemoText: "Load a sample company profile and see how the matching works.",
     loadDemoCompany: "Load demo company",
@@ -7182,7 +7234,7 @@ function renderOnboarding() {
 
   initializeProfileDraft();
   return renderShell(`
-    <section class="page-head">
+    <section class="page-head pricing-head">
       <p class="eyebrow">${escapeHtml(t("onboarding"))}</p>
       <h1>${escapeHtml(t("onboardingTitle"))}</h1>
       <p>${escapeHtml(t("onboardingText"))}</p>
@@ -10065,31 +10117,68 @@ function slugifyFilePart(value) {
 }
 
 function renderPricing() {
+  const plans = [
+    {
+      name: t("pricingStarter"),
+      price: "9.900 kr",
+      items: [
+        t("pricingWeeklyReport"),
+        t("pricingFiveMatches"),
+        t("pricingBasicMatching"),
+        t("pricingDeadlineReminders"),
+        t("pricingOneProfile")
+      ]
+    },
+    {
+      name: t("pricingGrowth"),
+      price: "19.900 kr",
+      highlighted: true,
+      items: [
+        t("pricingEverythingStarter"),
+        t("pricingMoreSources"),
+        t("pricingSummaries"),
+        t("pricingLabels"),
+        t("pricingSaved"),
+        t("pricingArchive")
+      ]
+    },
+    {
+      name: t("pricingPro"),
+      price: "39.900 kr",
+      items: [
+        t("pricingEverythingGrowth"),
+        t("pricingDocumentSummaries"),
+        t("pricingRequirements"),
+        t("pricingRiskWarnings"),
+        t("pricingBidChecklist"),
+        t("pricingPrioritySupport")
+      ]
+    }
+  ];
   return renderShell(`
     <section class="page-head">
-      <p class="eyebrow">Pricing</p>
-      <h1>Simple pricing for the MVP</h1>
-      <p>Start manual-assisted, then automate as the product grows.</p>
+      <p class="eyebrow">${escapeHtml(t("pricingEyebrow"))}</p>
+      <h1>${escapeHtml(t("pricingHeadline"))}</h1>
+      <p>${escapeHtml(t("pricingSubtitle"))}</p>
     </section>
 
     <section class="pricing-grid">
-      ${pricingCard("Starter", "9.900 kr", ["Weekly report", "Up to 5 matched opportunities/week", "Basic matching", "Deadline reminders", "1 company profile"])}
-      ${pricingCard("Growth", "19.900 kr", ["Everything in Starter", "More sources", "AI-style summaries", "Strong/Good/Possible match labels", "Saved opportunities", "Report archive"], true)}
-      ${pricingCard("Pro", "39.900 kr", ["Everything in Growth", "Tender document summaries", "Requirements checklist", "Risk warnings", "Bid preparation checklist", "Priority support"])}
+      ${plans.map(pricingCard).join("")}
     </section>
   `);
 }
 
-function pricingCard(name, price, items, highlighted = false) {
+function pricingCard(plan) {
+  const highlighted = Boolean(plan.highlighted);
   return `
     <div class="pricing-card ${highlighted ? "highlighted" : ""}">
-      ${highlighted ? `<span class="popular">Best for most businesses</span>` : ""}
-      <h2>${name}</h2>
-      <p class="price">${price}<span>/month</span></p>
+      ${highlighted ? `<span class="popular">${escapeHtml(t("pricingBadge"))}</span>` : ""}
+      <h2>${escapeHtml(plan.name)}</h2>
+      <p class="price">${escapeHtml(plan.price)}<span>${escapeHtml(t("pricingMonth"))}</span></p>
       <ul class="check-list">
-        ${items.map((i) => `<li>${i}</li>`).join("")}
+        ${plan.items.map((i) => `<li>${escapeHtml(i)}</li>`).join("")}
       </ul>
-      <button class="btn pricing-cta ${highlighted ? "btn-primary" : "btn-secondary"}" data-action="go" data-href="/onboarding">Create demo profile</button>
+      <button class="btn pricing-cta ${highlighted ? "btn-primary" : "btn-secondary"}" data-action="go" data-href="/onboarding">${escapeHtml(t("pricingCta"))}</button>
     </div>
   `;
 }
