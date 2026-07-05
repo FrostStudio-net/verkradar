@@ -21,6 +21,16 @@ const STORAGE_KEYS = {
   language: "verkradar_language"
 };
 
+function uniqueStrings(values) {
+  return Array.from(
+    new Set(
+      (values || [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    )
+  );
+}
+
 const translations = {
   is: {
     navDashboard: "Mælaborð",
@@ -2253,6 +2263,7 @@ function mapStoredMatch(row) {
 }
 
 function sanitizeOpportunityDescription(description, rawPayload = {}, sourceName = "", title = "") {
+  rawPayload = rawPayload && typeof rawPayload === "object" ? rawPayload : {};
   const text = String(description || "").replace(/\s+/g, " ").trim();
   const source = normalizeLocationText(sourceName);
   if (!text) return "";
@@ -2271,7 +2282,9 @@ function sanitizeOpportunityDescription(description, rawPayload = {}, sourceName
 }
 
 function extractUsefulUtbodsvefurDescription(text, rawPayload = {}, title = "") {
+  rawPayload = rawPayload && typeof rawPayload === "object" ? rawPayload : {};
   const compact = String(text || "").replace(/\s+/g, " ").trim();
+  if (!compact) return "";
   const starts = [
     compact.search(/F\.h\.[^.]{0,280}ósk(?:að|ar) eftir tilboðum/i),
     compact.search(/(?:Reykjavíkurborg|sveitarfélag|bærinn|kaupandi)[^.]{0,280}ósk(?:að|ar) eftir tilboðum/i),
