@@ -1713,6 +1713,7 @@ async function enrichRikiskaupOpportunityFromDetailPage(opportunity: NormalizedO
     if (detail.type) opportunity.type = detail.type;
     if (detail.category) opportunity.category = detail.category;
     if (detail.description) opportunity.description = detail.description;
+    if (detail.location) opportunity.location = detail.location;
 
     const isExpired = opportunity.deadline ? daysUntil(opportunity.deadline) < 0 : false;
     opportunity.raw_payload = {
@@ -1726,6 +1727,7 @@ async function enrichRikiskaupOpportunityFromDetailPage(opportunity: NormalizedO
       ...(detail.openingDate ? { opening_date: detail.openingDate } : {}),
       ...(detail.documentsDate ? { tender_documents_date: detail.documentsDate } : {}),
       ...(detail.completionDate ? { completion_date_text: detail.completionDate } : {}),
+      ...(detail.location ? { extracted_location: detail.location } : {}),
       quality_status: detail.deadline ? "confirmed_tender" : opportunity.raw_payload.quality_status,
       opportunity_intent: detail.deadline ? "confirmed_tender" : opportunity.raw_payload.opportunity_intent,
       hidden_from_reports: isExpired ? true : opportunity.raw_payload.hidden_from_reports === true,
@@ -1742,18 +1744,20 @@ async function enrichRikiskaupOpportunityFromDetailPage(opportunity: NormalizedO
 function parseRikiskaupTenderDetailPage(html: string) {
   const mainHtml = extractRikiskaupTenderMainHtml(html);
   const text = cleanConnectorText(mainHtml, "");
-  const buyer = cleanBuyerName(
+  const buyer = cleanRikiskaupBuyer(
     extractLabeledValue(text, ["Útboðsaðili", "Utboðsaðili", "Utbodsaðili", "Utbodsadili"]) ||
     extractRikiskaupBuyerFromText(text),
   );
   const type = extractLabeledValue(text, ["Tegund"]) || "";
-  const deadlineRaw = extractLabeledValue(text, ["Skilafrestur"]) || "";
-  const deadline = deadlineRaw ? parseDeadline(deadlineRaw) : extractDeadline(text).date;
+  const tenderDeadline = extractRikiskaupTenderDeadline(text);
+  const deadlineRaw = tenderDeadline.rawText || "";
+  const deadline = tenderDeadline.date;
   const openingDate = parseDeadline(extractLabeledValue(text, ["Opnun tilboða", "Opnun tilboda"]) || "");
   const documentsDate = parseDeadline(extractLabeledValue(text, ["Útboðsgögn afhent", "Utbodsgogn afhent"]) || "");
   const completionDate = extractCompletionDateText(text);
   const tenderNumber = extractTenderNumber(text);
   const description = buildRikiskaupDetailDescription(text, deadlineRaw);
+  const location = inferRikiskaupLocation(`${text} ${buyer}`);
   return {
     buyer,
     type: type || "tender",
@@ -1765,6 +1769,7 @@ function parseRikiskaupTenderDetailPage(html: string) {
     openingDate,
     documentsDate,
     completionDate,
+    location,
     description,
     hasUsefulDetail: Boolean(buyer || deadline || description),
   };
@@ -1787,9 +1792,14 @@ function extractRikiskaupTenderMainHtml(html: string) {
 
 function extractLabeledValue(text: string, labels: string[]) {
   const compact = String(text || "").replace(/\s+/g, " ").trim();
+  if (!compact) return "";
   const labelPattern = labels.map(escapeRegex).join("|");
   const stopLabels = [
+    "Númer",
+    "Numer",
     "Útboðsaðili",
+    "Utboðsaðili",
+    "Utbodsaðili",
     "Utbodsadili",
     "Tegund",
     "Útboðsgögn afhent",
@@ -1797,10 +1807,12 @@ function extractLabeledValue(text: string, labels: string[]) {
     "Skilafrestur",
     "Opnun tilboða",
     "Opnun tilboda",
+    "F.h.",
     "Verkinu skal",
+    "Lauslegt yfirlit",
     "Nánari upplýsingar",
   ].map(escapeRegex).join("|");
-  const match = compact.match(new RegExp(`(?:${labelPattern})\\s*:?\\s*([\\s\\S]{1,240}?)(?=\\s+(?:${stopLabels})\\s*:?|$)`, "i"));
+  const match = compact.match(new RegExp(`(?:${labelPattern})\\s*:?\\s*([\\s\\S]{1,320}?)(?=\\s+(?:${stopLabels})\\s*:?|$)`, "i"));
   return match ? cleanLabeledValue(match[1]) : "";
 }
 
@@ -1813,9 +1825,52 @@ function cleanLabeledValue(value: string) {
 
 function extractRikiskaupBuyerFromText(text: string) {
   const value = String(text || "");
-  if (/Reykjavíkurborg/i.test(value)) return "Reykjavíkurborg";
+  const explicit = value.match(/\bÚtboðsaðili\s*:?\s*([^:]{3,160}?)(?=\s+(?:Tegund|Útboðsgögn|Skilafrestur|Opnun tilboða)\b|$)/i);
+  if (explicit?.[1]) return explicit[1].trim();
   const match = value.match(/F\.h\.\s+([^,.]{3,120}?Reykjavíkurborgar)/i);
-  return match ? match[1].trim() : "";
+  if (match?.[1]) return match[1].trim();
+  if (/Reykjavíkurborg/i.test(value)) return "Reykjavíkurborg";
+  return "";
+}
+
+function cleanRikiskaupBuyer(value: string) {
+  const cleaned = cleanBuyerName(value)
+    .replace(/\s+/g, " ")
+    .replace(/\b(?:Tegund|Útboðsgögn afhent|Skilafrestur|Opnun tilboða)\b[\s\S]*$/i, "")
+    .trim();
+  if (/^FSRE\b/i.test(cleaned) || /Framkvæmdasýslan\s+Ríkiseignir/i.test(cleaned)) {
+    return "FSRE / Framkvæmdasýslan Ríkiseignir";
+  }
+  if (/^Reykjavíkurborg(?:ar)?$/i.test(cleaned) || /Umhverfis- og skipulagssviðs Reykjavíkurborgar/i.test(cleaned)) {
+    return "Reykjavíkurborg";
+  }
+  return cleaned;
+}
+
+function extractRikiskaupTenderDeadline(text: string): { date: string | null; rawText: string | null } {
+  const compact = String(text || "").replace(/\s+/g, " ").trim();
+  if (!compact) return { date: null, rawText: null };
+
+  const labeled = extractLabeledValue(compact, ["Skilafrestur"]);
+  if (labeled) {
+    const parsed = parseDeadlineDate(labeled);
+    if (parsed) return { date: parsed, rawText: labeled };
+  }
+
+  const tenderSubmissionPatterns = [
+    /Tilboðum\s+skal\s+skila[\s\S]{0,220}?(?:(?:eigi\s+síðar\s+en)\s*:?\s*)?(?:kl\.?\s*\d{1,2}[:.]\d{2}\s*(?:þann)?\s*)?(\d{1,2}\.?\s+(?:janúar|januar|febrúar|februar|mars|apríl|april|maí|mai|júní|juni|júlí|juli|ágúst|agust|september|október|oktober|nóvember|november|desember)\s+20\d{2}|\d{1,2}[./]\d{1,2}[./]20\d{2})/i,
+    /tilboðum\s+skilað[\s\S]{0,220}?fyrir\s+kl\.?\s*\d{1,2}[:.]\d{2}[\s\S]{0,80}?(\d{1,2}\.?\s+(?:janúar|januar|febrúar|februar|mars|apríl|april|maí|mai|júní|juni|júlí|juli|ágúst|agust|september|október|oktober|nóvember|november|desember)\s+20\d{2}|\d{1,2}[./]\d{1,2}[./]20\d{2})/i,
+    /eigi\s+síðar\s+en[\s\S]{0,160}?(\d{1,2}\.?\s+(?:janúar|januar|febrúar|februar|mars|apríl|april|maí|mai|júní|juni|júlí|juli|ágúst|agust|september|október|oktober|nóvember|november|desember)\s+20\d{2}|\d{1,2}[./]\d{1,2}[./]20\d{2})/i,
+  ];
+
+  for (const pattern of tenderSubmissionPatterns) {
+    const match = compact.match(pattern);
+    if (!match?.[1]) continue;
+    const parsed = parseDeadlineDate(match[1]);
+    if (parsed) return { date: parsed, rawText: match[0].trim() };
+  }
+
+  return { date: null, rawText: null };
 }
 
 function buildRikiskaupDetailDescription(text: string, deadlineRaw = "") {
@@ -1828,12 +1883,15 @@ function buildRikiskaupDetailDescription(text: string, deadlineRaw = "") {
   ].filter((index) => index >= 0);
   const start = startMatches.length ? Math.min(...startMatches) : -1;
   if (start < 0) return "";
-  const stop = compact.slice(start).search(/\s+(Nánari upplýsingar|Útboðsgögn afhent|Opnun tilboða|Opnun tilboda|Auglýsandi|Flokkar|Tengdar fréttir)\b/i);
+  const stop = compact.slice(start).search(/\s+(Skoða nánar|Um vefinn|Nánari upplýsingar|Auglýsandi|Flokkar|Tengdar fréttir|2014\s*-\s*2026)\b/i);
   const end = stop > 120 ? start + stop : start + 1200;
   const parts = [compact.slice(start, end).trim()];
   if (deadlineRaw) parts.push(`Skilafrestur: ${deadlineRaw}`);
   return uniqueStrings(parts)
     .join(" ")
+    .replace(/\s+Skoða nánar[\s\S]*$/i, "")
+    .replace(/\s+Um vefinn[\s\S]*$/i, "")
+    .replace(/\s+2014\s*-\s*2026[\s\S]*$/i, "")
     .replace(/\s+/g, " ")
     .slice(0, 1400)
     .trim();
@@ -1847,6 +1905,20 @@ function extractCompletionDateText(text: string) {
 function extractTenderNumber(text: string) {
   const match = String(text || "").match(/\b(?:útboð\s*nr\.?|nr\.?)\s*(\d{3,})\b/i);
   return match?.[1] || "";
+}
+
+function inferRikiskaupLocation(text: string) {
+  const normalized = normalize(String(text || ""));
+  if (normalized.includes("gardabaer") || normalized.includes("garðabær") || normalized.includes("vifilsstadavegur") || normalized.includes("vífilsstaðavegur")) {
+    return "Garðabær / Höfuðborgarsvæðið";
+  }
+  if (normalized.includes("reykjavik") || normalized.includes("reykjavík") || normalized.includes("vogabyggd") || normalized.includes("vogabyggð")) {
+    return "Reykjavík / Höfuðborgarsvæðið";
+  }
+  if (normalized.includes("stora hraun") || normalized.includes("gaulverjabaejarvegi") || normalized.includes("arborg")) {
+    return "Árborg / Suðurland";
+  }
+  return "";
 }
 
 function buildDeadlineAt(deadline: string, rawText: string | null) {
@@ -3510,7 +3582,7 @@ function stringFromPath(value: Record<string, unknown>, path: string[]) {
 
 function extractDeadline(text: string): { date: string | null; rawText: string | null } {
   const cleanText = stripHtml(text);
-  const keywordPattern = "(skilafrestur|tilboðsfrestur|tilbodsfrestur|frestur til|eigi síðar en|eigi sidar en)";
+  const keywordPattern = "(skilafrestur|tilboðsfrestur|tilbodsfrestur|frestur til|eigi síðar en|eigi sidar en|tilboðum skal skila|tilbodum skal skila|tilboðum skilað|tilbodum skilad|skal tilboðum skila|skal tilbodum skila)";
   const numericDatePattern = "(\\d{1,2}[./]\\d{1,2}[./]20\\d{2}|20\\d{2}-\\d{2}-\\d{2})";
   const monthDatePattern = "(\\d{1,2}\\.?\\s+(janúar|januar|febrúar|februar|mars|apríl|april|maí|mai|júní|juni|júlí|juli|ágúst|agust|september|október|oktober|nóvember|november|desember)\\s+20\\d{2})";
 
