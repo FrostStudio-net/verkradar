@@ -1178,7 +1178,8 @@ document.addEventListener("input", (event) => {
     } else {
       state.adminOpportunityFilters[key] = event.target.value;
     }
-    render();
+    renderPreservingInputAndScroll(event.target);
+    return;
   }
 
   if (event.target.matches("[data-admin-opportunity-field]")) {
@@ -1194,7 +1195,8 @@ document.addEventListener("input", (event) => {
   if (event.target.matches("[data-admin-company-filter]")) {
     const key = event.target.dataset.adminCompanyFilter;
     state.adminCompanyFilters[key] = event.target.value;
-    render();
+    renderPreservingInputAndScroll(event.target);
+    return;
   }
 
   if (event.target.matches("[data-admin-report-mode]")) {
@@ -5397,6 +5399,44 @@ function render() {
   } else {
     syncDetailsFromState();
   }
+}
+
+function renderPreservingInputAndScroll(input) {
+  const scrollX = window.scrollX;
+  const scrollY = window.scrollY;
+  const selector = getStableInputSelector(input);
+  const selectionStart = typeof input.selectionStart === "number" ? input.selectionStart : null;
+  const selectionEnd = typeof input.selectionEnd === "number" ? input.selectionEnd : null;
+
+  render();
+
+  requestAnimationFrame(() => {
+    window.scrollTo(scrollX, scrollY);
+    if (!selector) return;
+    const nextInput = document.querySelector(selector);
+    if (!nextInput) return;
+    nextInput.focus({ preventScroll: true });
+    if (
+      selectionStart !== null &&
+      selectionEnd !== null &&
+      typeof nextInput.setSelectionRange === "function" &&
+      ["text", "search", "email", "url", "tel", "password", ""].includes(nextInput.type || "")
+    ) {
+      nextInput.setSelectionRange(selectionStart, selectionEnd);
+    }
+  });
+}
+
+function getStableInputSelector(input) {
+  if (!input?.dataset) return "";
+  if (input.dataset.adminFilter) return `[data-admin-filter="${cssEscape(input.dataset.adminFilter)}"]`;
+  if (input.dataset.adminCompanyFilter) return `[data-admin-company-filter="${cssEscape(input.dataset.adminCompanyFilter)}"]`;
+  return "";
+}
+
+function cssEscape(value) {
+  if (window.CSS?.escape) return window.CSS.escape(String(value));
+  return String(value).replace(/["\\]/g, "\\$&");
 }
 
 function renderLoadingPage() {
