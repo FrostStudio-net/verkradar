@@ -2258,12 +2258,9 @@ function formatAdminReportMode(mode) {
 
 function getAdminNoReportMessage(payload, companyName) {
   const mode = payload?.report_mode || state.adminReportMode || "new_only";
-  if (state.language === "is") {
-    return mode === "new_only"
-      ? "Engin ný tækifæri fundust síðan síðasta yfirlit."
-      : `Engin viðeigandi tækifæri fundust fyrir ${companyName}.`;
-  }
-  return payload?.message || `No customer-report-ready matches found for ${companyName}.`;
+  return payload?.message || (mode === "new_only"
+    ? "No new eligible opportunities found since the previous report."
+    : `No customer-report-ready matches found for ${companyName}.`);
 }
 
 async function refreshAdminOperationsData() {
@@ -8218,7 +8215,7 @@ function renderAdminTabs() {
   const tabs = [
     ["overview", "Overview"],
     ["companies", "Companies"],
-    ["review", state.language === "is" ? "Yfirferð" : "Review Queue"],
+    ["review", "Review Queue"],
     ["sources", "Sources/imports"],
     ["opportunities", "Opportunities"],
     ["reports", "Reports"]
@@ -8306,33 +8303,6 @@ function renderAdminReviewQueue() {
 }
 
 function getAdminReviewLabels() {
-  if (state.language === "is") {
-    return {
-      title: "Yfirferð",
-      loading: "Hleð yfirferð...",
-      empty: "Engar óvissar samsvaranir bíða yfirferðar.",
-      count: (count) => `${count} óviss${count === 1 ? "" : "ar"} samsvörun${count === 1 ? "" : "ir"} þarfnast yfirferðar`,
-      opportunity: "Tækifæri",
-      company: "Fyrirtæki",
-      source: "Heimild",
-      buyer: "Kaupandi",
-      region: "Svæði",
-      deadline: "Skilafrestur",
-      score: "Samsvörun",
-      safety: "Öryggisflokkun",
-      alert: "Tilkynning",
-      safetyReasons: "Ástæður yfirferðar",
-      matchReasons: "Ástæður samsvörunar",
-      approve: "Samþykkja",
-      approving: "Samþykki...",
-      reject: "Hafna",
-      rejecting: "Hafna...",
-      noSource: "Heimildartengil vantar",
-      hidden: "Falið í yfirlitum",
-      notHidden: "Ekki falið í yfirlitum",
-      sourceUrl: "Slóð heimildar",
-    };
-  }
   return {
     title: "Review Queue",
     loading: "Loading review queue...",
@@ -8360,10 +8330,64 @@ function getAdminReviewLabels() {
   };
 }
 
+function formatAdminBuyer(opp) {
+  const sourceName = opp?.source || opp?.rawPayload?.source_name || "";
+  return getCleanOpportunityBuyer(opp?.buyer, sourceName, opp?.rawPayload || {}) || "Unknown buyer";
+}
+
+function formatAdminLocation(opp) {
+  const sourceName = opp?.source || opp?.rawPayload?.source_name || "";
+  return inferLocationFromSourceName(sourceName) || opp?.location || "Unknown";
+}
+
+function formatAdminDeadline(opp) {
+  const deadlineAt = String(opp?.deadlineAt || opp?.rawPayload?.deadline_at || "").trim();
+  const parsedDeadlineAt = deadlineAt.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{2}):(\d{2})/);
+  if (parsedDeadlineAt) return `${parsedDeadlineAt[1]} ${parsedDeadlineAt[2]}:${parsedDeadlineAt[3]}`;
+  if (opp?.deadline) return formatShortDate(opp.deadline);
+  return "Deadline not available in imported data — verify on source page.";
+}
+
+function formatAdminSafetyStatus(status) {
+  const value = String(status || "").toLowerCase();
+  const labels = {
+    auto_approved: "Auto-approved",
+    needs_review: "Needs review",
+    hidden: "Hidden"
+  };
+  return labels[value] || capitalize(value.replace(/_/g, " "));
+}
+
+function formatAdminAlertEligible(value) {
+  return value ? "Alert eligible" : "Not alert eligible";
+}
+
+function formatAdminReviewRequired(value) {
+  return value ? "Review required" : "Review not required";
+}
+
+function formatAdminMatchLabel(label) {
+  const value = String(label || "").trim();
+  const labels = {
+    "Strong match": "Strong match",
+    "Good match": "Good match",
+    "Possible match": "Possible match",
+    "Weak match": "Weak match"
+  };
+  return labels[value] || value || "Possible match";
+}
+
+function formatAdminReportReason(reason) {
+  return String(reason || "").trim();
+}
+
+function formatAdminRisk(risk) {
+  return String(risk || "").trim();
+}
+
 function renderAdminReviewCard(item) {
   const opp = item.opportunity || {};
   const busy = state.adminReviewActions?.[item.id] || "";
-  const deadline = getOpportunityDeadlineDisplay(opp);
   const sourceUrl = getSafeExternalUrl(opp.url);
   const labels = getAdminReviewLabels();
   const safetyReasons = item.safetyReasons.length ? item.safetyReasons : ["Needs admin review"];
@@ -8379,30 +8403,30 @@ function renderAdminReviewCard(item) {
           ${sourceUrl ? `<p class="admin-source-url"><span>${escapeHtml(labels.sourceUrl)}:</span> ${escapeHtml(sourceUrl)}</p>` : ""}
         </div>
         <div class="admin-review-source-action">
-          ${sourceUrl ? `<a class="btn btn-secondary btn-small" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener">${escapeHtml(t("openSource"))} ↗</a>` : `<span class="admin-chip">${escapeHtml(labels.noSource)}</span>`}
+          ${sourceUrl ? `<a class="btn btn-secondary btn-small" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener">Open source ↗</a>` : `<span class="admin-chip">${escapeHtml(labels.noSource)}</span>`}
         </div>
       </div>
 
       <div class="admin-review-meta-grid">
-        ${renderAdminReviewMeta(labels.buyer, formatOpportunityBuyer(opp))}
-        ${renderAdminReviewMeta(labels.region, formatOpportunityLocation(opp))}
-        ${renderAdminReviewMeta(labels.deadline, deadline.label || t("notFound"))}
-        ${renderAdminReviewMeta(labels.score, `${formatReportMatchLabel(item.matchLabel)} · ${Number(item.matchScore || 0)}`)}
-        ${renderAdminReviewMeta(labels.safety, formatSafetyStatus(item.safetyStatus))}
-        ${renderAdminReviewMeta(labels.alert, `${formatAlertEligible(item.alertEligible)} · ${item.reviewRequired ? (state.language === "is" ? "Þarfnast yfirferðar" : "Review required") : (state.language === "is" ? "Yfirferð ekki nauðsynleg" : "Review not required")}`)}
+        ${renderAdminReviewMeta(labels.buyer, formatAdminBuyer(opp))}
+        ${renderAdminReviewMeta(labels.region, formatAdminLocation(opp))}
+        ${renderAdminReviewMeta(labels.deadline, formatAdminDeadline(opp))}
+        ${renderAdminReviewMeta(labels.score, `${formatAdminMatchLabel(item.matchLabel)} · ${Number(item.matchScore || 0)}`)}
+        ${renderAdminReviewMeta(labels.safety, formatAdminSafetyStatus(item.safetyStatus))}
+        ${renderAdminReviewMeta(labels.alert, `${formatAdminAlertEligible(item.alertEligible)} · ${formatAdminReviewRequired(item.reviewRequired)}`)}
       </div>
 
       <div class="admin-review-reasons">
         <section class="admin-review-reason-box is-warning">
           <h4>${escapeHtml(labels.safetyReasons)}</h4>
           <ul>
-            ${safetyReasons.map((reason) => `<li>${escapeHtml(formatSafetyReason(reason))}</li>`).join("")}
+            ${safetyReasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}
           </ul>
         </section>
         <section class="admin-review-reason-box">
           <h4>${escapeHtml(labels.matchReasons)}</h4>
           <ul>
-            ${matchReasons.map((reason) => `<li>${escapeHtml(formatReportReason(reason))}</li>`).join("")}
+            ${matchReasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}
           </ul>
         </section>
       </div>
@@ -8702,7 +8726,7 @@ function renderAdminOpportunityRow(opp) {
     <div class="admin-row">
       <div>
         <h3>${escapeHtml(opp.title)}</h3>
-        <p>${escapeHtml(formatOpportunityBuyer(opp))} · ${escapeHtml(opp.source)} · ${escapeHtml(formatOpportunityLocation(opp))} · ${escapeHtml(opp.status)}</p>
+        <p>${escapeHtml(formatAdminBuyer(opp))} · ${escapeHtml(opp.source)} · ${escapeHtml(formatAdminLocation(opp))} · ${escapeHtml(opp.status)}</p>
         <p>Quality: ${escapeHtml(getOpportunityQualityLabel(opp))} · Intent: ${escapeHtml(formatOpportunityIntent(intent))}${hiddenFromReports ? " · Hidden from reports" : ""}${duplicateReason ? ` · Duplicate: ${escapeHtml(duplicateReason)}` : ""}${staleReason ? ` · Stale / expired: ${escapeHtml(staleReason)}` : ""}</p>
         <p>Debug: hidden_from_reports=${opp.rawPayload?.hidden_from_reports === true ? "true" : "false"} · admin_report_status=${escapeHtml(opp.rawPayload?.admin_report_status || "none")} · stale_status=${escapeHtml(opp.rawPayload?.stale_status || "none")}</p>
         ${renderAdminOpportunityMatchDebug(opp)}
@@ -8741,15 +8765,15 @@ function renderAdminOpportunityMatchDebug(opp) {
   const safety = classifyMatchSafety(company, match);
   return `
     <div class="admin-debug-panel">
-      <p><strong>Match debug for ${escapeHtml(company.companyName)}:</strong> score ${Number(match.matchScore || 0)} · ${escapeHtml(formatReportMatchLabel(match.matchLabel))}</p>
+      <p><strong>Match debug for ${escapeHtml(company.companyName)}:</strong> score ${Number(match.matchScore || 0)} · ${escapeHtml(formatAdminMatchLabel(match.matchLabel))}</p>
       <p><strong>Services:</strong> ${escapeHtml(serviceText)}</p>
       <p><strong>Keywords:</strong> ${escapeHtml(keywordText)}</p>
       <p><strong>Matched terms:</strong> ${matchedTerms.length ? matchedTerms.map((term) => `<span class="admin-chip">${escapeHtml(term)}</span>`).join(" ") : "None"}</p>
       <p><strong>Missing profile terms:</strong> ${missingTerms.length ? missingTerms.map((term) => `<span class="admin-chip">${escapeHtml(term)}</span>`).join(" ") : "None"}</p>
       <p><strong>Score contribution:</strong> ${scoreContributions.map((item) => `<span class="admin-chip">${escapeHtml(item)}</span>`).join(" ")}</p>
-      <p><strong>Matched terms/reasons:</strong> ${(match.matchReasons || []).map((reason) => `<span class="admin-chip">${escapeHtml(formatReportReason(reason))}</span>`).join(" ") || "None"}</p>
-      <p><strong>Risks:</strong> ${(match.risks || []).map((risk) => `<span class="admin-chip">${escapeHtml(formatReportRisk(risk))}</span>`).join(" ") || "None"}</p>
-      <p><strong>Safety:</strong> <span class="admin-chip">${escapeHtml(formatSafetyStatus(safety.safetyStatus))}</span> <span class="admin-chip">${escapeHtml(formatAlertEligible(safety.alertEligible))}</span> ${(safety.safetyReasons || []).map((reason) => `<span class="admin-chip">${escapeHtml(formatSafetyReason(reason))}</span>`).join(" ")}</p>
+      <p><strong>Matched terms/reasons:</strong> ${(match.matchReasons || []).map((reason) => `<span class="admin-chip">${escapeHtml(formatAdminReportReason(reason))}</span>`).join(" ") || "None"}</p>
+      <p><strong>Risks:</strong> ${(match.risks || []).map((risk) => `<span class="admin-chip">${escapeHtml(formatAdminRisk(risk))}</span>`).join(" ") || "None"}</p>
+      <p><strong>Safety:</strong> <span class="admin-chip">${escapeHtml(formatAdminSafetyStatus(safety.safetyStatus))}</span> <span class="admin-chip">${escapeHtml(formatAdminAlertEligible(safety.alertEligible))}</span> ${(safety.safetyReasons || []).map((reason) => `<span class="admin-chip">${escapeHtml(reason)}</span>`).join(" ")}</p>
       <p><strong>Excluded by:</strong> ${excludedReasons.length ? excludedReasons.map((reason) => `<span class="admin-chip">${escapeHtml(reason)}</span>`).join(" ") : "<span class=\"admin-chip\">Not excluded by local dashboard/report filters</span>"}</p>
     </div>
   `;
