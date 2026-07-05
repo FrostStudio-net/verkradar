@@ -3171,6 +3171,13 @@ body.modal-open {
   margin-top: auto;
 }
 
+.pricing-trial-note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
 .pricing-card.highlighted {
   border-color: rgba(215,255,63,0.45);
   transform: translateY(-8px);

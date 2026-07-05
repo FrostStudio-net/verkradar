@@ -97,6 +97,7 @@ const translations = {
     pricingMonth: "/mán.",
     pricingBadge: "Hentar flestum fyrirtækjum",
     pricingCta: "Fá prufuaðgang",
+    pricingTrialNoCard: "Engin greiðslukort krafist í prufu.",
     pricingWeeklyReport: "Vikulegt yfirlit",
     pricingFiveMatches: "Allt að 5 samsvaranir á viku",
     pricingBasicMatching: "Grunnsamsvörun",
@@ -127,6 +128,8 @@ const translations = {
     createAccount: "Stofna aðgang",
     createAccountTitle: "Stofna VerkRadar aðgang",
     createAccountSubtitle: "Byrjið á að stofna aðgang. Síðan stofnið þið fyrirtækjaprófíl.",
+    authRequiredTitle: "Skráðu þig inn til að halda áfram",
+    authRequiredText: "Þessi síða er aðgengileg eftir innskráningu.",
     creating: "Stofna...",
     alreadyHaveAccount: "Ertu þegar með aðgang?",
     passwordReset: "Endurstilla lykilorð",
@@ -353,6 +356,7 @@ const translations = {
     pricingMonth: "/month",
     pricingBadge: "Best for most businesses",
     pricingCta: "Get trial access",
+    pricingTrialNoCard: "No credit card required for the trial.",
     pricingWeeklyReport: "Weekly report",
     pricingFiveMatches: "Up to 5 matched opportunities/week",
     pricingBasicMatching: "Basic matching",
@@ -383,6 +387,8 @@ const translations = {
     createAccount: "Create account",
     createAccountTitle: "Create your VerkRadar account",
     createAccountSubtitle: "Start by creating an account. Then you’ll create your company profile.",
+    authRequiredTitle: "Log in to continue",
+    authRequiredText: "This page is available after you sign in.",
     creating: "Creating...",
     alreadyHaveAccount: "Already have an account?",
     passwordReset: "Password reset",
@@ -1506,6 +1512,11 @@ function navigate(route) {
 
 function getPostAuthRoute() {
   if (!state.user && !state.currentUser) return "/";
+  return state.profile ? "/dashboard" : "/onboarding";
+}
+
+function getTrialAccessHref() {
+  if (!state.user && !state.currentUser) return "/signup";
   return state.profile ? "/dashboard" : "/onboarding";
 }
 
@@ -3091,7 +3102,7 @@ async function getTedImportHeaders() {
 }
 
 function getAuthRedirectUrl() {
-  return window.location.origin;
+  return `${window.location.origin}/#/onboarding`;
 }
 
 function getPasswordResetRedirectUrl() {
@@ -3299,10 +3310,10 @@ async function checkAdminAccess(user = state.user) {
 function requireAuthPage() {
   return renderShell(`
     <section class="empty-state">
-      <h1>Log in to continue</h1>
-      <p>This page is available after you sign in.</p>
-      <button class="btn btn-primary" data-action="go" data-href="/login">Login</button>
-      <button class="btn btn-secondary" data-action="go" data-href="/signup">Create account</button>
+      <h1>${escapeHtml(t("authRequiredTitle"))}</h1>
+      <p>${escapeHtml(t("authRequiredText"))}</p>
+      <button class="btn btn-primary" data-action="go" data-href="/login">${escapeHtml(t("login"))}</button>
+      <button class="btn btn-secondary" data-action="go" data-href="/signup">${escapeHtml(t("createAccount"))}</button>
     </section>
   `);
 }
@@ -7089,7 +7100,7 @@ function renderLanding() {
           ${escapeHtml(t("heroText"))}
         </p>
         <div class="hero-actions">
-          <button class="btn btn-primary btn-large" data-action="go" data-href="/onboarding">${escapeHtml(t("createFreeDemoProfile"))} <span aria-hidden="true">&rarr;</span></button>
+          <button class="btn btn-primary btn-large" data-action="go" data-href="${escapeHtml(getTrialAccessHref())}">${escapeHtml(t("createFreeDemoProfile"))} <span aria-hidden="true">&rarr;</span></button>
           <button class="btn btn-secondary btn-large" data-action="scroll-to" data-target="sample-report">${escapeHtml(t("viewSampleReport"))}</button>
         </div>
         <div class="proof-lines" aria-label="Product proof">
@@ -10178,7 +10189,8 @@ function pricingCard(plan) {
       <ul class="check-list">
         ${plan.items.map((i) => `<li>${escapeHtml(i)}</li>`).join("")}
       </ul>
-      <button class="btn pricing-cta ${highlighted ? "btn-primary" : "btn-secondary"}" data-action="go" data-href="/onboarding">${escapeHtml(t("pricingCta"))}</button>
+      <button class="btn pricing-cta ${highlighted ? "btn-primary" : "btn-secondary"}" data-action="go" data-href="${escapeHtml(getTrialAccessHref())}">${escapeHtml(t("pricingCta"))}</button>
+      <p class="pricing-trial-note">${escapeHtml(t("pricingTrialNoCard"))}</p>
     </div>
   `;
 }
