@@ -5614,18 +5614,24 @@ function renderShell(content) {
         <button class="brand" data-action="go" data-href="/">
           <img class="brand-logo" src="./logo.png" alt="VerkRadar" />
         </button>
-        <button
-          class="menu-toggle"
-          type="button"
-          data-action="toggle-mobile-menu"
-          aria-label="${state.isMobileMenuOpen ? t("closeMenu") : t("openMenu")}"
-          aria-expanded="${state.isMobileMenuOpen ? "true" : "false"}"
-          aria-controls="mobile-menu"
-        >
-          <span></span>
-          <span></span>
-          <span></span>
-        </button>
+        <div class="mobile-header-actions">
+          <button class="language-toggle mobile-header-language-toggle" type="button" data-action="toggle-language" aria-label="Switch language">
+            <span class="${state.language === "is" ? "active" : ""}">IS</span>
+            <span class="${state.language === "en" ? "active" : ""}">EN</span>
+          </button>
+          <button
+            class="menu-toggle"
+            type="button"
+            data-action="toggle-mobile-menu"
+            aria-label="${state.isMobileMenuOpen ? t("closeMenu") : t("openMenu")}"
+            aria-expanded="${state.isMobileMenuOpen ? "true" : "false"}"
+            aria-controls="mobile-menu"
+          >
+            <span></span>
+            <span></span>
+            <span></span>
+          </button>
+        </div>
       </div>
       <div class="header-menu" id="site-menu">
         <nav class="site-nav">
@@ -5890,13 +5896,6 @@ function renderMobileMenuPanel(navItems, headerCta, isLoggedIn) {
   return `
     <nav class="mobile-menu-panel" id="mobile-menu">
       <div class="mobile-menu-scroll">
-        <div class="mobile-language-block">
-          <span>${state.language === "is" ? "Tungumál" : "Language"}</span>
-          <button class="language-toggle mobile-language-toggle" type="button" data-action="toggle-language" aria-label="Switch language">
-            <span class="${state.language === "is" ? "active" : ""}">IS</span>
-            <span class="${state.language === "en" ? "active" : ""}">EN</span>
-          </button>
-        </div>
       <div class="mobile-menu-links">
         ${linkItems}
         ${isLoggedIn && state.isAdmin ? `<button type="button" data-action="mobile-nav" data-href="/admin">Admin</button>` : ""}
@@ -5936,7 +5935,6 @@ function renderMobileAccountSection(headerCta, isLoggedIn) {
           ? `<button type="button" data-action="mobile-nav" data-href="/settings">${t("navSettings")}</button>`
           : `<button type="button" data-action="mobile-nav" data-href="/onboarding">${t("createProfile")}</button>`
         }
-        ${state.isAdmin ? `<button type="button" data-action="mobile-nav" data-href="/admin">Admin</button>` : ""}
         <button type="button" class="mobile-logout" data-action="logout">${t("logout")}</button>
       </div>
     </div>
