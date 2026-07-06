@@ -10282,7 +10282,7 @@ function renderPricing() {
     },
     {
       name: t("pricingPro"),
-      price: "39.900 kr",
+      price: "29.900 kr",
       items: [
         t("pricingEverythingGrowth"),
         t("pricingDocumentSummaries"),
