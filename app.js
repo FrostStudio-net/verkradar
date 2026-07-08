@@ -29,8 +29,10 @@ import {
   localizeLegacyReportContent,
   normalizeLocationText,
   parseCommaList,
+  requestCompanyAiReviewBatch,
   requestAiMatchReview,
   PROFILE_SUGGESTIONS,
+  renderAdminCompanyAiReviewPanel,
   renderForgotPasswordPage,
   renderLandingPage,
   renderLegalPageContent,
@@ -171,6 +173,9 @@ let state = {
   adminReviewActions: {},
   adminAiReviewActions: {},
   adminAiReviewError: null,
+  adminCompanyAiReviewActions: {},
+  adminCompanyAiReviewResults: {},
+  adminCompanyAiReviewFilter: "not_reviewed",
   adminCompanyActions: {},
   selectedAdminCompanyId: null,
   adminActiveTab: "overview",
@@ -593,6 +598,10 @@ document.addEventListener("click", (event) => {
     runAdminAiReview(id);
     return;
   }
+  if (name === "admin-ai-review-company") {
+    runAdminCompanyAiReviewBatch(id);
+    return;
+  }
   if (name === "import-ted") importTedNotices();
   if (name === "import-source-connectors") importSourceConnectors();
   if (name === "test-source-connector") importSourceConnectors(id);
@@ -800,6 +809,11 @@ document.addEventListener("input", (event) => {
     state.adminReportMode = event.target.value === "all_current" ? "all_current" : "new_only";
     render();
   }
+
+  if (event.target.matches("[data-admin-company-ai-filter]")) {
+    state.adminCompanyAiReviewFilter = event.target.value || "not_reviewed";
+    renderPreservingInputAndScroll(event.target);
+  }
 });
 
 document.addEventListener("change", (event) => {
@@ -819,6 +833,12 @@ document.addEventListener("change", (event) => {
   if (event.target.matches("[data-import-mode]")) {
     state.tedImportMode = event.target.value;
     render();
+    return;
+  }
+
+  if (event.target.matches("[data-admin-company-ai-filter]")) {
+    state.adminCompanyAiReviewFilter = event.target.value || "not_reviewed";
+    renderPreservingInputAndScroll(event.target);
     return;
   }
 
@@ -1431,7 +1451,10 @@ async function loadAdminCompanies() {
         supabaseClient.from("company_services").select("company_id, service").in("company_id", companyIds),
         supabaseClient.from("company_locations").select("company_id, location").in("company_id", companyIds),
         supabaseClient.from("company_keywords").select("company_id, keyword, type").in("company_id", companyIds),
-        supabaseClient.from("opportunity_matches").select("company_id, opportunity_id, match_score, match_label, safety_status, opportunities(title, buyer, source_id, sources(name))").in("company_id", companyIds),
+        supabaseClient
+          .from("opportunity_matches")
+          .select("id, company_id, opportunity_id, match_score, match_label, safety_status, ai_review_status, ai_review_fit, ai_review_confidence, ai_reviewed_at, opportunities(title, buyer, source_id, sources(name))")
+          .in("company_id", companyIds),
         supabaseClient.from("reports").select("id, company_id, title, created_at, period_start, period_end, status").in("company_id", companyIds).order("created_at", { ascending: false })
       ]);
 
@@ -1618,7 +1641,7 @@ function mapAdminCompany(company, related) {
     matchCount: matches.length,
     savedCount: 0,
     latestReportDate: reports[0]?.created_at || "",
-    latestMatches: matches.slice(0, 8),
+    latestMatches: matches.slice(0, 30),
     latestReports: reports.slice(0, 5)
   };
 }
@@ -1822,6 +1845,52 @@ async function runAdminAiReview(matchId) {
     const next = { ...(state.adminAiReviewActions || {}) };
     delete next[matchId];
     state.adminAiReviewActions = next;
+    render();
+  }
+}
+
+async function runAdminCompanyAiReviewBatch(companyId) {
+  if (!state.isAdmin) {
+    state.adminMessage = { type: "error", text: "You do not have access to this action." };
+    render();
+    return;
+  }
+  if (!companyId) {
+    state.adminMessage = { type: "error", text: "Missing company ID for AI review batch." };
+    render();
+    return;
+  }
+
+  state.adminCompanyAiReviewActions = {
+    ...(state.adminCompanyAiReviewActions || {}),
+    [companyId]: true
+  };
+  state.adminMessage = null;
+  render();
+
+  try {
+    const payload = await requestCompanyAiReviewBatch(companyId, { limit: 10 });
+    state.adminCompanyAiReviewResults = {
+      ...(state.adminCompanyAiReviewResults || {}),
+      [companyId]: payload
+    };
+    await Promise.all([loadAdminCompanies(), loadAdminReviewQueue()]);
+    if (state.companyId === companyId) await loadStoredMatchesForCurrentCompany();
+    state.adminMessage = {
+      type: "success",
+      text: `AI batch reviewed ${Number(payload.reviewed || 0)} matches. ${Number(payload.skipped || 0)} skipped.`
+    };
+    showToast("AI company review completed", "success");
+  } catch (error) {
+    console.error("Failed to run company AI review batch:", error);
+    state.adminMessage = {
+      type: "error",
+      text: `AI company review failed. ${formatSupabaseError(error)}`
+    };
+  } finally {
+    const next = { ...(state.adminCompanyAiReviewActions || {}) };
+    delete next[companyId];
+    state.adminCompanyAiReviewActions = next;
     render();
   }
 }
@@ -8009,6 +8078,14 @@ function renderAdminCompanyDetails(company) {
                 </ul>
               ` : `<p>No reports generated yet.</p>`}
             </section>
+
+            ${renderAdminCompanyAiReviewPanel(company, {
+              escapeHtml,
+              formatDateTime,
+              actionState: state.adminCompanyAiReviewActions?.[company.id] ? "running" : "",
+              filter: state.adminCompanyAiReviewFilter,
+              lastResult: state.adminCompanyAiReviewResults?.[company.id] || null
+            })}
           </div>
         </div>
       </div>

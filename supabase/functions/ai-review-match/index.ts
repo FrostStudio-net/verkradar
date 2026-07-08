@@ -40,6 +40,15 @@ Deno.serve(async (req) => {
     if (!adminRow) return json({ error: "Admin access required" }, 403);
 
     const body = await safeJson(req);
+    const companyId = String(body.companyId || body.company_id || "").trim();
+    const batch = body.batch === true || body.mode === "batch";
+    const limit = Math.max(1, Math.min(20, Number(body.limit || 10)));
+    if (batch) {
+      if (!isUuid(companyId)) return json({ error: "A valid companyId is required for batch review." }, 400);
+      const result = await runBatchReview(adminClient, openAiKey, model, companyId, limit);
+      return json({ ok: true, ...result });
+    }
+
     const matchId = String(body.matchId || body.match_id || "").trim();
     if (!isUuid(matchId)) return json({ error: "A valid matchId is required." }, 400);
     const force = body.force === true;
@@ -56,30 +65,7 @@ Deno.serve(async (req) => {
       if (existing) return json({ ok: true, cached: true, review: existing });
     }
 
-    const rawReview = await callOpenAiForReview(openAiKey, model, context);
-    const review = applyHardSafetyRules(rawReview, context);
-    const row = {
-      company_id: context.company.id,
-      opportunity_id: context.opportunity.id,
-      match_id: context.match.id,
-      fit: review.fit,
-      confidence: review.confidence,
-      send_to_client: review.send_to_client,
-      reason: review.reason,
-      fit_reasons: review.fit_reasons,
-      risks_or_questions: review.risks_or_questions,
-      suggested_client_summary: review.suggested_client_summary,
-      model,
-      updated_at: new Date().toISOString(),
-    };
-
-    const { data: saved, error: saveError } = await adminClient
-      .from("ai_match_reviews")
-      .upsert(row, { onConflict: "company_id,opportunity_id" })
-      .select("*")
-      .single();
-    if (saveError) throw saveError;
-
+    const saved = await createAndSaveReview(adminClient, openAiKey, model, context);
     return json({ ok: true, cached: false, review: saved });
   } catch (error) {
     console.error("AI match review failed:", error);
@@ -158,6 +144,167 @@ async function loadReviewContext(supabase: ReturnType<typeof createClient>, matc
       rawPayload: match.opportunities.raw_payload && typeof match.opportunities.raw_payload === "object" ? match.opportunities.raw_payload : {},
     },
   };
+}
+
+async function runBatchReview(
+  supabase: ReturnType<typeof createClient>,
+  openAiKey: string,
+  model: string,
+  companyId: string,
+  limit: number,
+) {
+  const candidates = await loadBatchCandidates(supabase, companyId, limit);
+  const summary = {
+    company_id: companyId,
+    reviewed: 0,
+    strong: 0,
+    possible: 0,
+    weak_or_no_fit: 0,
+    skipped: 0,
+    token_usage: null as null | Record<string, unknown>,
+    estimated_cost: null as null | string,
+    reviews: [] as Record<string, unknown>[],
+    skipped_samples: [] as string[],
+  };
+
+  for (const candidate of candidates) {
+    try {
+      const context = await loadReviewContext(supabase, String(candidate.id || ""));
+      const saved = await createAndSaveReview(supabase, openAiKey, model, context);
+      summary.reviewed += 1;
+      if (saved.fit === "strong") summary.strong += 1;
+      else if (saved.fit === "possible") summary.possible += 1;
+      else summary.weak_or_no_fit += 1;
+      summary.reviews.push(saved);
+    } catch (error) {
+      summary.skipped += 1;
+      summary.skipped_samples.push(errorMessage(error));
+    }
+  }
+
+  return summary;
+}
+
+async function loadBatchCandidates(supabase: ReturnType<typeof createClient>, companyId: string, limit: number) {
+  const { data: matches, error } = await supabase
+    .from("opportunity_matches")
+    .select(`
+      id,
+      opportunity_id,
+      match_score,
+      match_label,
+      safety_status,
+      reviewed_at,
+      ai_review_status,
+      opportunities (
+        id,
+        title,
+        deadline,
+        status,
+        raw_payload
+      )
+    `)
+    .eq("company_id", companyId)
+    .gte("match_score", 50)
+    .neq("safety_status", "hidden")
+    .order("match_score", { ascending: false })
+    .limit(100);
+  if (error) throw error;
+
+  const reviews = await loadExistingReviewKeys(supabase, companyId, (matches || []).map((match) => String(match.opportunity_id || "")));
+  const candidates = [];
+  for (const match of matches || []) {
+    if (candidates.length >= limit) break;
+    if (reviews.has(String(match.opportunity_id || ""))) continue;
+    if (String(match.ai_review_status || "not_reviewed") !== "not_reviewed") continue;
+    if (match.reviewed_at && String(match.safety_status || "") === "hidden") continue;
+    const opportunity = match.opportunities as Record<string, unknown> | null;
+    if (!opportunity || !isBatchEligibleOpportunity(opportunity)) continue;
+    candidates.push(match);
+  }
+  return candidates;
+}
+
+async function loadExistingReviewKeys(supabase: ReturnType<typeof createClient>, companyId: string, opportunityIds: string[]) {
+  const ids = uniqueStrings(opportunityIds).filter(isUuid);
+  if (!ids.length) return new Set<string>();
+  const { data, error } = await supabase
+    .from("ai_match_reviews")
+    .select("opportunity_id")
+    .eq("company_id", companyId)
+    .in("opportunity_id", ids);
+  if (error) throw error;
+  return new Set((data || []).map((row) => String(row.opportunity_id || "")));
+}
+
+function isBatchEligibleOpportunity(opportunity: Record<string, unknown>) {
+  const payload = opportunity.raw_payload && typeof opportunity.raw_payload === "object" ? opportunity.raw_payload as Record<string, unknown> : {};
+  const deadline = String(opportunity.deadline || payload.deadline_at || payload.bid_deadline_at || "").trim();
+  if (!deadline || daysUntil(deadline) < 0) return false;
+  if (String(opportunity.status || "").toLowerCase() === "hidden") return false;
+  if (payload.hidden_from_reports === true) return false;
+  if (["hidden", "noise", "deleted"].includes(String(payload.admin_report_status || "").toLowerCase())) return false;
+  if (String(payload.stale_status || "").toLowerCase()) return false;
+  return true;
+}
+
+async function createAndSaveReview(
+  supabase: ReturnType<typeof createClient>,
+  openAiKey: string,
+  model: string,
+  context: Record<string, unknown>,
+) {
+  const rawReview = await callOpenAiForReview(openAiKey, model, context);
+  const review = applyHardSafetyRules(rawReview, context);
+  const match = context.match as Record<string, unknown>;
+  const company = context.company as Record<string, unknown>;
+  const opportunity = context.opportunity as Record<string, unknown>;
+  const row = {
+    company_id: company.id,
+    opportunity_id: opportunity.id,
+    match_id: match.id,
+    fit: review.fit,
+    confidence: review.confidence,
+    send_to_client: review.send_to_client,
+    reason: review.reason,
+    fit_reasons: review.fit_reasons,
+    risks_or_questions: review.risks_or_questions,
+    suggested_client_summary: review.suggested_client_summary,
+    model,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { data: saved, error: saveError } = await supabase
+    .from("ai_match_reviews")
+    .upsert(row, { onConflict: "company_id,opportunity_id" })
+    .select("*")
+    .single();
+  if (saveError) throw saveError;
+  await updateMatchAiReviewStatus(supabase, String(match.id || ""), review);
+  return saved;
+}
+
+async function updateMatchAiReviewStatus(supabase: ReturnType<typeof createClient>, matchId: string, review: ReturnType<typeof normalizeAiReview>) {
+  const status = getAiReviewStatus(review);
+  const { error } = await supabase
+    .from("opportunity_matches")
+    .update({
+      ai_review_status: status,
+      ai_review_fit: review.fit,
+      ai_review_confidence: review.confidence,
+      ai_reviewed_at: new Date().toISOString(),
+      ...(review.fit === "weak" || review.fit === "no_fit" ? { review_required: true } : {}),
+    })
+    .eq("id", matchId);
+  if (error) throw error;
+}
+
+function getAiReviewStatus(review: ReturnType<typeof normalizeAiReview>) {
+  if (review.confidence < 0.65) return "needs_review";
+  if (review.fit === "strong" && review.send_to_client) return "ready_for_admin";
+  if (review.fit === "possible" && review.send_to_client) return "possible";
+  if (review.fit === "weak" || review.fit === "no_fit") return "low_priority";
+  return "needs_review";
 }
 
 async function callOpenAiForReview(openAiKey: string, model: string, context: Record<string, unknown>) {

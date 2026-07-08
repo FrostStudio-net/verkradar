@@ -2165,6 +2165,52 @@ select option:checked {
   text-transform: uppercase;
 }
 
+.admin-company-ai-panel {
+  grid-column: 1 / -1;
+}
+
+.admin-company-ai-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: start;
+}
+
+.admin-company-ai-header h3 {
+  margin-top: 0;
+}
+
+.admin-company-ai-header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.admin-company-ai-filter {
+  margin-top: 12px;
+  width: min(340px, 100%);
+}
+
+.admin-ai-batch-result {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid rgba(215,255,63,0.16);
+  border-radius: 8px;
+  background: rgba(215,255,63,0.055);
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.admin-ai-batch-result strong {
+  color: var(--text);
+}
+
+.admin-ai-match-list span {
+  overflow-wrap: anywhere;
+}
+
 .source-items-row td {
   background: rgba(255,255,255,0.018);
 }
@@ -4221,6 +4267,10 @@ body.modal-open {
   }
 
   .admin-ai-review-header {
+    display: grid;
+  }
+
+  .admin-company-ai-header {
     display: grid;
   }
 

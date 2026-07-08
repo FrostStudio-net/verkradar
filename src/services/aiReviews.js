@@ -28,6 +28,28 @@ export async function requestAiMatchReview(matchId, options = {}) {
   return payload;
 }
 
+export async function requestCompanyAiReviewBatch(companyId, options = {}) {
+  const endpoint = getAiReviewEndpoint();
+  if (!endpoint) {
+    throw new Error("AI review function is not configured. Set window.VERKRADAR_AI_REVIEW_MATCH_URL or window.VERKRADAR_SUPABASE_URL.");
+  }
+  const headers = await getAiReviewHeaders();
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      batch: true,
+      companyId,
+      limit: Math.max(1, Math.min(20, Number(options.limit || 10))),
+    }),
+  });
+  const payload = await readJsonResponse(response);
+  if (!response.ok) {
+    throw new Error(payload.error || payload.message || `AI review batch failed with status ${response.status}`);
+  }
+  return payload;
+}
+
 async function getAiReviewHeaders() {
   const headers = { "content-type": "application/json" };
   const anonKey = window.VERKRADAR_SUPABASE_ANON_KEY || SUPABASE_ANON_KEY;
