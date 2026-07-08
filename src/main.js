@@ -2,6 +2,7 @@ export { STORAGE_KEYS } from "./state.js";
 export { getInitialLanguage, translate, translations } from "./i18n.js";
 export { createEmptyProfile, DEFAULT_PROFILE, PROFILE_SUGGESTIONS } from "./services/companies.js";
 export { getLegalPageData } from "./services/legal.js";
+export { requestAiMatchReview } from "./services/aiReviews.js";
 export { renderForgotPasswordPage, renderLoginPage, renderResetPasswordPage, renderSignupPage } from "./pages/auth.js";
 export { renderDashboardEmptyStatePage, renderDashboardPage, renderOpportunityCardPage, renderOpportunityModalPage } from "./pages/dashboard.js";
 export { renderLegalPageContent } from "./pages/legal.js";

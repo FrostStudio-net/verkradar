@@ -29,6 +29,7 @@ import {
   localizeLegacyReportContent,
   normalizeLocationText,
   parseCommaList,
+  requestAiMatchReview,
   PROFILE_SUGGESTIONS,
   renderForgotPasswordPage,
   renderLandingPage,
@@ -168,6 +169,8 @@ let state = {
   adminReviewLoaded: false,
   adminReviewError: null,
   adminReviewActions: {},
+  adminAiReviewActions: {},
+  adminAiReviewError: null,
   adminCompanyActions: {},
   selectedAdminCompanyId: null,
   adminActiveTab: "overview",
@@ -584,6 +587,10 @@ document.addEventListener("click", (event) => {
   }
   if (name === "admin-review-match") {
     reviewAdminMatch(id, action.dataset.companyId || "", action.dataset.reviewAction || "");
+    return;
+  }
+  if (name === "admin-ai-review-match") {
+    runAdminAiReview(id);
     return;
   }
   if (name === "import-ted") importTedNotices();
@@ -1498,7 +1505,21 @@ async function loadAdminReviewQueue() {
       .limit(100);
 
     if (error) throw error;
-    state.adminReviewMatches = (data || []).map(mapAdminReviewMatch);
+    const rows = data || [];
+    const companyIds = uniqueStrings(rows.map((row) => row.company_id));
+    const opportunityIds = uniqueStrings(rows.map((row) => row.opportunity_id));
+    let aiReviews = [];
+    if (companyIds.length && opportunityIds.length) {
+      const { data: reviewRows, error: reviewError } = await supabaseClient
+        .from("ai_match_reviews")
+        .select("*")
+        .in("company_id", companyIds)
+        .in("opportunity_id", opportunityIds);
+      if (reviewError) throw reviewError;
+      aiReviews = reviewRows || [];
+    }
+    const reviewByKey = new Map(aiReviews.map((review) => [`${review.company_id}:${review.opportunity_id}`, review]));
+    state.adminReviewMatches = rows.map((row) => mapAdminReviewMatch(row, reviewByKey.get(`${row.company_id}:${row.opportunity_id}`)));
     state.adminReviewLoaded = true;
   } catch (error) {
     console.error("Failed to load admin review queue:", error);
@@ -1511,7 +1532,7 @@ async function loadAdminReviewQueue() {
   }
 }
 
-function mapAdminReviewMatch(row) {
+function mapAdminReviewMatch(row, aiReview = null) {
   const opportunity = mapSupabaseOpportunity(row.opportunities || {});
   return {
     id: row.id,
@@ -1527,7 +1548,24 @@ function mapAdminReviewMatch(row) {
     safetyReasons: Array.isArray(row.safety_reasons) ? row.safety_reasons : [],
     alertEligible: Boolean(row.alert_eligible),
     reviewRequired: Boolean(row.review_required),
-    calculatedAt: row.calculated_at
+    calculatedAt: row.calculated_at,
+    aiReview: aiReview ? mapAiReview(aiReview) : null
+  };
+}
+
+function mapAiReview(row) {
+  return {
+    id: row.id,
+    fit: row.fit || "weak",
+    confidence: Number(row.confidence || 0),
+    sendToClient: Boolean(row.send_to_client),
+    reason: row.reason || "",
+    fitReasons: Array.isArray(row.fit_reasons) ? row.fit_reasons.map(String) : [],
+    risksOrQuestions: Array.isArray(row.risks_or_questions) ? row.risks_or_questions.map(String) : [],
+    suggestedClientSummary: row.suggested_client_summary || "",
+    model: row.model || "",
+    createdAt: row.created_at || "",
+    updatedAt: row.updated_at || ""
   };
 }
 
@@ -1741,6 +1779,49 @@ async function reviewAdminMatch(matchId, companyId, reviewAction) {
     const next = { ...(state.adminReviewActions || {}) };
     delete next[matchId];
     state.adminReviewActions = next;
+    render();
+  }
+}
+
+async function runAdminAiReview(matchId) {
+  if (!state.isAdmin) {
+    state.adminMessage = { type: "error", text: "You do not have access to this action." };
+    render();
+    return;
+  }
+  if (!matchId) {
+    state.adminMessage = { type: "error", text: "Missing match ID for AI review." };
+    render();
+    return;
+  }
+
+  state.adminAiReviewActions = {
+    ...(state.adminAiReviewActions || {}),
+    [matchId]: true
+  };
+  state.adminAiReviewError = null;
+  state.adminMessage = null;
+  render();
+
+  try {
+    const payload = await requestAiMatchReview(matchId);
+    await loadAdminReviewQueue();
+    state.adminMessage = {
+      type: "success",
+      text: payload.cached ? "Loaded cached AI review." : "AI review completed."
+    };
+    showToast(payload.cached ? "AI review loaded" : "AI review completed", "success");
+  } catch (error) {
+    console.error("Failed to run AI match review:", error);
+    state.adminAiReviewError = formatSupabaseError(error);
+    state.adminMessage = {
+      type: "error",
+      text: `AI review failed. ${formatSupabaseError(error)}`
+    };
+  } finally {
+    const next = { ...(state.adminAiReviewActions || {}) };
+    delete next[matchId];
+    state.adminAiReviewActions = next;
     render();
   }
 }
@@ -7492,6 +7573,14 @@ function getAdminReviewLabels() {
     alert: "Alert",
     safetyReasons: "Safety reasons",
     matchReasons: "Match reasons",
+    aiReview: "AI review",
+    aiReviewButton: "AI review",
+    aiReviewing: "Reviewing...",
+    aiFit: "Fit",
+    aiConfidence: "Confidence",
+    aiSend: "Send to client",
+    aiSummary: "Suggested client summary",
+    aiNoReview: "No AI review saved yet.",
     approve: "Approve",
     approving: "Approving...",
     reject: "Reject",
@@ -7561,6 +7650,7 @@ function formatAdminRisk(risk) {
 function renderAdminReviewCard(item) {
   const opp = item.opportunity || {};
   const busy = state.adminReviewActions?.[item.id] || "";
+  const aiBusy = Boolean(state.adminAiReviewActions?.[item.id]);
   const sourceUrl = getSafeExternalUrl(opp.url);
   const labels = getAdminReviewLabels();
   const safetyReasons = item.safetyReasons.length ? item.safetyReasons : ["Needs admin review"];
@@ -7604,15 +7694,59 @@ function renderAdminReviewCard(item) {
         </section>
       </div>
 
+      ${renderAdminAiReviewResult(item, labels)}
+
       <div class="admin-review-actions">
         <span class="admin-review-hidden-state">${escapeHtml(opp.rawPayload?.hidden_from_reports === true ? labels.hidden : labels.notHidden)}</span>
         <div class="admin-row-actions">
-          <button class="btn btn-ghost btn-small" data-action="admin-review-match" data-review-action="approve" data-id="${escapeHtml(item.id)}" data-company-id="${escapeHtml(item.companyId)}" ${busy ? "disabled" : ""}>${busy === "approve" ? escapeHtml(labels.approving) : escapeHtml(labels.approve)}</button>
-          <button class="btn btn-ghost btn-small" data-action="admin-review-match" data-review-action="reject" data-id="${escapeHtml(item.id)}" data-company-id="${escapeHtml(item.companyId)}" ${busy ? "disabled" : ""}>${busy === "reject" ? escapeHtml(labels.rejecting) : escapeHtml(labels.reject)}</button>
+          <button class="btn btn-secondary btn-small" data-action="admin-ai-review-match" data-id="${escapeHtml(item.id)}" ${busy || aiBusy ? "disabled" : ""}>${aiBusy ? escapeHtml(labels.aiReviewing) : escapeHtml(labels.aiReviewButton)}</button>
+          <button class="btn btn-ghost btn-small" data-action="admin-review-match" data-review-action="approve" data-id="${escapeHtml(item.id)}" data-company-id="${escapeHtml(item.companyId)}" ${busy || aiBusy ? "disabled" : ""}>${busy === "approve" ? escapeHtml(labels.approving) : escapeHtml(labels.approve)}</button>
+          <button class="btn btn-ghost btn-small" data-action="admin-review-match" data-review-action="reject" data-id="${escapeHtml(item.id)}" data-company-id="${escapeHtml(item.companyId)}" ${busy || aiBusy ? "disabled" : ""}>${busy === "reject" ? escapeHtml(labels.rejecting) : escapeHtml(labels.reject)}</button>
         </div>
       </div>
     </article>
   `;
+}
+
+function renderAdminAiReviewResult(item, labels) {
+  const review = item.aiReview;
+  if (!review) {
+    return `
+      <section class="admin-ai-review-box is-empty">
+        <div class="admin-ai-review-header">
+          <h4>${escapeHtml(labels.aiReview)}</h4>
+          <span>${escapeHtml(labels.aiNoReview)}</span>
+        </div>
+      </section>
+    `;
+  }
+  return `
+    <section class="admin-ai-review-box">
+      <div class="admin-ai-review-header">
+        <h4>${escapeHtml(labels.aiReview)}</h4>
+        <span>${escapeHtml(review.model || "model not listed")} · ${review.updatedAt ? escapeHtml(formatDateTime(review.updatedAt)) : ""}</span>
+      </div>
+      <div class="admin-ai-review-meta">
+        <span><strong>${escapeHtml(labels.aiFit)}</strong>${escapeHtml(formatAiFit(review.fit))}</span>
+        <span><strong>${escapeHtml(labels.aiConfidence)}</strong>${Math.round(Number(review.confidence || 0) * 100)}%</span>
+        <span><strong>${escapeHtml(labels.aiSend)}</strong>${review.sendToClient ? "Yes" : "No"}</span>
+      </div>
+      <p>${escapeHtml(review.reason || "")}</p>
+      ${review.fitReasons.length ? `<p><strong>Fit reasons:</strong> ${review.fitReasons.map((reason) => `<span class="admin-chip">${escapeHtml(reason)}</span>`).join(" ")}</p>` : ""}
+      ${review.risksOrQuestions.length ? `<p><strong>Risks/questions:</strong> ${review.risksOrQuestions.map((reason) => `<span class="admin-chip">${escapeHtml(reason)}</span>`).join(" ")}</p>` : ""}
+      ${review.suggestedClientSummary ? `<p><strong>${escapeHtml(labels.aiSummary)}:</strong> ${escapeHtml(review.suggestedClientSummary)}</p>` : ""}
+    </section>
+  `;
+}
+
+function formatAiFit(fit) {
+  const labels = {
+    strong: "Strong",
+    possible: "Possible",
+    weak: "Weak",
+    no_fit: "No fit"
+  };
+  return labels[String(fit || "")] || "Weak";
 }
 
 function renderAdminReviewMeta(label, value) {
