@@ -665,6 +665,11 @@ function calculateMatch(profile: CompanyProfile, opportunity: Record<string, unk
     risks.push("Outside selected area; location match is low confidence");
   }
 
+  if (civilFit.hasWinterOnlyFit && locationCategory === "local_match") {
+    score += 12;
+    reasons.push("Local winter service fit");
+  }
+
   if (valueMatches(profile, opportunity)) {
     score += 10;
     if (opportunity.estimatedValue) reasons.push("Project value is inside your preferred range");
@@ -1149,7 +1154,7 @@ function buildReportContent(company: CompanyProfile, matches: Array<Record<strin
 
 function getLocationMatchCategory(profile: CompanyProfile, opportunity: Record<string, unknown>) {
   if (localLocationMatches(profile, opportunity)) return "local_match";
-  const locationText = normalizeLocationText(String(opportunity.location || ""));
+  const locationText = normalizeLocationText(getEffectiveOpportunityLocation(opportunity));
   if (locationText.includes("remote") || locationText.includes("online")) return profile.remoteProjects ? "remote_match" : "outside_area_low_confidence";
   if (isNationalOpportunity(opportunity) && getOpportunityCountryCode(opportunity) === "IS") return "national_match";
   if (getOpportunityCountryCode(opportunity) === "IS" && (profile.nationalProjects || profile.willingToTravel)) return "outside_area_possible";
@@ -1163,12 +1168,20 @@ function localLocationMatches(profile: CompanyProfile, opportunity: Record<strin
     profile.baseLocation,
   ].filter(Boolean).map(normalizeLocationText);
   if (!selectedLocations.length) return false;
-  const opportunityLocation = normalizeLocationText(String(opportunity.location || ""));
+  const opportunityLocation = normalizeLocationText(getEffectiveOpportunityLocation(opportunity));
   if (selectedLocations.includes("all iceland")) return getOpportunityCountryCode(opportunity) === "IS" || opportunityLocation.includes("iceland") || opportunityLocation.includes("island");
-  return selectedLocations.some((selected) => selected && (opportunityLocation.includes(selected) || selected.includes(opportunityLocation)));
+  return selectedLocations.some((selected) => {
+    if (!selected) return false;
+    if (selected === opportunityLocation) return true;
+    if (selected === "reykjavik" && ["reykjavik", "capital area", "hofudborgarsvaedid"].includes(opportunityLocation)) return true;
+    if (selected === "capital area" && ["reykjavik", "capital area", "hofudborgarsvaedid"].includes(opportunityLocation)) return true;
+    return opportunityLocation.includes(selected) || selected.includes(opportunityLocation);
+  });
 }
 
 function isNationalOpportunity(opportunity: Record<string, unknown>) {
+  const location = normalizeLocationText(String(opportunity.location || ""));
+  if (isGenericIcelandLocation(location) && inferOpportunityLocationFromText(opportunity)) return false;
   const text = normalizeLocationText(`${opportunity.title || ""} ${opportunity.description || ""} ${opportunity.location || ""}`);
   return ["all iceland", "iceland", "island", "national", "nationwide", "landsvist"].some((value) => text.includes(value));
 }
@@ -1176,8 +1189,51 @@ function isNationalOpportunity(opportunity: Record<string, unknown>) {
 function getOpportunityCountryCode(opportunity: Record<string, unknown>) {
   const direct = normalizeCountryCode(opportunity.countryCode);
   if (direct) return direct;
-  const location = normalizeLocationText(String(opportunity.location || ""));
-  if (location.includes("iceland") || location.includes("island")) return "IS";
+  const location = normalizeLocationText(getEffectiveOpportunityLocation(opportunity));
+  if (
+    location.includes("iceland") ||
+    location.includes("island") ||
+    location.includes("reykjavik") ||
+    location.includes("capital area") ||
+    location.includes("hofudborgarsvaedid")
+  ) return "IS";
+  return "";
+}
+
+function getEffectiveOpportunityLocation(opportunity: Record<string, unknown>) {
+  const rawLocation = String(opportunity.location || "").trim();
+  const normalized = normalizeLocationText(rawLocation);
+  if (rawLocation && !isGenericIcelandLocation(normalized)) return rawLocation;
+  return inferOpportunityLocationFromText(opportunity) || rawLocation;
+}
+
+function isGenericIcelandLocation(normalizedLocation: string) {
+  return !normalizedLocation ||
+    normalizedLocation === "unknown" ||
+    normalizedLocation === "all iceland" ||
+    normalizedLocation === "iceland" ||
+    normalizedLocation === "island";
+}
+
+function inferOpportunityLocationFromText(opportunity: Record<string, unknown>) {
+  const payload = opportunity.rawPayload && typeof opportunity.rawPayload === "object"
+    ? opportunity.rawPayload as Record<string, unknown>
+    : {};
+  const text = normalizeLocationText([
+    opportunity.title,
+    opportunity.description,
+    opportunity.buyer,
+    payload.buyer,
+    payload.extracted_buyer,
+    payload.source_name,
+    payload.extracted_location,
+    payload.location,
+  ].filter(Boolean).join(" "));
+  if (
+    text.includes("reykjavik") ||
+    text.includes("reykjavikurborg") ||
+    text.includes("hofudborgarsvaedid")
+  ) return "Reykjavík / Höfuðborgarsvæðið";
   return "";
 }
 

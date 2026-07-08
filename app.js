@@ -1,642 +1,88 @@
+import {
+  STORAGE_KEYS,
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY,
+  capitalize,
+  cleanStringArray,
+  createEmptyProfile,
+  daysUntilDeadline,
+  DEFAULT_PROFILE,
+  escapeHtml,
+  escapeJs,
+  formatCurrencyAmount,
+  formatCustomerLocation as formatCustomerLocationBase,
+  formatDateTime,
+  formatNextStep as formatNextStepBase,
+  formatOpportunityModalValue as formatOpportunityModalValueBase,
+  formatReportMatchLabel as formatReportMatchLabelBase,
+  formatReportMetadataValue as formatReportMetadataValueBase,
+  formatReportQualityLabel as formatReportQualityLabelBase,
+  formatReportReason as formatReportReasonBase,
+  formatReportRisk as formatReportRiskBase,
+  formatShortDate,
+  getInitialLanguage as getInitialLanguageBase,
+  getLegalPageData,
+  getSafeExternalUrl,
+  getCleanOpportunityBuyer,
+  inferLocationFromSourceName,
+  isUuid,
+  localizeLegacyReportContent,
+  normalizeLocationText,
+  parseCommaList,
+  PROFILE_SUGGESTIONS,
+  renderForgotPasswordPage,
+  renderLandingPage,
+  renderLegalPageContent,
+  renderLoginPage,
+  renderDashboardEmptyStatePage,
+  renderDashboardPage,
+  renderOpportunityCardPage,
+  renderOpportunityModalPage,
+  renderPricingPage,
+  renderProfileFormPage,
+  renderReportArchiveRowPage,
+  renderReportOpportunityItemPage,
+  renderReportOpportunitySectionPage,
+  renderReportPreviewPage,
+  renderReportQualityBadgePage,
+  renderReportSummaryCardPage,
+  renderResetPasswordPage,
+  renderSettingsPage,
+  renderSignupPage,
+  splitInput,
+  stripHtmlFromString,
+  supabaseClient,
+  translate,
+  uniqueStrings
+} from "./src/main.js";
+
 /* VerkRadar MVP single-page app.
    No backend required. Uses localStorage and mock data.
    Later: replace storage functions with Supabase queries.
 */
 
-const SUPABASE_URL = "https://asojxjbsgqbfpbepojzh.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFzb2p4amJzZ3FiZnBiZXBvanpoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAwNTU2NjgsImV4cCI6MjA5NTYzMTY2OH0.yPA34VbqWqKrBPespmHr5AojYzjhy3kGRxswO9XdAd0";
-
-const supabaseClient =
-  window.supabase && SUPABASE_URL && SUPABASE_ANON_KEY && SUPABASE_ANON_KEY !== "PASTE_MY_ANON_PUBLIC_KEY_HERE"
-    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-    : null;
-
 const MISSING_DEADLINE_RISK = "Deadline not available in imported data — verify on source page.";
 const EXTRACTED_PROJECT_DEADLINE_RISK = "No formal tender deadline extracted — verify source article.";
 
-const STORAGE_KEYS = {
-  profile: "verkradar_profile",
-  saved: "verkradar_saved_opportunities",
-  ignored: "verkradar_ignored_opportunities",
-  language: "verkradar_language"
-};
-
-function uniqueStrings(values) {
-  return Array.from(
-    new Set(
-      (values || [])
-        .map((value) => String(value || "").trim())
-        .filter(Boolean)
-    )
-  );
-}
-
-const translations = {
-  is: {
-    navDashboard: "Mælaborð",
-    navReport: "Yfirlit",
-    navPricing: "Verðskrá",
-    navSettings: "Stillingar",
-    navHowItWorks: "Hvernig virkar þetta",
-    navSampleReport: "Sýnishorn",
-    login: "Innskráning",
-    logout: "Skrá út",
-    getStarted: "Byrja",
-    createProfile: "Stofna prófíl",
-    companyProfile: "Fyrirtækjaprófíll",
-    noCompanyProfile: "Enginn fyrirtækjaprófíll",
-    openMenu: "Opna valmynd",
-    closeMenu: "Loka valmynd",
-    privacyPolicy: "Persónuvernd",
-    termsOfService: "Skilmálar",
-    dataSources: "Gagnaheimildir",
-    cookies: "Vafrakökur",
-    security: "Öryggi",
-    contact: "Hafa samband",
-    footerText: "Vöktun útboða og viðskiptatækifæra fyrir fyrirtæki. VerkRadar hjálpar ykkur að finna og yfirfara opinber tækifæri, en frumgögn eru alltaf endanleg heimild.",
-    loadingLabel: "Hleð VerkRadar",
-    heroEyebrow: "Útboðsgreind fyrir verktaka og þjónustufyrirtæki",
-    heroTitle: "Finnið verðmæt útboð áður en skilafresturinn rennur út.",
-    heroText: "VerkRadar vaktar opinberar heimildir og skilar stuttu yfirliti yfir verkefni sem passa við ykkar verkflokka og svæði.",
-    createFreeDemoProfile: "Fá ókeypis prufu-yfirlit",
-    viewSampleReport: "Skoða sýnishorn",
-    proofStrong: "Fyrir verktaka, iðnfyrirtæki og þjónustuaðila.",
-    proofText: "Vöktun á opinberum heimildum, sveitarfélögum og útboðsvefjum - sett fram sem forgangsraðað yfirlit.",
-    bestOpenMatch: "Stutt yfirlit",
-    tender: "Útboð",
-    deadlineRisk: "Rennur út fljótlega",
-    daysLeft: "{count} dagar eftir",
-    problemEyebrow: "Vandinn",
-    problemTitle: "Útboð tapast oft áður en tilboðsgerðin byrjar.",
-    problemOneTitle: "Útboð birtast á mörgum mismunandi stöðum.",
-    problemOneText: "Sveitarfélög, stofnanir og útboðsvefir birta tækifæri á ólíkum síðum og í ólíkum sniðum.",
-    problemTwoTitle: "Skilafrestir geta verið stuttir.",
-    problemTwoText: "Það tekur tíma að finna hvað passar við ykkar verkflokka, svæði og stærð verkefna.",
-    targetEyebrow: "Fyrir hverja?",
-    targetTitle: "Byggt fyrir íslensk fyrirtæki sem þurfa að finna rétt verkefni fyrr.",
-    targetText: "VerkRadar hentar fyrirtækjum sem vilja vakta útboð, verðfyrirspurnir og verkefnavísbendingar án þess að opna sömu vefi handvirkt á hverjum degi.",
-    solutionEyebrow: "Lausnin",
-    solutionTitle: "Eitt skýrt yfirlit í stað dreifðrar leitar.",
-    solutionText: "VerkRadar breytir útboðshávaða í forgangsraðaðan lista yfir tækifæri sem fyrirtækið ætti að skoða.",
-    createProfileStep: "1. Stofnið prófíl",
-    createProfileStepText: "Segið VerkRadar hvaða þjónustu, svæði, lykilorð og verkefnastærðir henta ykkur.",
-    matchProjectsStep: "2. Samsvara verkefnum",
-    matchProjectsStepText: "Kerfið metur hvert tækifæri gagnvart fyrirtækjaprófílnum.",
-    getReportStep: "3. Fáið yfirlit",
-    getReportStepText: "Fáið skýrt yfirlit með frestum, ástæðum samsvörunar og næstu skrefum.",
-    sampleReportEyebrow: "Sýnishorn",
-    sampleReportTitle: "Stuttlisti sem sýnir hvað er þess virði að skoða.",
-    sampleReportText: "Sýnishornið sýnir hvernig VerkRadar raðar útboðum og verkefnum eftir þjónustu, svæði, fresti og ástæðum samsvörunar.",
-    sourceDisclaimer: "VerkRadar hjálpar til við að forgangsraða tækifærum. Upprunaleg útboðsgögn eru alltaf endanleg heimild.",
-    pricingEyebrow: "VERÐSKRÁ",
-    pricingHeadline: "Einföld verðskrá fyrir fyrstu útgáfu",
-    pricingSubtitle: "Byrjið með skýru yfirliti og bætið við sjálfvirkni eftir þörfum.",
-    pricingStarter: "Grunnur",
-    pricingGrowth: "Vöxtur",
-    pricingPro: "Sérsniðið",
-    pricingMonth: "/mán.",
-    pricingBadge: "Hentar flestum fyrirtækjum",
-    pricingCta: "Fá prufuaðgang",
-    pricingTrialNoCard: "Engin greiðslukort krafist í prufu.",
-    pricingWeeklyReport: "Vikulegt yfirlit",
-    pricingFiveMatches: "Allt að 5 samsvaranir á viku",
-    pricingBasicMatching: "Grunnsamsvörun",
-    pricingDeadlineReminders: "Áminningar um skilafresti",
-    pricingOneProfile: "1 fyrirtækjaprófíll",
-    pricingEverythingStarter: "Allt í Grunni",
-    pricingMoreSources: "Fleiri heimildir",
-    pricingSummaries: "Stutt samantekt á tækifærum",
-    pricingLabels: "Sterk/góð/möguleg samsvörun",
-    pricingSaved: "Vistuð tækifæri",
-    pricingArchive: "Yfirlitssafn",
-    pricingEverythingGrowth: "Allt í Vexti",
-    pricingDocumentSummaries: "Samantektir útboðsgagna",
-    pricingRequirements: "Gátlisti fyrir kröfur",
-    pricingRiskWarnings: "Áhættuvísbendingar",
-    pricingBidChecklist: "Gátlisti fyrir tilboðsgerð",
-    pricingPrioritySupport: "Forgangsþjónusta",
-    tryDemoTitle: "Prófið sýnimælaborðið.",
-    tryDemoText: "Hlaðið sýnifyrirtæki og sjáið hvernig samsvörunin virkar.",
-    loadDemoCompany: "Hlaða sýnifyrirtæki",
-    authLoginTitle: "Skrá inn í VerkRadar",
-    authLoginSubtitle: "Fáið aðgang að mælaborði, vistuðum tækifærum og vikuyfirlitum.",
-    email: "Netfang",
-    password: "Lykilorð",
-    forgotPassword: "Gleymt lykilorð?",
-    loggingIn: "Skrái inn...",
-    newToVerkRadar: "Ný hjá VerkRadar?",
-    createAccount: "Stofna aðgang",
-    createAccountTitle: "Stofna VerkRadar aðgang",
-    createAccountSubtitle: "Byrjið á að stofna aðgang. Síðan stofnið þið fyrirtækjaprófíl.",
-    authRequiredTitle: "Skráðu þig inn til að halda áfram",
-    authRequiredText: "Þessi síða er aðgengileg eftir innskráningu.",
-    alreadyLoggedInTitle: "Þú ert þegar skráð(ur) inn",
-    alreadyLoggedInText: "Beini þér á næsta skref.",
-    signupCreatedConfirm: "Aðgangur stofnaður. Athugaðu tölvupóstinn þinn til að staðfesta aðganginn.",
-    signupExistingAccount: "Þetta netfang er þegar með aðgang. Skráðu þig inn eða endurstilltu lykilorð.",
-    signupNeutralNextSteps: "Ef aðgangur er til fyrir þetta netfang færðu tölvupóst með næstu skrefum. Annars hefur nýr aðgangur verið stofnaður.",
-    emailOrPasswordIncorrect: "Netfang eða lykilorð er rangt.",
-    confirmEmailBeforeLogin: "Staðfestu netfangið þitt áður en þú skráir þig inn.",
-    passwordTooShort: "Lykilorð þarf að vera að minnsta kosti 6 stafir.",
-    tooManyAttempts: "Of margar tilraunir. Bíddu aðeins og reyndu aftur.",
-    couldNotCreateAccount: "Gat ekki stofnað aðgang. Athugaðu netfang og lykilorð.",
-    couldNotLogin: "Gat ekki skráð þig inn. Reyndu aftur.",
-    creating: "Stofna...",
-    alreadyHaveAccount: "Ertu þegar með aðgang?",
-    passwordReset: "Endurstilla lykilorð",
-    resetPasswordTitle: "Endurstilla lykilorð",
-    resetPasswordSubtitle: "Sláið inn netfang og VerkRadar sendir öruggan hlekk ef aðgangur er til.",
-    sending: "Sendi...",
-    sendResetLink: "Senda hlekk",
-    rememberedPassword: "Manstu lykilorðið?",
-    backToLogin: "Til baka í innskráningu",
-    newPassword: "Nýtt lykilorð",
-    chooseNewPassword: "Veldu nýtt lykilorð",
-    resetPasswordHelp: "Settu nýtt lykilorð fyrir VerkRadar aðganginn. Ef hlekkurinn er útrunninn skaltu biðja um nýjan.",
-    confirmNewPassword: "Staðfesta nýtt lykilorð",
-    updating: "Uppfæri...",
-    updatePassword: "Uppfæra lykilorð",
-    needNewLink: "Þarftu nýjan hlekk?",
-    sendAnotherResetLink: "Senda annan hlekk",
-    onboarding: "Uppsetning",
-    onboardingTitle: "Stofna fyrirtækjaprófíl",
-    onboardingText: "Þetta notar samsvörunarkerfið til að finna viðeigandi tækifæri.",
-    companyBasics: "1. Grunnupplýsingar",
-    companyName: "Fyrirtækisnafn",
-    contactEmail: "Tengiliðanetfang",
-    website: "Vefsíða",
-    industry: "Atvinnugrein",
-    servicesAndKeywords: "2. Þjónusta og leitarorð",
-    servicesHint: "Byrjið á þjónustunni sem þið viljið raunverulega bjóða í.",
-    servicesLabel: "Hvaða þjónustu bjóðið þið? Veljið tillögur eða sláið inn eigin, aðskildar með kommu.",
-    servicesHelper: "Skráið þjónustuna sem fyrirtækið selur. Nákvæmari þjónusta gefur betri samsvaranir.",
-    extraWords: "Aukaorð sem VerkRadar á að leita að í útboðum.",
-    includeKeywordsHelper: "Notið orð sem birtast oft í tækifærum sem þið viljið fá.",
-    excludeWords: "Orð sem ættu að lækka eða fjarlægja slæmar samsvaranir.",
-    excludeKeywordsHelper: "Orð sem ættu að lækka eða fjarlægja slæmar samsvaranir.",
-    suggestedServicesFor: "Tillögur að þjónustu fyrir {industry}",
-    suggestedKeywordsFor: "Tillögur að leitarorðum fyrir {industry}",
-    selectIndustryForServices: "Veljið atvinnugrein til að sjá þjónustutillögur",
-    selectIndustryForKeywords: "Veljið atvinnugrein til að sjá leitarorðatillögur",
-    locationsTitle: "3. Svæði",
-    locationsHint: "Notið Allt landið fyrir landsdekkandi útboð. Notið ferðastillingar ef þið getið boðið utan heimasvæðis fyrir rétt verkefni.",
-    baseLocation: "Heimasvæði",
-    baseLocationPlaceholder: "Dæmi: Austurland",
-    serviceAreas: "Þjónustusvæði, aðskilin með kommu",
-    serviceAreasPlaceholder: "Dæmi: Austurland, Allt landið",
-    travelScope: "Ferðir og umfang",
-    willingToTravel: "Tilbúin að ferðast fyrir rétt verkefni",
-    includeNational: "Sýna landsdekkandi tækifæri",
-    includeRemote: "Sýna fjarvinnu / netverkefni",
-    minimumTravelValue: "Lágmarksverðmæti fyrir ferðalög",
-    projectSize: "4. Verkefnastærð",
-    minimumValue: "Lágmarksverðmæti",
-    maximumValue: "Hámarksverðmæti",
-    showUnknownValue: "Sýna tækifæri þó verðmæti vanti",
-    reportPreferences: "5. Yfirlitsstillingar",
-    frequency: "Tíðni",
-    weekly: "Vikulega",
-    daily: "Daglega",
-    reportDay: "Dagur yfirlits",
-    deadlineReminders: "Áminningar um skilafresti",
-    includeLowConfidence: "Sýna óvissar samsvaranir",
-    saveProfile: "Vista prófíl",
-    saving: "Vista...",
-    saved: "Vistað",
-    dashboard: "Mælaborð",
-    welcomeCompany: "Velkomin, {company}",
-    dashboardIntro: "Forgangsraðaðar tækifærasamsvaranir út frá þjónustu, svæðum og leitarorðum. {refresh}",
-    matchesLastRefreshed: "Síðast uppfært {time}.",
-    matchesAutoRefresh: "Samsvaranir uppfærast sjálfkrafa eftir vistun prófíls.",
-    refreshMatches: "Uppfæra samsvaranir",
-    refreshing: "Uppfæri...",
-    viewWeeklyReport: "Skoða yfirlit",
-    strongMatches: "Sterkar samsvaranir",
-    closingSoon: "Rennur út fljótlega",
-    savedLabel: "Vistað",
-    totalPotentialValue: "Áætlað heildarverðmæti",
-    searchOpportunities: "Leita í tækifærum...",
-    savedOnly: "Aðeins vistað",
-    improveProfile: "Bæta prófíl",
-    includeNationalOpportunities: "Sýna landsdekkandi tækifæri",
-    showAllStoredMatches: "Sýna allar samsvaranir",
-    inspectAllOpportunities: "Skoða öll tækifæri",
-    details: "Nánar",
-    save: "Vista",
-    ignore: "Hunsa",
-    originalLanguage: "Upprunalegt tungumál",
-    extractedProject: "Útdregið verkefni",
-    reportTitle: "Útboðs- og verkefnayfirlit",
-    weeklyReport: "Yfirlit",
-    saveReport: "Vista yfirlit",
-    savingReport: "Vista...",
-    downloadPdf: "Sækja PDF",
-    copyReport: "Afrita yfirlit",
-    reportArchive: "Yfirlitssafn",
-    savedReports: "Vistuð yfirlit",
-    loadingSavedReports: "Hleð vistuð yfirlit...",
-    noSavedReports: "Engin vistuð yfirlit enn.",
-    viewReport: "Skoða yfirlit",
-    closeReport: "Loka yfirliti",
-    generatedBy: "Útbúið af VerkRadar",
-    reportForCompany: "Útboðs- og verkefnayfirlit fyrir {company}",
-    openTenders: "Opin útboð / verðfyrirspurnir",
-    upcomingOpportunities: "Möguleg væntanleg tækifæri",
-    openTendersDescription: "Skýr útboðs- eða verðfyrirspurnarmerki. Yfirfarið frumgögn áður en brugðist er við.",
-    upcomingDescription: "Væntanleg útboðs- eða verkefnamerki með skýrum vísbendingum.",
-    reportFooter: "VerkRadar hjálpar til við að forgangsraða yfirferð opinberra tækifæra. Staðfestið alltaf útboðsgögn, skilafresti, kröfur og hæfi á upprunalegri heimild áður en brugðist er við.",
-    buyer: "Kaupandi",
-    source: "Heimild",
-    description: "Lýsing",
-    requirements: "Kröfur",
-    noSpecificRequirements: "Engar sérstakar kröfur skráðar.",
-    noDescription: "Engin lýsing tiltæk.",
-    noMatchReasons: "Engar ástæður samsvörunar tiltækar.",
-    matchReasons: "Ástæður samsvörunar",
-    opportunityInfo: "Upplýsingar um tækifæri",
-    extraction: "Útdráttur",
-    sourceArticle: "Heimildargrein",
-    parentArticle: "Upprunagrein",
-    openSourceArticle: "Opna heimildargrein",
-    extractedRegion: "Útdregið svæði",
-    projectNumber: "Verknúmer",
-    tenderState: "Staða útboðs",
-    quality: "Gæði",
-    category: "Flokkur",
-    type: "Tegund",
-    published: "Birt",
-    cpv: "CPV",
-    recommendedNextSteps: "Ráðlögð næstu skref",
-    noMajorRisks: "Engar stórar áhættur greindar í þessum gögnum.",
-    openSourceAndConfirm: "Opnið upprunalega heimild og staðfestið hæfi.",
-    removeFromSaved: "Fjarlægja úr vistuðum",
-    saveOpportunity: "Vista tækifæri",
-    markNotRelevant: "Merkja sem ekki viðeigandi",
-    publicProcurement: "Opinbert útboð",
-    area: "Svæði",
-    deadline: "Skilafrestur",
-    estimatedValue: "Áætlað verðmæti",
-    notFound: "Fannst ekki",
-    notListed: "Ekki gefið upp",
-    unknownBuyer: "Óþekktur kaupandi",
-    allIceland: "Allt landið",
-    whyThisMatters: "Af hverju þetta gæti skipt máli",
-    risksToCheck: "Atriði til að staðfesta",
-    openSource: "Opna heimild",
-    sourceLinkMissing: "Heimildartengil vantar",
-    strongMatch: "Sterk samsvörun",
-    goodMatch: "Góð samsvörun",
-    possibleMatch: "Möguleg samsvörun",
-    weakMatch: "Veik samsvörun",
-    confirmedTender: "Staðfest útboð",
-    likelyOpportunity: "Líklegt tækifæri",
-    earlySignal: "Væntanlegt tækifæri",
-    needsReview: "Þarfnast staðfestingar",
-    tenderAwarded: "Útboði lokið / samið",
-    tenderAlreadyAnnounced: "Útboð þegar auglýst",
-    upcomingTender: "Væntanlegt útboð",
-    projectSignal: "Verkefnavísbending",
-    nationalOpportunity: "Landsdekkandi tækifæri",
-    localMatch: "Staðbundin samsvörun",
-    mentionsService: "Nefnir þjónustu ykkar: {value}",
-    containsKeyword: "Inniheldur leitarorð: {value}",
-    procurement: "innkaup"
-  },
-  en: {
-    navDashboard: "Dashboard",
-    navReport: "Report",
-    navPricing: "Pricing",
-    navSettings: "Settings",
-    navHowItWorks: "How it works",
-    navSampleReport: "Sample report",
-    login: "Login",
-    logout: "Logout",
-    getStarted: "Get started",
-    createProfile: "Create profile",
-    companyProfile: "Company profile",
-    noCompanyProfile: "No company profile",
-    openMenu: "Open menu",
-    closeMenu: "Close menu",
-    privacyPolicy: "Privacy",
-    termsOfService: "Terms",
-    dataSources: "Data sources",
-    cookies: "Cookies",
-    security: "Security",
-    contact: "Contact",
-    footerText: "Tender and opportunity monitoring for businesses. VerkRadar helps you find and review public opportunities, but source documents remain the authority.",
-    loadingLabel: "Loading VerkRadar",
-    heroEyebrow: "Tender intelligence for working contractors",
-    heroTitle: "Stop losing valuable jobs to tabs you never opened.",
-    heroText: "VerkRadar monitors public sources and returns a short project shortlist matched to your trades and service areas.",
-    createFreeDemoProfile: "Get a free trial report",
-    viewSampleReport: "View sample report",
-    proofStrong: "Contractors find relevant opportunities faster.",
-    proofText: "Top matches often include tenders outside the main databases.",
-    bestOpenMatch: "Shortlist",
-    tender: "Tender",
-    deadlineRisk: "Deadline risk",
-    daysLeft: "{count} days left",
-    problemEyebrow: "The problem",
-    problemTitle: "Opportunities are often lost before bidding starts.",
-    problemOneTitle: "Deadlines show up after your crew is already booked.",
-    problemOneText: "A short response window becomes a scramble, or a valuable contract never gets priced.",
-    problemTwoTitle: "The search takes longer than the go/no-go call.",
-    problemTwoText: "Owners spend hours opening low-fit tenders instead of seeing value, location, requirements and match reasons in one view.",
-    targetEyebrow: "Who it is for",
-    targetTitle: "Built for Icelandic companies that need to find the right jobs earlier.",
-    targetText: "VerkRadar is for teams that want to monitor tenders, quote requests and project signals without checking the same websites manually every day.",
-    solutionEyebrow: "The solution",
-    solutionTitle: "One clear report instead of scattered searching.",
-    solutionText: "VerkRadar turns tender noise into a ranked list of opportunities your business should actually check.",
-    createProfileStep: "1. Create profile",
-    createProfileStepText: "Tell VerkRadar your services, locations, keywords and project size.",
-    matchProjectsStep: "2. Match projects",
-    matchProjectsStepText: "The system scores each opportunity against your business profile.",
-    getReportStep: "3. Get report",
-    getReportStepText: "Receive a clear weekly report with deadlines and next steps.",
-    sampleReportEyebrow: "Sample report",
-    sampleReportTitle: "A shortlist that shows what is worth checking.",
-    sampleReportText: "Preview how VerkRadar ranks tenders and projects by services, region, deadline and match reasons.",
-    sourceDisclaimer: "VerkRadar helps prioritize opportunity review. Original tender documents are always the final authority.",
-    pricingEyebrow: "PRICING",
-    pricingHeadline: "Simple pricing for the first version",
-    pricingSubtitle: "Start with a clear report and add automation as needed.",
-    pricingStarter: "Starter",
-    pricingGrowth: "Growth",
-    pricingPro: "Custom",
-    pricingMonth: "/month",
-    pricingBadge: "Best for most businesses",
-    pricingCta: "Get trial access",
-    pricingTrialNoCard: "No credit card required for the trial.",
-    pricingWeeklyReport: "Weekly report",
-    pricingFiveMatches: "Up to 5 matched opportunities/week",
-    pricingBasicMatching: "Basic matching",
-    pricingDeadlineReminders: "Deadline reminders",
-    pricingOneProfile: "1 company profile",
-    pricingEverythingStarter: "Everything in Starter",
-    pricingMoreSources: "More sources",
-    pricingSummaries: "Opportunity summaries",
-    pricingLabels: "Strong/Good/Possible match labels",
-    pricingSaved: "Saved opportunities",
-    pricingArchive: "Report archive",
-    pricingEverythingGrowth: "Everything in Growth",
-    pricingDocumentSummaries: "Tender document summaries",
-    pricingRequirements: "Requirements checklist",
-    pricingRiskWarnings: "Risk warnings",
-    pricingBidChecklist: "Bid preparation checklist",
-    pricingPrioritySupport: "Priority support",
-    tryDemoTitle: "Try the demo dashboard now.",
-    tryDemoText: "Load a sample company profile and see how the matching works.",
-    loadDemoCompany: "Load demo company",
-    authLoginTitle: "Login to VerkRadar",
-    authLoginSubtitle: "Access your company dashboard, saved opportunities and weekly reports.",
-    email: "Email",
-    password: "Password",
-    forgotPassword: "Forgot password?",
-    loggingIn: "Logging in...",
-    newToVerkRadar: "New to VerkRadar?",
-    createAccount: "Create account",
-    createAccountTitle: "Create your VerkRadar account",
-    createAccountSubtitle: "Start by creating an account. Then you’ll create your company profile.",
-    authRequiredTitle: "Log in to continue",
-    authRequiredText: "This page is available after you sign in.",
-    alreadyLoggedInTitle: "Already logged in",
-    alreadyLoggedInText: "Redirecting you to the next step.",
-    signupCreatedConfirm: "Account created. Check your email to confirm your account.",
-    signupExistingAccount: "This email already has an account. Log in or reset your password.",
-    signupNeutralNextSteps: "If an account exists for this email, you’ll receive an email with next steps. Otherwise, a new account has been created.",
-    emailOrPasswordIncorrect: "Email or password is incorrect.",
-    confirmEmailBeforeLogin: "Please confirm your email before logging in.",
-    passwordTooShort: "Password must be at least 6 characters.",
-    tooManyAttempts: "Too many attempts. Please wait a moment and try again.",
-    couldNotCreateAccount: "Could not create account. Please check your email and password.",
-    couldNotLogin: "Could not log in. Please try again.",
-    creating: "Creating...",
-    alreadyHaveAccount: "Already have an account?",
-    passwordReset: "Password reset",
-    resetPasswordTitle: "Reset your password",
-    resetPasswordSubtitle: "Enter your email and VerkRadar will send a secure reset link if the account exists.",
-    sending: "Sending...",
-    sendResetLink: "Send reset link",
-    rememberedPassword: "Remembered your password?",
-    backToLogin: "Back to login",
-    newPassword: "New password",
-    chooseNewPassword: "Choose a new password",
-    resetPasswordHelp: "Set a new password for your VerkRadar account. If the link has expired, request a new reset link.",
-    confirmNewPassword: "Confirm new password",
-    updating: "Updating...",
-    updatePassword: "Update password",
-    needNewLink: "Need a new link?",
-    sendAnotherResetLink: "Send another reset link",
-    onboarding: "Onboarding",
-    onboardingTitle: "Create your company profile",
-    onboardingText: "This is what the matching system uses to find relevant opportunities.",
-    companyBasics: "1. Company basics",
-    companyName: "Company name",
-    contactEmail: "Contact email",
-    website: "Website",
-    industry: "Industry",
-    servicesAndKeywords: "2. Services and keywords",
-    servicesHint: "Start with the services you would actually want to bid on.",
-    servicesLabel: "What services do you offer? Choose suggestions or type your own, separated by commas.",
-    servicesHelper: "Add the services your company actually sells. More specific services create better matches.",
-    extraWords: "Extra words VerkRadar should look for in notices.",
-    includeKeywordsHelper: "Use words that often appear in opportunities you want.",
-    excludeWords: "Words that should lower or remove bad matches.",
-    excludeKeywordsHelper: "Words that should lower or remove bad matches.",
-    suggestedServicesFor: "Suggested services for {industry}",
-    suggestedKeywordsFor: "Suggested keywords for {industry}",
-    selectIndustryForServices: "Select an industry to see service suggestions",
-    selectIndustryForKeywords: "Select an industry to see keyword suggestions",
-    locationsTitle: "3. Locations",
-    locationsHint: "Use All Iceland for national tenders. Use travel settings when you can bid outside your base area for the right project size.",
-    baseLocation: "Base location",
-    baseLocationPlaceholder: "Example: East Iceland",
-    serviceAreas: "Service areas, comma separated",
-    serviceAreasPlaceholder: "Example: East Iceland, All Iceland",
-    travelScope: "Travel and scope",
-    willingToTravel: "Willing to travel for the right project",
-    includeNational: "Include national / All Iceland opportunities",
-    includeRemote: "Include remote / online opportunities",
-    minimumTravelValue: "Minimum project value for travel",
-    projectSize: "4. Project size",
-    minimumValue: "Minimum value",
-    maximumValue: "Maximum value",
-    showUnknownValue: "Show opportunities even if value is unknown",
-    reportPreferences: "5. Report preferences",
-    frequency: "Frequency",
-    weekly: "Weekly",
-    daily: "Daily",
-    reportDay: "Report day",
-    deadlineReminders: "Deadline reminders",
-    includeLowConfidence: "Include low-confidence matches",
-    saveProfile: "Save profile",
-    saving: "Saving...",
-    saved: "Saved",
-    dashboard: "Dashboard",
-    welcomeCompany: "Welcome, {company}",
-    dashboardIntro: "Ranked project opportunities based on your services, locations and keywords. {refresh}",
-    matchesLastRefreshed: "Last refreshed {time}.",
-    matchesAutoRefresh: "Matches refresh automatically after profile saves.",
-    refreshMatches: "Refresh matches",
-    refreshing: "Refreshing...",
-    viewWeeklyReport: "View report",
-    strongMatches: "Strong matches",
-    closingSoon: "Closing soon",
-    savedLabel: "Saved",
-    totalPotentialValue: "Total potential value",
-    searchOpportunities: "Search opportunities...",
-    savedOnly: "Saved only",
-    improveProfile: "Improve profile",
-    includeNationalOpportunities: "Include national opportunities",
-    showAllStoredMatches: "Show all matches",
-    inspectAllOpportunities: "Inspect all opportunities",
-    details: "Details",
-    save: "Save",
-    ignore: "Ignore",
-    originalLanguage: "Original language",
-    extractedProject: "Extracted project",
-    reportTitle: "Tender and opportunity report",
-    weeklyReport: "Report",
-    saveReport: "Save report",
-    savingReport: "Saving...",
-    downloadPdf: "Download PDF",
-    copyReport: "Copy report",
-    reportArchive: "Report archive",
-    savedReports: "Saved reports",
-    loadingSavedReports: "Loading saved reports...",
-    noSavedReports: "No saved reports yet.",
-    viewReport: "View report",
-    closeReport: "Close report",
-    generatedBy: "Generated by VerkRadar",
-    reportForCompany: "Tender and opportunity report for {company}",
-    openTenders: "Open tenders / quote requests",
-    upcomingOpportunities: "Possible upcoming opportunities",
-    openTendersDescription: "Clear procurement intent. Review source documents before acting.",
-    upcomingDescription: "Upcoming procurement or project signals with clear evidence.",
-    reportFooter: "VerkRadar helps prioritise public opportunity review. Always check the original source documents, deadlines, requirements and eligibility before acting.",
-    buyer: "Buyer",
-    source: "Source",
-    description: "Description",
-    requirements: "Requirements",
-    noSpecificRequirements: "No specific requirements listed.",
-    noDescription: "No description available.",
-    noMatchReasons: "No match reasons available.",
-    matchReasons: "Match reasons",
-    opportunityInfo: "Opportunity info",
-    extraction: "Extraction",
-    sourceArticle: "Source article",
-    parentArticle: "Parent article",
-    openSourceArticle: "Open source article",
-    extractedRegion: "Extracted region",
-    projectNumber: "Project number",
-    tenderState: "Tender state",
-    quality: "Quality",
-    category: "Category",
-    type: "Type",
-    published: "Published",
-    cpv: "CPV",
-    recommendedNextSteps: "Recommended next steps",
-    noMajorRisks: "No major risks detected in this data.",
-    openSourceAndConfirm: "Open the source notice and confirm eligibility.",
-    removeFromSaved: "Remove from saved",
-    saveOpportunity: "Save opportunity",
-    markNotRelevant: "Mark not relevant",
-    publicProcurement: "Public procurement",
-    area: "Location",
-    deadline: "Deadline",
-    estimatedValue: "Estimated value",
-    notFound: "Not found",
-    notListed: "Not listed",
-    unknownBuyer: "Unknown buyer",
-    allIceland: "All Iceland",
-    whyThisMatters: "Why this matters",
-    risksToCheck: "Risks / things to check",
-    openSource: "Open source",
-    sourceLinkMissing: "Source link missing",
-    strongMatch: "Strong match",
-    goodMatch: "Good match",
-    possibleMatch: "Possible match",
-    weakMatch: "Weak match",
-    confirmedTender: "Confirmed tender",
-    likelyOpportunity: "Likely opportunity",
-    earlySignal: "Early signal",
-    needsReview: "Needs review",
-    tenderAwarded: "Tender awarded",
-    tenderAlreadyAnnounced: "Tender already announced",
-    upcomingTender: "Upcoming tender",
-    projectSignal: "Project signal",
-    nationalOpportunity: "National opportunity",
-    localMatch: "Local match",
-    mentionsService: "Mentions your service: {value}",
-    containsKeyword: "Contains your keyword: {value}",
-    procurement: "procurement"
-  }
-};
-
 function getInitialLanguage() {
-  const stored = localStorage.getItem(STORAGE_KEYS.language);
-  return stored === "en" || stored === "is" ? stored : "is";
+  return getInitialLanguageBase(STORAGE_KEYS);
 }
 
 function t(key, params = {}) {
-  const dictionary = translations[state?.language || "is"] || translations.is;
-  const fallback = translations.en[key] || translations.is[key] || key;
-  return String(dictionary[key] || fallback).replace(/\{(\w+)\}/g, (_, name) => params[name] ?? "");
+  return translate(state?.language || "is", key, params);
 }
-
 function setLanguage(language) {
   state.language = language === "en" ? "en" : "is";
   localStorage.setItem(STORAGE_KEYS.language, state.language);
   render();
 }
 
-const defaultProfile = {
-  companyName: "RafFix ehf.",
-  contactEmail: "owner@raffix.is",
-  website: "https://raffix.is",
-  industry: "Electrical",
-  services: ["electrical installation", "maintenance", "fire alarm systems", "EV chargers"],
-  includeKeywords: ["charging", "inspection", "public buildings"],
-  excludeKeywords: ["telecom", "snow removal"],
-  locations: ["Reykjavík", "Capital Area", "Suðurnes", "Remote / Online"],
-  minProjectValue: 500000,
-  maxProjectValue: 30000000,
-  allowUnknownValue: true,
-  reportFrequency: "weekly",
-  reportDay: "monday",
-  deadlineReminders: true,
-  includeLowConfidence: false,
-  autoAlertMode: "auto_safe_only"
-};
+const defaultProfile = DEFAULT_PROFILE;
 
 const PROFILE_LOAD_TIMEOUT_MS = 12000;
 
 function getEmptyProfile() {
-  return {
-    companyName: "",
-    contactEmail: state.user?.email || "",
-    website: "",
-    industry: "",
-    services: [],
-    includeKeywords: [],
-    excludeKeywords: [],
-    locations: [],
-    baseLocation: "",
-    serviceAreas: [],
-    willingToTravel: false,
-    nationalProjects: false,
-    remoteProjects: false,
-    minimumProjectValueForTravel: "",
-    minProjectValue: "",
-    maxProjectValue: "",
-    allowUnknownValue: true,
-    reportFrequency: "weekly",
-    reportDay: "monday",
-    deadlineReminders: true,
-    includeLowConfidence: false,
-    autoAlertMode: "auto_safe_only"
-  };
+  return createEmptyProfile(state.user?.email || "");
 }
 
 let state = {
@@ -2883,7 +2329,7 @@ function getOpportunityCountryCode(opp) {
   const direct = normalizeCountryCode(opp.countryCode);
   if (direct) return direct;
 
-  const location = String(opp.location || "");
+  const location = getEffectiveOpportunityLocation(opp);
   const normalized = normalizeLocationText(location);
   if (
     normalized.includes("iceland") ||
@@ -4357,13 +3803,6 @@ async function getOrCreateSource(sourceName) {
   return created.id;
 }
 
-function parseCommaList(value) {
-  return String(value || "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
 function formatSupabaseError(error) {
   if (!error) return "Unknown error";
   if (typeof error === "string") return error;
@@ -4462,22 +3901,6 @@ function saveArray(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
-function splitInput(value) {
-  return String(value || "")
-    .split(",")
-    .map((x) => x.trim())
-    .filter(Boolean);
-}
-
-function cleanStringArray(value) {
-  const values = Array.isArray(value) ? value : splitInput(value);
-  return Array.from(new Set(
-    values
-      .map((item) => String(item || "").trim())
-      .filter(Boolean)
-  ));
-}
-
 function arrayFieldText(value) {
   return cleanStringArray(value).join(", ");
 }
@@ -4487,81 +3910,6 @@ function nullableNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
-
-const PROFILE_SUGGESTIONS = {
-  services: {
-    Electrical: [
-      "raflagnir",
-      "rafvirki",
-      "brunakerfi",
-      "öryggiskerfi",
-      "lýsing",
-      "viðhald",
-      "þjónusta",
-      "hleðslustöðvar",
-      "töflusmíði",
-      "rafmagnseftirlit"
-    ],
-    "IT / Web / Software": [
-      "vefsíðugerð",
-      "vefhönnun",
-      "hugbúnaðarþróun",
-      "kerfisþróun",
-      "vefverslun",
-      "aðgengi",
-      "CMS",
-      "gagnagrunnar",
-      "viðhald",
-      "ráðgjöf"
-    ],
-    Cleaning: [
-      "Office cleaning",
-      "School cleaning",
-      "Facility cleaning",
-      "Window cleaning",
-      "Deep cleaning",
-      "Floor care",
-      "Municipal cleaning",
-      "Regular cleaning contracts"
-    ],
-    Transport: [
-      "Passenger transport",
-      "Goods transport",
-      "Healthcare transport",
-      "School transport",
-      "Shuttle services",
-      "Delivery services",
-      "Framework transport services"
-    ],
-    Construction: [
-      "jarðvinna",
-      "gatnagerð",
-      "vegagerð",
-      "malbikun",
-      "brúargerð",
-      "lagnavinna",
-      "framkvæmdir",
-      "viðhald",
-      "steypa",
-      "húsbyggingar",
-      "þakvinna"
-    ]
-  },
-  includeKeywords: {
-    Electrical: [
-      "rafmagn",
-      "rafvirki",
-      "brunakerfi",
-      "hleðslustöð",
-      "öryggiskerfi",
-      "myndavélakerfi",
-      "lýsing",
-      "viðhald",
-      "lagnir",
-      "neyðarlýsing"
-    ]
-  }
-};
 
 function normalizeSuggestionValue(value) {
   return String(value || "").trim().toLowerCase();
@@ -4912,6 +4260,7 @@ function getCivilContractorFit(profile, opp, serviceHits, keywordHits) {
 
 function isNationalOpportunity(opp) {
   const location = normalizeLocationText(opp.location);
+  if (isGenericIcelandLocation(location) && inferOpportunityLocationFromText(opp)) return false;
   const text = normalizeLocationText(`${opp.title} ${opp.description} ${opp.location}`);
   if ([
     "all iceland",
@@ -4938,19 +4287,20 @@ function localLocationMatches(profile, opp) {
   if (!selectedLocations.length) return false;
   const country = getOpportunityCountryCode(opp);
   if (selectedLocations.includes("All Iceland")) {
-    const opportunityLocation = normalizeLocationText(opp.location);
+    const opportunityLocation = normalizeLocationText(getEffectiveOpportunityLocation(opp));
     return country === "IS" || opportunityLocation.includes("iceland") || opportunityLocation.includes("island");
   }
-  if (selectedLocations.includes("Remote / Online") && opp.location === "Remote / Online") return true;
+  if (selectedLocations.includes("Remote / Online") && getEffectiveOpportunityLocation(opp) === "Remote / Online") return true;
   if (!country) return false;
   if (country !== "IS" && selectedLocations.some((location) => normalizeLocationText(location).includes("iceland"))) return false;
 
-  const opportunityLocation = normalizeLocationText(opp.location);
+  const opportunityLocation = normalizeLocationText(getEffectiveOpportunityLocation(opp));
   return selectedLocations.some((loc) => {
     const selected = normalizeLocationText(loc);
     if (!selected) return false;
     if (selected === opportunityLocation) return true;
     if (selected === "reykjavik" && ["reykjavik", "capital area", "hofudborgarsvaedid"].includes(opportunityLocation)) return true;
+    if (selected === "capital area" && ["reykjavik", "capital area", "hofudborgarsvaedid"].includes(opportunityLocation)) return true;
     return opportunityLocation.includes(selected) || selected.includes(opportunityLocation);
   });
 }
@@ -4958,13 +4308,13 @@ function localLocationMatches(profile, opp) {
 function getLocationMatchCategory(profile, opp) {
   if (!profile) return "outside_area_low_confidence";
   if (localLocationMatches(profile, opp)) return "local_match";
-  if (profile.locations?.includes("Remote / Online") && opp.location === "Remote / Online") {
+  if (profile.locations?.includes("Remote / Online") && getEffectiveOpportunityLocation(opp) === "Remote / Online") {
     return "remote_match";
   }
   if (isNationalOpportunity(opp) && (isIcelandicOpportunity(opp) || getOpportunityCountryCode(opp) === "IS")) {
     return "national_match";
   }
-  if (opp.location === "Remote / Online" && profile.remoteProjects) return "remote_match";
+  if (getEffectiveOpportunityLocation(opp) === "Remote / Online" && profile.remoteProjects) return "remote_match";
   if (isIcelandicOpportunity(opp) && (profile.nationalProjects || profile.willingToTravel)) {
     return "outside_area_possible";
   }
@@ -4988,7 +4338,7 @@ function locationMatchReason(profile, opp) {
 function isIcelandicOpportunity(opp) {
   const country = getOpportunityCountryCode(opp);
   if (country === "IS") return true;
-  const location = normalizeLocationText(opp.location);
+  const location = normalizeLocationText(getEffectiveOpportunityLocation(opp));
   return [
     "iceland",
     "island",
@@ -5004,19 +4354,43 @@ function isIcelandicOpportunity(opp) {
   ].some((value) => location.includes(value));
 }
 
-function isEuRegionCode(value) {
-  return /^[A-Z]{2}[A-Z0-9]{2,4}$/i.test(String(value || "").trim());
+function getEffectiveOpportunityLocation(opp = {}) {
+  const rawLocation = String(opp.location || "").trim();
+  const normalized = normalizeLocationText(rawLocation);
+  if (rawLocation && !isGenericIcelandLocation(normalized)) return rawLocation;
+  return inferOpportunityLocationFromText(opp) || rawLocation;
 }
 
-function normalizeLocationText(value) {
-  return String(value || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/æ/g, "ae")
-    .replace(/[ðþ]/g, (char) => char === "ð" ? "d" : "th")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
+function isGenericIcelandLocation(normalizedLocation) {
+  return !normalizedLocation ||
+    normalizedLocation === "unknown" ||
+    normalizedLocation === "all iceland" ||
+    normalizedLocation === "iceland" ||
+    normalizedLocation === "island";
+}
+
+function inferOpportunityLocationFromText(opp = {}) {
+  const payload = opp.rawPayload && typeof opp.rawPayload === "object" ? opp.rawPayload : {};
+  const text = normalizeLocationText([
+    opp.title,
+    opp.description,
+    opp.buyer,
+    payload.buyer,
+    payload.extracted_buyer,
+    payload.source_name,
+    payload.extracted_location,
+    payload.location,
+  ].filter(Boolean).join(" "));
+  if (
+    text.includes("reykjavik") ||
+    text.includes("reykjavikurborg") ||
+    text.includes("hofudborgarsvaedid")
+  ) return "Reykjavík / Höfuðborgarsvæðið";
+  return "";
+}
+
+function isEuRegionCode(value) {
+  return /^[A-Z]{2}[A-Z0-9]{2,4}$/i.test(String(value || "").trim());
 }
 
 function valueMatches(profile, opp) {
@@ -5090,6 +4464,11 @@ function calculateMatch(profile, opp) {
   } else {
     score -= 8;
     risks.push("Outside selected area; location match is low confidence");
+  }
+
+  if (civilFit.hasWinterOnlyFit && locationCategory === "local_match") {
+    score += 12;
+    reasons.push("Local winter service fit");
   }
 
   if (valueMatches(profile, opp)) {
@@ -5514,15 +4893,6 @@ function syncDetailsFromState() {
   document.body.classList.add("modal-open");
 }
 
-function daysUntilDeadline(dateString) {
-  if (!dateString) return 999;
-  const today = new Date();
-  const d = new Date(dateString + "T00:00:00");
-  if (Number.isNaN(d.getTime())) return 999;
-  const ms = d - new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  return Math.ceil(ms / (1000 * 60 * 60 * 24));
-}
-
 function getDeadlineDisplay(value) {
   if (!value) {
     return {
@@ -5596,38 +4966,12 @@ function getOpportunityDeadlineDisplay(opp) {
 
 function formatISK(value) {
   if (!value) return state.language === "is" ? "Ekki gefið upp" : "Value unknown";
-  return new Intl.NumberFormat("is-IS").format(value) + " kr";
+  return formatCurrencyAmount(value, "ISK");
 }
 
 function formatEstimatedValue(value, currency = "ISK") {
   if (!value) return state.language === "is" ? "Ekki gefið upp" : "Value unknown";
-  const code = currency || "ISK";
-  const suffix = code === "ISK" ? "kr" : code;
-  return `${new Intl.NumberFormat("is-IS").format(value)} ${suffix}`;
-}
-
-function formatShortDate(value) {
-  if (!value) return "No deadline";
-  const date = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return String(value);
-  return new Intl.DateTimeFormat("en-GB", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit"
-  }).format(date);
-}
-
-function formatDateTime(value) {
-  if (!value) return "Unknown date";
-  return new Intl.DateTimeFormat("en-GB", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit"
-  }).format(new Date(value));
-}
-
-function isUuid(value) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
+  return formatCurrencyAmount(value, currency);
 }
 
 function categories() {
@@ -5739,17 +5083,7 @@ function renderLoadingPage() {
 function renderShell(content) {
   const isLoggedIn = Boolean(state.user);
   const hasProfile = Boolean(state.profile);
-  const navItems = isLoggedIn
-    ? [
-        [t("navDashboard"), "/dashboard"],
-        [t("navReport"), "/report"],
-        [t("navSettings"), "/settings"]
-      ]
-    : [
-        [t("navHowItWorks"), "#how-it-works"],
-        [t("navSampleReport"), "#sample-report"],
-        [t("navPricing"), "/pricing"]
-      ];
+  const navItems = getHeaderNavItems(isLoggedIn, hasProfile);
   const headerCta = getHeaderCta(isLoggedIn, hasProfile);
 
   return `
@@ -5807,6 +5141,28 @@ function renderShell(content) {
   `;
 }
 
+function getHeaderNavItems(isLoggedIn = Boolean(state.user), hasProfile = Boolean(state.profile)) {
+  const items = !isLoggedIn
+    ? [
+        [t("navHowItWorks"), "#how-it-works"],
+        [t("navSampleReport"), "#sample-report"],
+        [t("navPricing"), "/pricing"]
+      ]
+    : hasProfile
+      ? [
+          [t("navDashboard"), "/dashboard"],
+          [t("navReport"), "/report"],
+          [t("navSettings"), "/settings"]
+        ]
+      : [
+          [t("setupCompany"), "/onboarding"],
+          [t("navSettings"), "/settings"]
+        ];
+
+  if (isLoggedIn && state.isAdmin) items.push(["Admin", "/admin"]);
+  return items;
+}
+
 function renderFooter() {
   const links = [
     [t("privacyPolicy"), "/privacy"],
@@ -5828,176 +5184,20 @@ function renderFooter() {
   `;
 }
 
-function renderLegalPage({ eyebrow, title, intro, sections }) {
-  const updatedLabel = state.language === "is" ? "Síðast uppfært" : "Last updated";
-  const updatedDate = state.language === "is" ? "4. júní 2026" : "June 4, 2026";
-  return renderShell(`
-    <section class="legal-page">
-      <div class="legal-hero">
-        <p class="eyebrow">${escapeHtml(eyebrow)}</p>
-        <h1>${escapeHtml(title)}</h1>
-        <p>${escapeHtml(intro)}</p>
-        <span>${escapeHtml(updatedLabel)}: ${escapeHtml(updatedDate)}</span>
-      </div>
-      <div class="legal-layout">
-        ${sections.map((section) => `
-          <section class="legal-section">
-            <h2>${escapeHtml(section.title)}</h2>
-            <div class="legal-content">${section.content}</div>
-          </section>
-        `).join("")}
-      </div>
-    </section>
-  `);
-}
-
-function legalParagraphs(items) {
-  return items.map((item) => `<p>${escapeHtml(item)}</p>`).join("");
-}
-
-function legalList(items) {
-  return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
-}
-
 function legalPageData(key) {
-  const is = state.language === "is";
-  const pages = {
-    privacy: is ? {
-      eyebrow: "Lög og traust",
-      title: "Persónuvernd",
-      intro: "Hér er útskýrt á einföldu máli hvaða gögn VerkRadar vistar og hvernig þau eru notuð til að veita þjónustuna.",
-      sections: [
-        ["Persónuvernd", ["VerkRadar er vöktunar- og yfirlitskerfi fyrir fyrirtæki. Kerfið notar gögn sem notandi setur inn og opinber gögn um útboð og verkefni til að hjálpa fyrirtækjum að finna það sem gæti passað."]],
-        ["Hvaða gögn eru vistuð", ["VerkRadar getur vistað fyrirtækjaheiti, tengiliðanetfang, vefslóð, atvinnugrein, þjónustuflokka, staðsetningar, leitarorð, stillingar, vistuð og hunsuð verkefni, samsvaranir og yfirlit.", "Kerfið vistar einnig innskráningar- og lotugögn sem þarf til að halda notendum innskráðum og vernda aðgang."]],
-        ["Innskráning og aðgangur", ["Notendur skrá sig inn með auðkenndum aðgangi. Aðgangur að mælaborði, stillingum og skýrslum er tengdur við notanda og fyrirtæki eftir því sem við á."]],
-        ["Fyrirtækjaprófíll og stillingar", ["Fyrirtækjaprófíllinn er notaður til að bera opinber verkefni saman við þjónustu, svæði, lykilorð og óskir fyrirtækisins. Betri prófíll gefur yfirleitt betri samsvörun."]],
-        ["Vistuð og hunsuð tækifæri", ["VerkRadar getur vistað hvaða verkefni notandi vistar, fylgist með eða hunsar. Þetta er notað til að bæta upplifun, síur og yfirlit."]],
-        ["Vafrakökur og vafrageymsla", ["VerkRadar notar nauðsynlega vafrageymslu, lotugeymslu og sambærilega virkni fyrir innskráningu, Supabase Auth lotur, tungumál, stillingar og grunnvirkni appsins.", "Við gerum ekki ráð fyrir auglýsinga- eða rekjanlegri markaðssetningargeymslu í þessari útgáfu. Ef greiningar eða auglýsingatól verða síðar bætt við þarf að uppfæra þessa lýsingu."]],
-        ["Hafa samband", ["Spurningar um persónuvernd eða gögn má senda á info@froststudio.net."]]
-      ]
-    } : {
-      eyebrow: "Legal and trust",
-      title: "Privacy",
-      intro: "This page explains in practical terms what VerkRadar stores and how that data is used to provide the service.",
-      sections: [
-        ["Privacy", ["VerkRadar is a monitoring and reporting tool for businesses. It uses user-entered company data and public tender/project data to help companies find relevant opportunities."]],
-        ["What data is stored", ["VerkRadar may store company name, contact email, website, industry, service categories, locations, keywords, settings, saved and ignored opportunities, matches, and reports.", "The system also stores login and session data needed to keep users signed in and protect account access."]],
-        ["Login and access", ["Users log in with authenticated accounts. Access to dashboards, settings, and reports is connected to the user and company where applicable."]],
-        ["Company profile and settings", ["The company profile is used to compare public opportunities against services, locations, keywords, and company preferences. A better profile usually creates better matches."]],
-        ["Saved and ignored opportunities", ["VerkRadar may store which opportunities a user saves, watches, or ignores. This is used to improve the experience, filters, and reports."]],
-        ["Cookies and browser storage", ["VerkRadar uses essential browser storage, session storage, and similar functionality for login, Supabase Auth sessions, language, preferences, and core app functionality.", "We do not currently claim to use advertising or marketing tracking storage in this version. If analytics or advertising tools are added later, this section should be updated."]],
-        ["Contact", ["Questions about privacy or data can be sent to info@froststudio.net."]]
-      ]
-    },
-    terms: is ? {
-      eyebrow: "Lög og traust",
-      title: "Skilmálar",
-      intro: "Þessir skilmálar lýsa notkun VerkRadar á einföldu máli. Þeir eru ekki endanleg lögfræðiráðgjöf.",
-      sections: [
-        ["Skilmálar", ["Með því að nota VerkRadar samþykkir notandi að nota þjónustuna á ábyrgan hátt og staðfesta alltaf upplýsingar á upprunalegri heimild áður en brugðist er við."]],
-        ["Þjónustan", ["VerkRadar vaktar opinberar heimildir, útboðsvefi, sveitarfélagssíður og aðrar heimildir þar sem það er heimilt og tæknilega mögulegt. Kerfið raðar verkefnum eftir fyrirtækjaprófíl og býr til mælaborð eða yfirlit."]],
-        ["Upprunaleg gögn eru endanleg heimild", ["VerkRadar hjálpar til við að forgangsraða yfirferð opinberra tækifæra. Upprunaleg útboðsgögn, skilafrestir, kröfur og hæfisskilyrði á upprunalegri heimild eru alltaf endanleg heimild."]],
-        ["Engin trygging um fullkomna vöktun", ["VerkRadar tryggir ekki að öll útboð finnist, að öll gögn séu fullkomin, að samsvörun sé alltaf rétt eða að fyrirtæki uppfylli skilyrði eða vinni verk."]],
-        ["Prufuaðgangur og verð", ["Prufuaðgangur, verð, greiðslur og uppsagnir ráðast af verðsíðu, pöntunarsíðu eða skriflegu samkomulagi hverju sinni."]],
-        ["Uppsögn", ["Notandi getur óskað eftir lokun eða breytingu á aðgangi. VerkRadar getur takmarkað aðgang ef þjónustan er misnotuð, greiðslur vantar eða öryggisáhætta kemur upp."]],
-        ["Ábyrgðartakmörkun", ["VerkRadar ber ekki ábyrgð á töpuðum skilafrestum, röngum upplýsingum á upprunalegum heimildum, viðskiptatapi eða ákvörðunum sem teknar eru út frá yfirlitum án staðfestingar á frumgögnum."]],
-        ["Hafa samband", ["Spurningar um skilmála má senda á info@froststudio.net."]]
-      ]
-    } : {
-      eyebrow: "Legal and trust",
-      title: "Terms",
-      intro: "These terms describe VerkRadar use in plain language. They are not final legal advice.",
-      sections: [
-        ["Terms", ["By using VerkRadar, users agree to use the service responsibly and always verify information at the original source before acting."]],
-        ["The service", ["VerkRadar monitors public sources, procurement portals, municipal pages, and other sources where allowed and technically feasible. The system ranks opportunities against company profiles and creates dashboards or reports."]],
-        ["Original data is the final authority", ["VerkRadar helps prioritize review of public opportunities. Original tender documents, deadlines, requirements, and eligibility criteria at the original source are always the final authority."]],
-        ["No guarantee of complete monitoring", ["VerkRadar does not guarantee that every tender is found, that all data is complete, that matching is always correct, or that a company is eligible for or will win any contract."]],
-        ["Trial access and pricing", ["Trial access, pricing, billing, and cancellation are governed by the pricing page, order page, or written agreement in effect at the time."]],
-        ["Cancellation", ["A user may request account changes or cancellation. VerkRadar may restrict access if the service is misused, payment is missing, or a security risk arises."]],
-        ["Limitation of liability", ["VerkRadar is not responsible for missed deadlines, incorrect information at original sources, business losses, or decisions made from reports without checking source documents."]],
-        ["Contact", ["Questions about these terms can be sent to info@froststudio.net."]]
-      ]
-    },
-    data: is ? {
-      eyebrow: "Gagnaheimildir",
-      title: "Gagnaheimildir",
-      intro: "VerkRadar notar opinberar heimildir til að hjálpa fyrirtækjum að finna verkefni sem gætu skipt máli.",
-      sections: [
-        ["Gagnaheimildir", ["Kerfið safnar og samræmir opinberar upplýsingar þar sem slíkt er heimilt og tæknilega mögulegt."]],
-        ["Opinberar heimildir", ["Heimildir geta verið útboðsvefir, opinberar stofnanir, RSS straumar, sveitarfélagssíður og aðrar opinberar síður."]],
-        ["Sveitarfélög og útboðsvefir", ["VerkRadar getur vaktað sveitarfélög, innkaupa- og útboðsvefi og sértækar síður fyrir framkvæmdir, þjónustu eða innkaup."]],
-        ["Evrópsk útboð ef við á", ["Evrópsk útboð geta verið sótt úr TED eða sambærilegum heimildum þegar þau eiga við markaðinn og fyrirtækjaprófíla."]],
-        ["Takmarkanir gagna", ["Sumar heimildir veita ekki fulla skilafresti, verðmæti, kaupanda eða útboðsgögn í véllesanlegu formi. Gögn geta verið seinkuð, ófullkomin, tvítekin eða breytt á upprunalegri síðu."]],
-        ["Leiðréttingar", ["Ef þú sérð rangar eða úreltar upplýsingar má senda ábendingu á info@froststudio.net. Opnið alltaf upprunalega heimild áður en brugðist er við."]]
-      ]
-    } : {
-      eyebrow: "Data sources",
-      title: "Data sources",
-      intro: "VerkRadar uses public sources to help businesses find projects that may matter.",
-      sections: [
-        ["Data sources", ["The system collects and normalizes public information where allowed and technically feasible."]],
-        ["Public sources", ["Sources can include procurement portals, public institutions, RSS feeds, municipal pages, and other official public pages."]],
-        ["Municipalities and procurement portals", ["VerkRadar may monitor municipalities, procurement/tender portals, and specific pages for construction, services, or purchasing."]],
-        ["European tenders where applicable", ["European tenders may be imported from TED or similar sources when relevant to the market and company profiles."]],
-        ["Data limitations", ["Some sources do not provide full deadlines, values, buyer data, or tender documents in machine-readable form. Data may be delayed, incomplete, duplicated, or changed at the original source."]],
-        ["Corrections", ["If you see incorrect or outdated information, send a correction to info@froststudio.net. Always open the original source before acting."]]
-      ]
-    },
-    security: is ? {
-      eyebrow: "Öryggi",
-      title: "Öryggi",
-      intro: "VerkRadar notar innskráningu, aðgangsstýringu og aðskilnað gagna til að vernda fyrirtækjaupplýsingar.",
-      sections: [
-        ["Öryggi", ["Við reynum að halda öryggisupplýsingum hagnýtum og heiðarlegum. VerkRadar fullyrðir ekki um vottanir sem hafa ekki verið fengnar."]],
-        ["Innskráning", ["Notendur skrá sig inn með auðkenndum aðgangi. Innskráning og lotur eru hluti af grunnvirkni appsins."]],
-        ["Aðgangsstýring", ["Aðgangur að fyrirtækjagögnum, samsvörunum og skýrslum er aðgreindur eftir notanda og fyrirtæki þar sem það á við."]],
-        ["Fyrirtækjagögn", ["Fyrirtækjaprófílar, stillingar og vistuð/hunsuð verkefni eru notuð til að veita þjónustuna og ættu ekki að vera sýnileg öðrum viðskiptavinum."]],
-        ["Admin aðgangur", ["Admin verkfæri eru takmörkuð við skilgreinda stjórnendur og eru notuð til að fylgjast með heimildum, innflutningi, fyrirtækjum og handvirkri yfirferð."]],
-        ["Tilkynna vandamál", ["Öryggisspurningar eða ábendingar má senda á info@froststudio.net."]]
-      ]
-    } : {
-      eyebrow: "Security",
-      title: "Security",
-      intro: "VerkRadar uses authentication, access control, and data separation to protect company information.",
-      sections: [
-        ["Security", ["We try to keep security information practical and honest. VerkRadar does not claim certifications it has not obtained."]],
-        ["Login", ["Users log in with authenticated accounts. Login and sessions are part of the app’s core functionality."]],
-        ["Access control", ["Access to company data, matches, and reports is separated by user and company where applicable."]],
-        ["Company data", ["Company profiles, settings, and saved/ignored opportunities are used to provide the service and should not be visible to other customers."]],
-        ["Admin access", ["Admin tools are restricted to defined administrators and are used to monitor sources, imports, companies, and manual review."]],
-        ["Report an issue", ["Security questions or reports can be sent to info@froststudio.net."]]
-      ]
-    },
-    contact: is ? {
-      eyebrow: "Hafa samband",
-      title: "Hafa samband",
-      intro: "Viltu prófa VerkRadar, spyrja um vöktun eða benda á leiðréttingu?",
-      sections: [
-        ["VerkRadar / Frost Studio", ["Netfang: info@froststudio.net", "Tengiliður: Kristján Jakob"]]
-      ]
-    } : {
-      eyebrow: "Contact",
-      title: "Contact",
-      intro: "Want to try VerkRadar, ask about monitoring, or report a correction?",
-      sections: [
-        ["VerkRadar / Frost Studio", ["Email: info@froststudio.net", "Contact person: Kristján Jakob"]]
-      ]
-    }
-  };
-  return pages[key];
+  return getLegalPageData(key, state.language);
 }
 
 function renderLegalDataPage(key) {
   const data = legalPageData(key);
-  return renderLegalPage({
+  return renderShell(renderLegalPageContent({
+    language: state.language,
+    escapeHtml,
     eyebrow: data.eyebrow,
     title: data.title,
     intro: data.intro,
-    sections: data.sections.map(([title, paragraphs]) => ({
-      title,
-      content: legalParagraphs(paragraphs)
-    }))
-  });
+    sections: data.sections
+  }));
 }
 
 function renderPrivacyPolicy() {
@@ -6025,14 +5225,7 @@ function renderContactPage() {
 }
 
 function renderMobileMenuPanel(navItems, headerCta, isLoggedIn) {
-  const mobileNavItems = isLoggedIn
-    ? [
-        [t("navDashboard"), "/dashboard"],
-        [t("navReport"), "/report"],
-        [t("navSettings"), "/settings"]
-      ]
-    : navItems;
-  const linkItems = mobileNavItems.map(([label, href]) => href.startsWith("#")
+  const linkItems = navItems.map(([label, href]) => href.startsWith("#")
     ? `<button type="button" data-action="mobile-scroll-to" data-target="${href.slice(1)}">${label}</button>`
     : `<button type="button" data-action="mobile-nav" data-href="${href}">${label}</button>`
   ).join("");
@@ -6042,7 +5235,6 @@ function renderMobileMenuPanel(navItems, headerCta, isLoggedIn) {
       <div class="mobile-menu-scroll">
       <div class="mobile-menu-links">
         ${linkItems}
-        ${isLoggedIn && state.isAdmin ? `<button type="button" data-action="mobile-nav" data-href="/admin">Admin</button>` : ""}
       </div>
       ${renderMobileAccountSection(headerCta, isLoggedIn)}
       </div>
@@ -6074,10 +5266,11 @@ function renderMobileAccountSection(headerCta, isLoggedIn) {
         </div>
       </div>
       <div class="mobile-account-actions">
-        <button type="button" data-action="mobile-nav" data-href="/dashboard">${t("navDashboard")}</button>
         ${state.profile
-          ? `<button type="button" data-action="mobile-nav" data-href="/settings">${t("navSettings")}</button>`
-          : `<button type="button" data-action="mobile-nav" data-href="/onboarding">${t("createProfile")}</button>`
+          ? `<button type="button" data-action="mobile-nav" data-href="/dashboard">${t("navDashboard")}</button>
+             <button type="button" data-action="mobile-nav" data-href="/settings">${t("navSettings")}</button>`
+          : `<button type="button" data-action="mobile-nav" data-href="/onboarding">${t("setupCompany")}</button>
+             <button type="button" data-action="mobile-nav" data-href="/settings">${t("navSettings")}</button>`
         }
         <button type="button" class="mobile-logout" data-action="logout">${t("logout")}</button>
       </div>
@@ -6149,112 +5342,38 @@ function requireProfilePage(title, message) {
   `);
 }
 
-function renderAuthMessage() {
-  if (!state.authMessage) return "";
-  const actions = Array.isArray(state.authMessage.actions) ? state.authMessage.actions : [];
-  return `
-    <div class="admin-message ${state.authMessage.type === "error" ? "is-error" : "is-success"}">
-      <span>${escapeHtml(state.authMessage.text)}</span>
-      ${actions.length ? `
-        <div class="auth-message-actions">
-          ${actions.map((action) => `
-            <button type="button" class="btn btn-${action.variant === "primary" ? "primary" : "secondary"}" data-action="go" data-href="${escapeHtml(action.href)}">
-              ${escapeHtml(action.label)}
-            </button>
-          `).join("")}
-        </div>
-      ` : ""}
-    </div>
-  `;
-}
-
 function renderLogin() {
   if (state.user) return requireProfilePage(state.language === "is" ? "Þú ert þegar skráð(ur) inn" : "Already logged in", state.language === "is" ? "Opnaðu mælaborðið eða breyttu fyrirtækjaprófílnum." : "Open your dashboard or edit your company profile.");
 
-  return renderShell(`
-    <section class="auth-page">
-      <div class="auth-layout">
-        <div class="auth-copy">
-          <p class="eyebrow">${escapeHtml(t("login"))}</p>
-          <h1>${escapeHtml(t("authLoginTitle"))}</h1>
-          <p>${escapeHtml(t("authLoginSubtitle"))}</p>
-        </div>
-
-        <div class="auth-form-column">
-          ${renderAuthMessage()}
-          <form id="login-form" class="auth-card">
-            <label class="form-group">${escapeHtml(t("email"))} <input type="email" name="email" data-auth-field="email" value="${escapeHtml(state.authForm.email)}" autocomplete="email" required /></label>
-            <label class="form-group">${escapeHtml(t("password"))} <input type="password" name="password" data-auth-field="password" value="${escapeHtml(state.authForm.password)}" autocomplete="current-password" required /></label>
-            <p class="auth-help-link"><button type="button" data-action="go" data-href="/forgot-password">${escapeHtml(t("forgotPassword"))}</button></p>
-            <div class="auth-actions">
-              <button class="btn btn-primary btn-large" type="submit" ${state.authSubmitting ? "disabled" : ""}>
-                ${state.authSubmitting ? escapeHtml(t("loggingIn")) : escapeHtml(t("login"))}
-              </button>
-            </div>
-            <p class="auth-switch">${escapeHtml(t("newToVerkRadar"))} <button type="button" data-action="go" data-href="/signup">${escapeHtml(t("createAccount"))}</button></p>
-          </form>
-        </div>
-      </div>
-    </section>
-  `);
+  return renderShell(renderLoginPage({
+    t,
+    escapeHtml,
+    authForm: state.authForm,
+    authSubmitting: state.authSubmitting,
+    authMessage: state.authMessage
+  }));
 }
 
 function renderForgotPassword() {
   if (state.user) return requireProfilePage(state.language === "is" ? "Þú ert þegar skráð(ur) inn" : "Already logged in", state.language === "is" ? "Opnaðu mælaborðið eða breyttu fyrirtækjaprófílnum." : "Open your dashboard or edit your company profile.");
 
-  return renderShell(`
-    <section class="auth-page">
-      <div class="auth-layout">
-        <div class="auth-copy">
-          <p class="eyebrow">${escapeHtml(t("passwordReset"))}</p>
-          <h1>${escapeHtml(t("resetPasswordTitle"))}</h1>
-          <p>${escapeHtml(t("resetPasswordSubtitle"))}</p>
-        </div>
-
-        <div class="auth-form-column">
-          ${renderAuthMessage()}
-          <form id="forgot-password-form" class="auth-card">
-            <label class="form-group">${escapeHtml(t("email"))} <input type="email" name="email" data-auth-field="email" value="${escapeHtml(state.authForm.email)}" autocomplete="email" required /></label>
-            <div class="auth-actions">
-              <button class="btn btn-primary btn-large" type="submit" ${state.authSubmitting ? "disabled" : ""}>
-                ${state.authSubmitting ? escapeHtml(t("sending")) : escapeHtml(t("sendResetLink"))}
-              </button>
-            </div>
-            <p class="auth-switch">${escapeHtml(t("rememberedPassword"))} <button type="button" data-action="go" data-href="/login">${escapeHtml(t("backToLogin"))}</button></p>
-          </form>
-        </div>
-      </div>
-    </section>
-  `);
+  return renderShell(renderForgotPasswordPage({
+    t,
+    escapeHtml,
+    authForm: state.authForm,
+    authSubmitting: state.authSubmitting,
+    authMessage: state.authMessage
+  }));
 }
 
 function renderResetPassword() {
-  return renderShell(`
-    <section class="auth-page">
-      <div class="auth-layout">
-        <div class="auth-copy">
-          <p class="eyebrow">${escapeHtml(t("newPassword"))}</p>
-          <h1>${escapeHtml(t("chooseNewPassword"))}</h1>
-          <p>${escapeHtml(t("resetPasswordHelp"))}</p>
-        </div>
-
-        <div class="auth-form-column">
-          ${renderAuthMessage()}
-          <form id="reset-password-form" class="auth-card">
-            <label class="form-group">${escapeHtml(t("newPassword"))} <input type="password" name="newPassword" data-auth-field="newPassword" value="${escapeHtml(state.authForm.newPassword)}" autocomplete="new-password" minlength="8" required /></label>
-            <label class="form-group">${escapeHtml(t("confirmNewPassword"))} <input type="password" name="confirmPassword" data-auth-field="confirmPassword" value="${escapeHtml(state.authForm.confirmPassword)}" autocomplete="new-password" minlength="8" required /></label>
-            <div class="auth-actions">
-              <button class="btn btn-primary btn-large" type="submit" ${state.authSubmitting ? "disabled" : ""}>
-                ${state.authSubmitting ? escapeHtml(t("updating")) : escapeHtml(t("updatePassword"))}
-              </button>
-            </div>
-            <p class="auth-switch">${escapeHtml(t("needNewLink"))} <button type="button" data-action="go" data-href="/forgot-password">${escapeHtml(t("sendAnotherResetLink"))}</button></p>
-            <p class="auth-switch">${escapeHtml(t("backToLogin"))} <button type="button" data-action="go" data-href="/login">${escapeHtml(t("login"))}</button></p>
-          </form>
-        </div>
-      </div>
-    </section>
-  `);
+  return renderShell(renderResetPasswordPage({
+    t,
+    escapeHtml,
+    authForm: state.authForm,
+    authSubmitting: state.authSubmitting,
+    authMessage: state.authMessage
+  }));
 }
 
 function renderSignup() {
@@ -6269,31 +5388,13 @@ function renderSignup() {
     `);
   }
 
-  return renderShell(`
-    <section class="auth-page">
-      <div class="auth-layout">
-        <div class="auth-copy">
-          <p class="eyebrow">${escapeHtml(t("createAccount"))}</p>
-          <h1>${escapeHtml(t("createAccountTitle"))}</h1>
-          <p>${escapeHtml(t("createAccountSubtitle"))}</p>
-        </div>
-
-        <div class="auth-form-column">
-          ${renderAuthMessage()}
-          <form id="signup-form" class="auth-card">
-            <label class="form-group">${escapeHtml(t("email"))} <input type="email" name="email" data-auth-field="email" value="${escapeHtml(state.authForm.email)}" autocomplete="email" required /></label>
-            <label class="form-group">${escapeHtml(t("password"))} <input type="password" name="password" data-auth-field="password" value="${escapeHtml(state.authForm.password)}" autocomplete="new-password" minlength="6" required /></label>
-            <div class="auth-actions">
-              <button class="btn btn-primary btn-large" type="submit" ${state.authSubmitting ? "disabled" : ""}>
-                ${state.authSubmitting ? escapeHtml(t("creating")) : escapeHtml(t("createAccount"))}
-              </button>
-            </div>
-            <p class="auth-switch">${escapeHtml(t("alreadyHaveAccount"))} <button type="button" data-action="go" data-href="/login">${escapeHtml(t("login"))}</button></p>
-          </form>
-        </div>
-      </div>
-    </section>
-  `);
+  return renderShell(renderSignupPage({
+    t,
+    escapeHtml,
+    authForm: state.authForm,
+    authSubmitting: state.authSubmitting,
+    authMessage: state.authMessage
+  }));
 }
 
 function renderImportStatus() {
@@ -7162,183 +6263,14 @@ function renderAdminOpportunityFilters(opportunities) {
 }
 
 function renderLanding() {
-  const isIcelandic = state.language === "is";
-  const heroSamples = isIcelandic
-    ? [
-        { title: "Gatnagerð og lagnir við nýtt hverfi", type: "1", score: "Sterk samsvörun · Skilafrestur eftir 10 daga" },
-        { title: "Lóðarframkvæmdir við skóla", type: "2", score: "Passar við lóðarvinnu · Staðfesta gögn" },
-        { title: "Bílastæði og yfirborðsfrágangur", type: "3", score: "Möguleg samsvörun · Opna heimild" }
-      ]
-    : [
-        { title: "Roadworks and utilities for a new neighborhood", type: "1", score: "Strong match · Deadline in 10 days" },
-        { title: "Site works at a school", type: "2", score: "Fits site work · Verify documents" },
-        { title: "Parking area and surface finishing", type: "3", score: "Possible match · Open source" }
-      ];
-  const targetCards = isIcelandic
-    ? [
-        ["Jarðvinna og gatnagerð", "Útboð um vegi, lóðir, bílastæði, stíga og jarðvegsvinnu."],
-        ["Lagnavinna og fráveita", "Verkefni um lagnir, dælustöðvar, fráveitu, vatn og hitaveitu."],
-        ["Malbikun og lóðarframkvæmdir", "Gatnagerð, yfirborðsfrágangur, gangstéttir og viðhald."],
-        ["Rafverktakar", "Raflagnir, brunakerfi, lýsing, öryggiskerfi og hleðslustöðvar."],
-        ["Ræstingar og þjónusta", "Reglulegir þjónustusamningar, húsþjónusta og rekstrarverkefni."],
-        ["Verkfræðistofur og ráðgjafar", "Hönnun, eftirlit, ráðgjöf og verkefnastjórnun þegar það á við."]
-      ]
-    : [
-        ["Earthworks and roadworks", "Tenders for roads, plots, parking areas, paths and earthworks."],
-        ["Utilities and drainage", "Projects for pipes, pumping stations, drainage, water and heating utilities."],
-        ["Paving and site works", "Road construction, surface finishing, sidewalks and maintenance."],
-        ["Electrical contractors", "Wiring, fire alarms, lighting, security systems and chargers."],
-        ["Cleaning and services", "Recurring service contracts, facility services and operations work."],
-        ["Engineering and advisors", "Design, supervision, consulting and project management where relevant."]
-      ];
-  return renderShell(`
-    <section class="hero">
-      <div class="hero-copy">
-        <p class="eyebrow">${escapeHtml(t("heroEyebrow"))}</p>
-        <h1>${escapeHtml(t("heroTitle"))}</h1>
-        <p class="hero-text">
-          ${escapeHtml(t("heroText"))}
-        </p>
-        <div class="hero-actions">
-          <button class="btn btn-primary btn-large" data-action="go" data-href="${escapeHtml(getTrialAccessHref())}">${escapeHtml(t("createFreeDemoProfile"))} <span aria-hidden="true">&rarr;</span></button>
-          <button class="btn btn-secondary btn-large" data-action="scroll-to" data-target="sample-report">${escapeHtml(t("viewSampleReport"))}</button>
-        </div>
-        <div class="proof-lines" aria-label="Product proof">
-          <strong>${escapeHtml(t("proofStrong"))}</strong>
-          <span>${escapeHtml(t("proofText"))}</span>
-        </div>
-      </div>
-      <div class="product-shot hero-card" aria-label="VerkRadar product preview">
-        <div class="shot-topbar">
-          <span>VERKRADAR / ${escapeHtml(isIcelandic ? "JARÐVINNUFYRIRTÆKI EHF." : "CIVIL CONTRACTOR LTD.")}</span>
-          <span>${new Date().toLocaleDateString(isIcelandic ? "is-IS" : "en-GB", { day: "2-digit", month: "short" })}</span>
-        </div>
-        <div class="shot-metric">
-          <span>${escapeHtml(t("bestOpenMatch"))}</span>
-          <strong>${escapeHtml(isIcelandic ? "3 verkefni sem passa" : "3 matching projects")}</strong>
-        </div>
-        <div class="shot-row is-active">
-          <div>
-            <span class="shot-label">${escapeHtml(heroSamples[0].type)}</span>
-            <h3>${escapeHtml(heroSamples[0].title)}</h3>
-            <p>${escapeHtml(heroSamples[0].score)}</p>
-          </div>
-        </div>
-        ${heroSamples.slice(1, 3).map((opp) => `
-          <div class="shot-row">
-            <div>
-              <span class="shot-label">${escapeHtml(opp.type)}</span>
-              <h3>${escapeHtml(opp.title)}</h3>
-              <p>${escapeHtml(opp.score)}</p>
-            </div>
-          </div>
-        `).join("")}
-        <div class="shot-footer">
-          <span>${escapeHtml(t("deadlineRisk"))}</span>
-          <strong>${escapeHtml(isIcelandic ? "2 verkefni" : "2 projects")}</strong>
-        </div>
-      </div>
-    </section>
-
-    <section class="problem-section">
-      <div class="section-copy">
-        <p class="eyebrow">${escapeHtml(t("problemEyebrow"))}</p>
-        <h2>${escapeHtml(t("problemTitle"))}</h2>
-      </div>
-      <div class="problem-table">
-        <div class="problem-row">
-          <span>01</span>
-          <h3>${escapeHtml(t("problemOneTitle"))}</h3>
-          <p>${escapeHtml(t("problemOneText"))}</p>
-        </div>
-        <div class="problem-row">
-          <span>02</span>
-          <h3>${escapeHtml(t("problemTwoTitle"))}</h3>
-          <p>${escapeHtml(t("problemTwoText"))}</p>
-        </div>
-      </div>
-    </section>
-
-    <section class="section target-section">
-      <div class="section-copy">
-        <p class="eyebrow">${escapeHtml(t("targetEyebrow"))}</p>
-        <h2>${escapeHtml(t("targetTitle"))}</h2>
-        <p>${escapeHtml(t("targetText"))}</p>
-      </div>
-      <div class="feature-grid target-grid">
-        ${targetCards.map(([title, text]) => `
-          <div class="feature-card">
-            <h3>${escapeHtml(title)}</h3>
-            <p>${escapeHtml(text)}</p>
-          </div>
-        `).join("")}
-      </div>
-    </section>
-
-    <section id="how-it-works" class="section section-grid reversed how-it-works-section">
-      <div class="feature-grid">
-        <div class="feature-card"><h3>${escapeHtml(t("createProfileStep"))}</h3><p>${escapeHtml(t("createProfileStepText"))}</p></div>
-        <div class="feature-card"><h3>${escapeHtml(t("matchProjectsStep"))}</h3><p>${escapeHtml(t("matchProjectsStepText"))}</p></div>
-        <div class="feature-card"><h3>${escapeHtml(t("getReportStep"))}</h3><p>${escapeHtml(t("getReportStepText"))}</p></div>
-      </div>
-      <div class="section-copy">
-        <p class="eyebrow">${escapeHtml(t("solutionEyebrow"))}</p>
-        <h2>${escapeHtml(t("solutionTitle"))}</h2>
-        <p>${escapeHtml(t("solutionText"))}</p>
-      </div>
-    </section>
-
-    <section id="sample-report" class="section sample-report-section public-sample-report-page">
-      <div class="section-copy">
-        <p class="eyebrow">${escapeHtml(t("sampleReportEyebrow"))}</p>
-        <h2>${escapeHtml(t("sampleReportTitle"))}</h2>
-        <p>${escapeHtml(t("sampleReportText"))}</p>
-      </div>
-      <div class="public-report-preview">
-        <div class="report-topbar">
-          <span>${escapeHtml(t("reportTitle"))}</span>
-          <span>Jarðtækni ehf.</span>
-        </div>
-        <article class="report-item">
-          <h3>${escapeHtml(isIcelandic ? "Gatnagerð og lagnir á Akranesi" : "Roadworks and utilities in Akranes")}</h3>
-          <p><strong>${escapeHtml(t("buyer"))}:</strong> ${escapeHtml(isIcelandic ? "Akraneskaupstaður" : "Akranes Municipality")}</p>
-          <p><strong>${escapeHtml(t("deadline"))}:</strong> ${escapeHtml(t("daysLeft", { count: 18 }))} · <strong>${escapeHtml(t("possibleMatch"))}:</strong> 92/100</p>
-          <ul>
-            <li>${escapeHtml(isIcelandic ? "Nefnir gatnagerð og lagnir sem passa við verkflokka fyrirtækisins." : "Mentions roadworks and utilities that match the company profile.")}</li>
-            <li>${escapeHtml(isIcelandic ? "Svæðið er innan valins þjónustusvæðis." : "The area is inside the selected service region.")}</li>
-            <li>${escapeHtml(isIcelandic ? "Verkefnið er þess virði að staðfesta í upprunalegum útboðsgögnum." : "The project is worth verifying in the original tender documents.")}</li>
-          </ul>
-          <p><strong>${escapeHtml(t("openSource"))}:</strong> ${isIcelandic ? "Opnið heimild og staðfestið skilafrest, kröfur og gögn." : "Open the source and confirm deadline, requirements and documents."}</p>
-        </article>
-        <article class="report-item">
-          <h3>${escapeHtml(isIcelandic ? "Lóðarframkvæmdir við Myllubakkaskóla" : "Site works at Myllubakkaskóli")}</h3>
-          <p><strong>${escapeHtml(t("buyer"))}:</strong> ${escapeHtml(isIcelandic ? "Reykjanesbær" : "Reykjanesbær Municipality")}</p>
-          <p><strong>${escapeHtml(t("deadline"))}:</strong> ${escapeHtml(t("daysLeft", { count: 24 }))} · <strong>${escapeHtml(t("possibleMatch"))}:</strong> 86/100</p>
-          <ul>
-            <li>${escapeHtml(isIcelandic ? "Inniheldur leitarorð: lóðarframkvæmdir, yfirborðsfrágangur." : "Contains keywords: site works, surface finishing.")}</li>
-            <li>${escapeHtml(isIcelandic ? "Passar við jarðvinnu, frágang og verk á lóðum." : "Fits earthworks, finishing and site work services.")}</li>
-          </ul>
-        </article>
-        <article class="report-item">
-          <h3>${escapeHtml(isIcelandic ? "Verðfyrirspurn - Sandbakki - gatnagerð" : "Quote request - Sandbakki roadworks")}</h3>
-          <p><strong>${escapeHtml(t("buyer"))}:</strong> ${escapeHtml(isIcelandic ? "Opinber verkkaupi" : "Public buyer")}</p>
-          <p><strong>${escapeHtml(t("deadline"))}:</strong> ${escapeHtml(t("daysLeft", { count: 11 }))} · <strong>${escapeHtml(t("possibleMatch"))}:</strong> 83/100</p>
-          <ul>
-            <li>${escapeHtml(isIcelandic ? "Skýr verðfyrirspurn með gatnagerð í titli." : "Clear quote request with roadworks in the title.")}</li>
-            <li>${escapeHtml(isIcelandic ? "Stuttur frestur, því þarf að bregðast hratt við." : "Short deadline, so it needs quick review.")}</li>
-          </ul>
-        </article>
-        <p class="source-disclaimer">${escapeHtml(t("sourceDisclaimer"))}</p>
-      </div>
-    </section>
-
-    <section class="cta-panel">
-      <h2>${escapeHtml(t("tryDemoTitle"))}</h2>
-      <p>${escapeHtml(t("tryDemoText"))}</p>
-      <button class="btn btn-primary" data-action="load-demo">${escapeHtml(t("loadDemoCompany"))}</button>
-    </section>
-  `);
+  return renderShell(renderLandingPage({
+    t,
+    escapeHtml,
+    language: state.language,
+    trialHref: getTrialAccessHref()
+  }));
 }
+
 
 function renderOnboarding() {
   if (!state.user) return requireAuthPage();
@@ -7357,182 +6289,23 @@ function renderOnboarding() {
 
 function renderProfileForm() {
   initializeProfileDraft();
-  return `
-    <form id="profile-form" class="form-card settings-profile-form">
-      ${renderProfileBasicsSection()}
-      ${renderProfileServicesSection()}
-      ${renderProfileLocationsSection()}
-      ${renderProfileValueSection()}
-      ${renderProfileReportsSection()}
-      ${renderProfileFormActions()}
-    </form>
-  `;
-}
-
-function renderProfileBasicsSection() {
-  const p = state.profileDraft || getEmptyProfile();
-  const selectedIndustry = p.industry || "";
-  return `
-    <div class="form-section">
-      <h2>${escapeHtml(t("companyBasics"))}</h2>
-      <div class="form-grid">
-        <label>${escapeHtml(t("companyName"))}<input name="companyName" data-profile-field="companyName" value="${escapeHtml(p.companyName || "")}" required /></label>
-        <label>${escapeHtml(t("contactEmail"))}<input name="contactEmail" type="email" data-profile-field="contactEmail" value="${escapeHtml(p.contactEmail || "")}" required /></label>
-        <label>${escapeHtml(t("website"))}<input name="website" data-profile-field="website" value="${escapeHtml(p.website || "")}" /></label>
-        <label class="custom-select-field">${escapeHtml(t("industry"))}
-          <input id="industry-input" type="hidden" name="industry" value="${escapeHtml(selectedIndustry)}" required />
-          ${renderCustomDropdown({
-            key: "industry",
-            value: selectedIndustry,
-            options: getFilterOptions("industry"),
-            profileField: "industry"
-          })}
-        </label>
-      </div>
-    </div>
-  `;
-}
-
-function renderProfileServicesSection() {
-  const p = state.profileDraft || getEmptyProfile();
-  const selectedIndustry = p.industry || "";
-  const serviceSuggestions = getProfileSuggestions("services", selectedIndustry);
-  const keywordSuggestions = getProfileSuggestions("includeKeywords", selectedIndustry);
-  return `
-    <div class="form-section">
-      <h2>${escapeHtml(t("servicesAndKeywords"))}</h2>
-      <p class="form-section-hint">${escapeHtml(t("servicesHint"))}</p>
-      <label>${escapeHtml(t("servicesLabel"))}
-        <textarea name="services" data-profile-field="services" data-profile-array="true" rows="3">${escapeHtml(arrayFieldText(p.services))}</textarea>
-      </label>
-      <p class="field-helper">${escapeHtml(t("servicesHelper"))}</p>
-      ${renderSuggestionChips({
-        field: "services",
-        title: selectedIndustry ? t("suggestedServicesFor", { industry: selectedIndustry }) : t("selectIndustryForServices"),
-        values: serviceSuggestions,
-        selectedValues: p.services || []
-      })}
-      <div class="form-grid keyword-grid">
-        <label class="profile-keyword-field">${escapeHtml(t("extraWords"))}
-          <input name="includeKeywords" data-profile-field="includeKeywords" data-profile-array="true" value="${escapeHtml(arrayFieldText(p.includeKeywords))}" />
-          <span class="field-helper inline-helper">${escapeHtml(t("includeKeywordsHelper"))}</span>
-        </label>
-        <label class="profile-keyword-field">${escapeHtml(t("excludeWords"))}
-          <input name="excludeKeywords" data-profile-field="excludeKeywords" data-profile-array="true" value="${escapeHtml(arrayFieldText(p.excludeKeywords))}" />
-          <span class="field-helper inline-helper">${escapeHtml(t("excludeKeywordsHelper"))}</span>
-        </label>
-      </div>
-      ${renderSuggestionChips({
-        field: "includeKeywords",
-        title: selectedIndustry ? t("suggestedKeywordsFor", { industry: selectedIndustry }) : t("selectIndustryForKeywords"),
-        values: keywordSuggestions,
-        selectedValues: p.includeKeywords || []
-      })}
-    </div>
-  `;
-}
-
-function renderProfileLocationsSection() {
-  const p = state.profileDraft || getEmptyProfile();
-  const locationOptions = ["Reykjavík", "Capital Area", "Suðurnes", "South Iceland", "West Iceland", "North Iceland", "East Iceland", "Westfjords", "All Iceland", "Remote / Online"];
-  return `
-    <div class="form-section">
-      <h2>${escapeHtml(t("locationsTitle"))}</h2>
-      <p class="form-section-hint">${escapeHtml(t("locationsHint"))}</p>
-      <div class="form-grid">
-        <label>${escapeHtml(t("baseLocation"))}
-          <input name="baseLocation" data-profile-field="baseLocation" value="${escapeHtml(p.baseLocation || "")}" placeholder="${escapeHtml(t("baseLocationPlaceholder"))}" />
-        </label>
-        <label>${escapeHtml(t("serviceAreas"))}
-          <input name="serviceAreas" data-profile-field="serviceAreas" data-profile-array="true" value="${escapeHtml(arrayFieldText(p.serviceAreas))}" placeholder="${escapeHtml(t("serviceAreasPlaceholder"))}" />
-        </label>
-      </div>
-      <div class="checkbox-grid">
-        ${locationOptions.map((loc) => `
-          <label class="checkbox">
-            <input type="checkbox" name="locations" value="${loc}" data-profile-location ${(p.locations || []).includes(loc) ? "checked" : ""} />
-            <span>${escapeHtml(formatCustomerLocation(loc))}</span>
-          </label>
-        `).join("")}
-      </div>
-      <div class="profile-travel-panel">
-        <h3>${escapeHtml(t("travelScope"))}</h3>
-        <div class="profile-travel-grid">
-          <label class="checkbox inline"><input type="checkbox" name="willingToTravel" data-profile-field="willingToTravel" ${p.willingToTravel ? "checked" : ""} /><span>${escapeHtml(t("willingToTravel"))}</span></label>
-          <label class="checkbox inline"><input type="checkbox" name="nationalProjects" data-profile-field="nationalProjects" ${p.nationalProjects ? "checked" : ""} /><span>${escapeHtml(t("includeNational"))}</span></label>
-          <label class="checkbox inline"><input type="checkbox" name="remoteProjects" data-profile-field="remoteProjects" ${p.remoteProjects ? "checked" : ""} /><span>${escapeHtml(t("includeRemote"))}</span></label>
-          <label>${escapeHtml(t("minimumTravelValue"))}
-            <input name="minimumProjectValueForTravel" type="number" data-profile-field="minimumProjectValueForTravel" data-profile-number="true" value="${p.minimumProjectValueForTravel || ""}" />
-          </label>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-function renderProfileValueSection() {
-  const p = state.profileDraft || getEmptyProfile();
-  return `
-    <div class="form-section">
-      <h2>${escapeHtml(t("projectSize"))}</h2>
-      <div class="form-grid">
-        <label>${escapeHtml(t("minimumValue"))}<input name="minProjectValue" type="number" data-profile-field="minProjectValue" data-profile-number="true" value="${p.minProjectValue || ""}" /></label>
-        <label>${escapeHtml(t("maximumValue"))}<input name="maxProjectValue" type="number" data-profile-field="maxProjectValue" data-profile-number="true" value="${p.maxProjectValue || ""}" /></label>
-      </div>
-      <label class="checkbox inline">
-        <input type="checkbox" name="allowUnknownValue" data-profile-field="allowUnknownValue" ${p.allowUnknownValue ? "checked" : ""} />
-        <span>${escapeHtml(t("showUnknownValue"))}</span>
-      </label>
-    </div>
-  `;
-}
-
-function renderProfileReportsSection() {
-  const p = state.profileDraft || getEmptyProfile();
-  return `
-    <div class="form-section">
-      <h2>${escapeHtml(t("reportPreferences"))}</h2>
-      <div class="form-grid">
-        <label>${escapeHtml(t("frequency"))}
-          <select name="reportFrequency" data-profile-field="reportFrequency">
-            <option ${p.reportFrequency === "weekly" ? "selected" : ""} value="weekly">${escapeHtml(t("weekly"))}</option>
-            <option ${p.reportFrequency === "daily" ? "selected" : ""} value="daily">${escapeHtml(t("daily"))}</option>
-          </select>
-        </label>
-        <label>${escapeHtml(t("reportDay"))}
-          <select name="reportDay" data-profile-field="reportDay">
-            ${["monday", "tuesday", "wednesday", "thursday", "friday"].map((x) => `<option ${p.reportDay === x ? "selected" : ""} value="${x}">${capitalize(x)}</option>`).join("")}
-          </select>
-        </label>
-      </div>
-      <label class="checkbox inline"><input type="checkbox" name="deadlineReminders" data-profile-field="deadlineReminders" ${p.deadlineReminders ? "checked" : ""} /><span>${escapeHtml(t("deadlineReminders"))}</span></label>
-      <label class="checkbox inline"><input type="checkbox" name="includeLowConfidence" data-profile-field="includeLowConfidence" ${p.includeLowConfidence ? "checked" : ""} /><span>${escapeHtml(t("includeLowConfidence"))}</span></label>
-    </div>
-  `;
-}
-
-function renderProfileFormActions() {
-  return `
-    <div class="form-actions">
-      <button
-        type="submit"
-        class="btn btn-primary btn-large"
-        ${state.isSavingProfile ? "disabled" : ""}
-      >
-        ${state.isSavingProfile ? escapeHtml(t("saving")) : state.profileSaved ? escapeHtml(t("saved")) : escapeHtml(t("saveProfile"))}
-      </button>
-    </div>
-    ${state.profileSaveMessage ? `
-      <div class="form-message success">
-        ${escapeHtml(state.profileSaveMessage)}
-      </div>
-    ` : ""}
-    ${state.profileSaveError ? `
-      <div class="form-message error">
-        ${escapeHtml(state.profileSaveError)}
-      </div>
-    ` : ""}
-  `;
+  return renderProfileFormPage({
+    t,
+    escapeHtml,
+    capitalize,
+    arrayFieldText,
+    formatCustomerLocation,
+    getFilterOptions,
+    getProfileSuggestions,
+    renderCustomDropdown,
+    renderSuggestionChips,
+    profileDraft: state.profileDraft || getEmptyProfile(),
+    hasProfile: Boolean(state.profile),
+    isSavingProfile: state.isSavingProfile,
+    profileSaved: state.profileSaved,
+    profileSaveMessage: state.profileSaveMessage,
+    profileSaveError: state.profileSaveError
+  });
 }
 
 function getFilterOptions(key) {
@@ -7599,7 +6372,7 @@ function getSelectedFilterIndex(key) {
 function getFilterLabel(key) {
   const options = getFilterOptions(key);
   const selectedValue = key === "industry" ? (state.profileDraft?.industry || state.profile?.industry || "") : state.filters[key];
-  return options.find((option) => option.value === selectedValue)?.label || (key === "industry" ? "Select industry" : options[0]?.label) || "";
+  return options.find((option) => option.value === selectedValue)?.label || (key === "industry" ? t("selectIndustry") : options[0]?.label) || "";
 }
 
 function renderFilterDropdown(key) {
@@ -7617,7 +6390,7 @@ function renderCustomDropdown({ key, value, options, profileField = "" }) {
   const focusedIndex = isOpen ? state.dropdown.focusedIndex : selectedIndex;
   const triggerId = `filter-${key}-trigger`;
   const listId = `filter-${key}-list`;
-  const selectedLabel = options.find((option) => option.value === selectedValue)?.label || (key === "industry" ? "Select industry" : options[0]?.label) || "";
+  const selectedLabel = options.find((option) => option.value === selectedValue)?.label || (key === "industry" ? t("selectIndustry") : options[0]?.label) || "";
 
   return `
     <div class="custom-select ${isOpen ? "is-open" : ""}" data-key="${key}">
@@ -7684,8 +6457,8 @@ function renderDashboard() {
 
   if (!state.profile) {
     return requireProfilePage(
-      state.language === "is" ? "Stofnaðu prófíl fyrst" : "Create a profile first",
-      state.language === "is" ? "Mælaborðið þarf fyrirtækjaprófíl til að reikna samsvaranir." : "The dashboard needs a company profile so it can calculate opportunity matches."
+      t("setupCompanyFirst"),
+      t("dashboardNeedsProfile")
     );
   }
 
@@ -7711,65 +6484,46 @@ function renderDashboard() {
     ? t("matchesLastRefreshed", { time: formatDateTime(state.lastMatchedAt) })
     : t("matchesAutoRefresh");
 
-  return renderShell(`
-    <section class="dashboard-head">
-      <div>
-        <p class="eyebrow">${escapeHtml(t("dashboard"))}</p>
-        <h1>${escapeHtml(t("welcomeCompany", { company: state.profile.companyName }))}</h1>
-        <p>${escapeHtml(t("dashboardIntro", { refresh: matchRefreshText }))}</p>
-      </div>
-      <div class="dashboard-actions">
-        ${state.isAdmin ? `
-          <button class="btn btn-primary" data-action="run-matching" ${state.matchingLoading ? "disabled" : ""}>
-            ${state.matchingLoading ? escapeHtml(t("refreshing")) : escapeHtml(t("refreshMatches"))}
-          </button>
-        ` : ""}
-        <button class="btn btn-secondary" data-action="go" data-href="/report">${escapeHtml(t("viewWeeklyReport"))}</button>
-      </div>
-    </section>
-
-    ${state.matchStatus ? `
-      <div class="admin-message ${state.matchStatus.type === "error" ? "is-error" : "is-success"}">
-        ${escapeHtml(state.matchStatus.text)}
-      </div>
-    ` : ""}
-
-    ${state.opportunityLoadError ? `
-      <div class="note-panel">
-        ${escapeHtml(state.opportunityLoadError)}
-      </div>
-    ` : ""}
-
-    <section class="stats-grid">
-      <div class="stat-card"><span>${escapeHtml(t("strongMatches"))}</span><strong>${strong}</strong></div>
-      <div class="stat-card"><span>${escapeHtml(t("closingSoon"))}</span><strong>${closingSoon}</strong></div>
-      <div class="stat-card"><span>${escapeHtml(t("savedLabel"))}</span><strong>${savedCount}</strong></div>
-      <div class="stat-card"><span>${escapeHtml(t("totalPotentialValue"))}</span><strong>${formatISK(totalValue)}</strong></div>
-    </section>
-
-    <section class="filters">
-      <input data-filter="search" value="${escapeHtml(state.filters.search)}" placeholder="${escapeHtml(t("searchOpportunities"))}" />
-      ${renderFilterDropdown("label")}
-      ${renderFilterDropdown("category")}
-      ${renderFilterDropdown("location")}
-      ${renderFilterDropdown("type")}
-      <label class="checkbox compact"><input type="checkbox" data-filter="savedOnly" ${state.filters.savedOnly ? "checked" : ""}/><span>${escapeHtml(t("savedOnly"))}</span></label>
-    </section>
-
-    <div class="note-panel dashboard-filter-summary">
-      ${escapeHtml(filterSummary)}
-    </div>
-
-    <section class="opportunity-list">
-      ${matches.length ? matches.map(renderOpportunityCard).join("") : renderDashboardEmptyState(state.profile, state.filters.label, {
-        availableCount: availableOpportunities.length,
-        storedMatchCount: allMatches.length,
-        filteredStoredCount: filteredStoredMatches.length,
-        recommendedCount,
-        strongCount: strong,
-      })}
-    </section>
-  `);
+  return renderShell(renderDashboardPage({
+    profile: state.profile,
+    matches,
+    stats: {
+      strong,
+      closingSoon,
+      savedCount,
+      totalValue: formatISK(totalValue)
+    },
+    filters: state.filters,
+    filterSummary,
+    matchStatus: state.matchStatus,
+    opportunityLoadError: state.opportunityLoadError,
+    isAdmin: state.isAdmin,
+    matchingLoading: state.matchingLoading,
+    labels: {
+      dashboard: t("dashboard"),
+      welcomeCompany: t("welcomeCompany", { company: state.profile.companyName }),
+      dashboardIntro: t("dashboardIntro", { refresh: matchRefreshText }),
+      refreshing: t("refreshing"),
+      refreshMatches: t("refreshMatches"),
+      viewWeeklyReport: t("viewWeeklyReport"),
+      strongMatches: t("strongMatches"),
+      closingSoon: t("closingSoon"),
+      savedLabel: t("savedLabel"),
+      totalPotentialValue: t("totalPotentialValue"),
+      searchOpportunities: t("searchOpportunities"),
+      savedOnly: t("savedOnly")
+    },
+    renderFilterDropdown,
+    renderOpportunityCard,
+    renderEmptyState: () => renderDashboardEmptyState(state.profile, state.filters.label, {
+      availableCount: availableOpportunities.length,
+      storedMatchCount: allMatches.length,
+      filteredStoredCount: filteredStoredMatches.length,
+      recommendedCount,
+      strongCount: strong,
+    }),
+    escapeHtml
+  }));
 }
 
 function getDashboardProfileSuggestions(profile) {
@@ -7900,62 +6654,45 @@ function renderDashboardEmptyState(profile, filter = state.filters.label, contex
     ...context,
     companyName: profile?.companyName,
   });
-  return `
-    <div class="dashboard-empty-state">
-      <div>
-        <p class="eyebrow">${escapeHtml(copy.eyebrow)}</p>
-        <h2>${escapeHtml(copy.title)}</h2>
-        <p>${escapeHtml(copy.body)}</p>
-      </div>
-      <ul>
-        ${suggestions.map((suggestion) => `<li>${escapeHtml(suggestion)}</li>`).join("")}
-      </ul>
-      <div class="dashboard-empty-actions">
-        <button class="btn btn-primary" type="button" data-action="go" data-href="/settings">${escapeHtml(t("improveProfile"))}</button>
-        <button class="btn btn-secondary" type="button" data-action="include-national-opportunities">${escapeHtml(t("includeNationalOpportunities"))}</button>
-        <button class="btn btn-secondary" type="button" data-action="show-all-matches">${escapeHtml(t("showAllStoredMatches"))}</button>
-        <button class="btn btn-secondary" type="button" data-action="show-all-opportunities">${escapeHtml(t("inspectAllOpportunities"))}</button>
-      </div>
-    </div>
-  `;
+  return renderDashboardEmptyStatePage({
+    copy,
+    suggestions,
+    labels: {
+      improveProfile: t("improveProfile"),
+      includeNationalOpportunities: t("includeNationalOpportunities"),
+      showAllStoredMatches: t("showAllStoredMatches"),
+      inspectAllOpportunities: t("inspectAllOpportunities")
+    },
+    escapeHtml
+  });
 }
 
 function renderOpportunityCard(opp) {
   const saved = state.saved.includes(opp.id);
-  const days = daysUntilDeadline(opp.deadline);
   const deadline = getOpportunityDeadlineDisplay(opp);
-  return `
-    <article class="opportunity-card">
-      <div class="opp-main">
-        <div class="opp-top">
-          <div class="opportunity-badges">
-            <span class="source-pill source-badge">${escapeHtml(opp.source)}</span>
-            ${renderQualityBadge(opp)}
-            ${renderSafetyBadge(opp)}
-            ${renderExtractedArticleBadge(opp)}
-            ${isTedOpportunity(opp) ? `<span class="source-pill source-badge muted-badge">${escapeHtml(t("originalLanguage"))}</span>` : ""}
-          </div>
-          <span class="${badgeClass(opp.matchLabel)}">${escapeHtml(formatReportMatchLabel(opp.matchLabel))} · ${opp.matchScore}</span>
-        </div>
-        <h3>${escapeHtml(opp.title)}</h3>
-        <p>${escapeHtml(opp.description)}</p>
-        <div class="meta-row">
-          <span>${escapeHtml(formatOpportunityBuyer(opp))}</span>
-          <span>${escapeHtml(formatOpportunityLocation(opp))}</span>
-          <span>${formatISK(opp.estimatedValue)}</span>
-          <span class="${deadline.className}">${escapeHtml(deadline.label)}</span>
-        </div>
-        <div class="reason-row">
-          ${opp.matchReasons.slice(0, 3).map((r) => `<span>${escapeHtml(formatReportReason(r))}</span>`).join("")}
-        </div>
-      </div>
-      <div class="opp-actions">
-        <button class="btn btn-secondary" data-action="details" data-id="${opp.id}">${escapeHtml(t("details"))}</button>
-        <button class="btn ${saved ? "btn-primary" : "btn-secondary"}" data-action="save" data-id="${opp.id}">${saved ? escapeHtml(t("saved")) : escapeHtml(t("save"))}</button>
-        <button class="btn btn-ghost" data-action="ignore" data-id="${opp.id}">${escapeHtml(t("ignore"))}</button>
-      </div>
-    </article>
-  `;
+  return renderOpportunityCardPage({
+    opp,
+    saved,
+    deadline,
+    sourceBadgeHtml: `<span class="source-pill source-badge">${escapeHtml(opp.source)}</span>`,
+    qualityBadgeHtml: renderQualityBadge(opp),
+    safetyBadgeHtml: renderSafetyBadge(opp),
+    extractedBadgeHtml: renderExtractedArticleBadge(opp),
+    originalLanguageBadgeHtml: isTedOpportunity(opp) ? `<span class="source-pill source-badge muted-badge">${escapeHtml(t("originalLanguage"))}</span>` : "",
+    matchBadgeClass: badgeClass(opp.matchLabel),
+    matchLabel: formatReportMatchLabel(opp.matchLabel),
+    buyer: formatOpportunityBuyer(opp),
+    location: formatOpportunityLocation(opp),
+    value: formatISK(opp.estimatedValue),
+    reasons: opp.matchReasons.slice(0, 3).map(formatReportReason),
+    labels: {
+      details: t("details"),
+      saved: t("saved"),
+      save: t("save"),
+      ignore: t("ignore")
+    },
+    escapeHtml
+  });
 }
 
 function isTedOpportunity(opp) {
@@ -8103,80 +6840,71 @@ function renderOpportunityModal(opp) {
   const matchReasons = Array.isArray(opp.matchReasons) ? opp.matchReasons : [];
   const risks = Array.isArray(opp.risks) ? opp.risks : [];
   const nextSteps = Array.isArray(opp.nextSteps) ? opp.nextSteps : [];
-  return `
-    <div class="modal-backdrop">
-      <div class="modal" role="dialog" aria-modal="true">
-        <div class="modal-header">
-          <div>
-            <div class="opportunity-badges">
-              <span class="${badgeClass(opp.matchLabel)}">${escapeHtml(formatReportMatchLabel(opp.matchLabel))} · ${opp.matchScore}</span>
-              ${renderQualityBadge(opp)}
-              ${renderSafetyBadge(opp)}
-              ${renderExtractedArticleBadge(opp)}
-            </div>
-            <h2>${escapeHtml(opp.title)}</h2>
-            <p>${escapeHtml(formatOpportunityModalValue("buyer", opp.buyer))} · ${escapeHtml(formatOpportunityLocation(opp))} · ${opp.estimatedValue ? formatISK(opp.estimatedValue) : t("notListed")}</p>
-          </div>
-          <button type="button" class="icon-btn modal-close-btn" data-action="close-modal" aria-label="Close details">×</button>
-        </div>
+  const extractedDetails = [
+    isVegagerdinExtractedProject(opp) ? `<p><strong>${escapeHtml(t("extraction"))}:</strong> ${escapeHtml(state.language === "is" ? "Útdregið úr grein Vegagerðarinnar" : "Extracted from Vegagerðin article")}</p>` : "",
+    opp.rawPayload?.parent_article_title ? `<p><strong>${escapeHtml(t("sourceArticle"))}:</strong> ${escapeHtml(opp.rawPayload.parent_article_title)}</p>` : "",
+    opp.rawPayload?.parent_url ? `<p><strong>${escapeHtml(t("parentArticle"))}:</strong> <a href="${escapeHtml(opp.rawPayload.parent_url)}" target="_blank" rel="noreferrer">${escapeHtml(t("openSourceArticle"))}</a></p>` : "",
+    opp.rawPayload?.region ? `<p><strong>${escapeHtml(t("extractedRegion"))}:</strong> ${escapeHtml(opp.rawPayload.region)}</p>` : "",
+    opp.rawPayload?.project_number ? `<p><strong>${escapeHtml(t("projectNumber"))}:</strong> ${escapeHtml(opp.rawPayload.project_number)}</p>` : "",
+    isVegagerdinExtractedProject(opp) ? `<p><strong>${escapeHtml(t("tenderState"))}:</strong> ${escapeHtml(formatTenderState(getVegagerdinExtractedTenderState(opp)))}</p>` : ""
+  ].join("");
 
-        <div class="modal-body">
-          <div class="modal-grid">
-            <section>
-              ${renderQualityWarning(opp)}
-              <h3>${escapeHtml(t("description"))}</h3>
-              <p>${escapeHtml(opp.description || t("noDescription"))}</p>
-              <h3>${escapeHtml(t("requirements"))}</h3>
-              <ul class="check-list">
-                ${(requirements.length ? requirements : [t("noSpecificRequirements")]).map((r) => `<li>${escapeHtml(r)}</li>`).join("")}
-              </ul>
-              <h3>${escapeHtml(t("matchReasons"))}</h3>
-              <ul class="check-list">
-                ${(matchReasons.length ? matchReasons.map(formatReportReason) : [t("noMatchReasons")]).map((r) => `<li>${escapeHtml(r)}</li>`).join("")}
-              </ul>
-            </section>
-
-            <aside class="side-panel">
-              <h3>${escapeHtml(t("opportunityInfo"))}</h3>
-              <p><strong>${escapeHtml(t("source"))}:</strong> ${escapeHtml(formatOpportunityModalValue("source", opp.source))}</p>
-              ${isVegagerdinExtractedProject(opp) ? `<p><strong>${escapeHtml(t("extraction"))}:</strong> ${escapeHtml(state.language === "is" ? "Útdregið úr grein Vegagerðarinnar" : "Extracted from Vegagerðin article")}</p>` : ""}
-              ${opp.rawPayload?.parent_article_title ? `<p><strong>${escapeHtml(t("sourceArticle"))}:</strong> ${escapeHtml(opp.rawPayload.parent_article_title)}</p>` : ""}
-              ${opp.rawPayload?.parent_url ? `<p><strong>${escapeHtml(t("parentArticle"))}:</strong> <a href="${escapeHtml(opp.rawPayload.parent_url)}" target="_blank" rel="noreferrer">${escapeHtml(t("openSourceArticle"))}</a></p>` : ""}
-              ${opp.rawPayload?.region ? `<p><strong>${escapeHtml(t("extractedRegion"))}:</strong> ${escapeHtml(opp.rawPayload.region)}</p>` : ""}
-              ${opp.rawPayload?.project_number ? `<p><strong>${escapeHtml(t("projectNumber"))}:</strong> ${escapeHtml(opp.rawPayload.project_number)}</p>` : ""}
-              ${isVegagerdinExtractedProject(opp) ? `<p><strong>${escapeHtml(t("tenderState"))}:</strong> ${escapeHtml(formatTenderState(getVegagerdinExtractedTenderState(opp)))}</p>` : ""}
-              <p><strong>${escapeHtml(t("quality"))}:</strong> ${escapeHtml(formatReportQualityLabel(getOpportunityQualityLabel(opp)))}</p>
-              ${opp.safetyStatus ? `<p><strong>${escapeHtml(state.language === "is" ? "Öryggisflokkun" : "Safety status")}:</strong> ${escapeHtml(formatSafetyStatus(opp.safetyStatus))} · ${escapeHtml(formatAlertEligible(opp.alertEligible))}</p>` : ""}
-              <p><strong>${escapeHtml(t("category"))}:</strong> ${escapeHtml(formatOpportunityModalValue("category", opp.category))}</p>
-              <p><strong>${escapeHtml(t("type"))}:</strong> ${escapeHtml(formatOpportunityModalValue("type", opp.type))}</p>
-              <p><strong>${escapeHtml(t("deadline"))}:</strong> <span class="${deadline.className}">${escapeHtml(formatReportRisk(deadline.label))}</span></p>
-              <p><strong>${escapeHtml(t("published"))}:</strong> ${escapeHtml(opp.publishedDate)}</p>
-              <p><strong>${escapeHtml(t("cpv"))}:</strong> ${escapeHtml(opp.cpvCode || "—")}</p>
-
-              <h3>${escapeHtml(t("risksToCheck"))}</h3>
-              <ul class="risk-list">
-                ${([
-                  ...(Array.isArray(opp.safetyReasons) ? opp.safetyReasons : []),
-                  ...(risks.length ? risks.map(formatReportRisk) : [t("noMajorRisks")])
-                ]).map((r) => `<li>${escapeHtml(formatSafetyReason(r))}</li>`).join("")}
-              </ul>
-
-              <h3>${escapeHtml(t("recommendedNextSteps"))}</h3>
-              <ol class="steps-list">
-                ${(nextSteps.length ? nextSteps : [t("openSourceAndConfirm")]).map((s) => `<li>${escapeHtml(formatNextStep(s))}</li>`).join("")}
-              </ol>
-
-              <div class="button-stack">
-                <button class="btn btn-primary" data-action="save" data-id="${opp.id}">${saved ? escapeHtml(t("removeFromSaved")) : escapeHtml(t("saveOpportunity"))}</button>
-                <a class="btn btn-secondary" href="${escapeHtml(opp.url)}" target="_blank" rel="noreferrer">${escapeHtml(t("openSource"))}</a>
-                <button class="btn btn-ghost" data-action="ignore" data-id="${opp.id}">${escapeHtml(t("markNotRelevant"))}</button>
-              </div>
-            </aside>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
+  return renderOpportunityModalPage({
+    opp,
+    saved,
+    deadline,
+    requirements,
+    matchReasons: matchReasons.length ? matchReasons.map(formatReportReason) : [],
+    risks: risks.length ? risks.map(formatReportRisk) : [t("noMajorRisks")],
+    safetyReasons: [
+      ...(Array.isArray(opp.safetyReasons) ? opp.safetyReasons : []),
+      ...(risks.length ? risks.map(formatReportRisk) : [t("noMajorRisks")])
+    ].map(formatSafetyReason),
+    nextSteps: nextSteps.map(formatNextStep),
+    matchBadgeClass: badgeClass(opp.matchLabel),
+    matchLabel: formatReportMatchLabel(opp.matchLabel),
+    qualityBadgeHtml: renderQualityBadge(opp),
+    safetyBadgeHtml: renderSafetyBadge(opp),
+    extractedBadgeHtml: renderExtractedArticleBadge(opp),
+    qualityWarningHtml: renderQualityWarning(opp),
+    buyerSummary: formatOpportunityModalValue("buyer", opp.buyer),
+    location: formatOpportunityLocation(opp),
+    value: opp.estimatedValue ? formatISK(opp.estimatedValue) : t("notListed"),
+    sourceUrl: opp.url,
+    extractedDetails,
+    qualityLabel: formatReportQualityLabel(getOpportunityQualityLabel(opp)),
+    safetyStatusLine: opp.safetyStatus ? `<p><strong>${escapeHtml(state.language === "is" ? "Öryggisflokkun" : "Safety status")}:</strong> ${escapeHtml(formatSafetyStatus(opp.safetyStatus))} · ${escapeHtml(formatAlertEligible(opp.alertEligible))}</p>` : "",
+    category: formatOpportunityModalValue("category", opp.category),
+    type: formatOpportunityModalValue("type", opp.type),
+    publishedDate: opp.publishedDate,
+    cpvCode: opp.cpvCode,
+    labels: {
+      description: t("description"),
+      noDescription: t("noDescription"),
+      requirements: t("requirements"),
+      noSpecificRequirements: t("noSpecificRequirements"),
+      matchReasons: t("matchReasons"),
+      noMatchReasons: t("noMatchReasons"),
+      opportunityInfo: t("opportunityInfo"),
+      source: t("source"),
+      sourceValue: formatOpportunityModalValue("source", opp.source),
+      quality: t("quality"),
+      category: t("category"),
+      type: t("type"),
+      deadline: t("deadline"),
+      deadlineLabel: formatReportRisk(deadline.label),
+      published: t("published"),
+      cpv: t("cpv"),
+      risksToCheck: t("risksToCheck"),
+      recommendedNextSteps: t("recommendedNextSteps"),
+      openSourceAndConfirm: t("openSourceAndConfirm"),
+      removeFromSaved: t("removeFromSaved"),
+      saveOpportunity: t("saveOpportunity"),
+      openSource: t("openSource"),
+      markNotRelevant: t("markNotRelevant")
+    },
+    escapeHtml
+  });
 }
 
 function renderAdmin() {
@@ -8837,8 +7565,8 @@ function renderReport() {
 
   if (!state.profile) {
     return requireProfilePage(
-      "Create a profile first",
-      "The report needs a company profile so it can generate relevant opportunity matches."
+      t("setupCompanyFirst"),
+      t("reportNeedsProfile")
     );
   }
 
@@ -8908,18 +7636,16 @@ function renderReportArchiveRow(report) {
   const itemLabel = state.language === "is"
     ? `${itemCount} ${itemCount === 1 ? "tækifæri" : "tækifæri"}`
     : `${itemCount} item${itemCount === 1 ? "" : "s"}`;
-  return `
-    <div class="report-archive-row">
-      <div>
-        <h3>${escapeHtml(getCustomerReportTitle(report, companyName))}</h3>
-        <p>${escapeHtml(created)} · ${escapeHtml(itemLabel)} · ${escapeHtml(formatReportArchiveStatus(report.status))}</p>
-      </div>
-      <div class="admin-row-actions">
-        <button class="btn btn-secondary" data-action="view-report" data-id="${escapeHtml(report.id)}">${escapeHtml(t("viewReport"))}</button>
-        <button class="btn btn-ghost btn-small" data-action="archive-report" data-id="${escapeHtml(report.id)}">${escapeHtml(state.language === "is" ? "Fela yfirlit" : "Hide report")}</button>
-      </div>
-    </div>
-  `;
+  return renderReportArchiveRowPage({
+    report,
+    title: getCustomerReportTitle(report, companyName),
+    created,
+    itemLabel,
+    statusLabel: formatReportArchiveStatus(report.status),
+    hideLabel: state.language === "is" ? "Fela yfirlit" : "Hide report",
+    viewLabel: t("viewReport"),
+    escapeHtml
+  });
 }
 
 function formatReportArchiveStatus(status) {
@@ -8941,26 +7667,16 @@ function formatReportArchiveStatus(status) {
 }
 
 function renderReportPreview(report, options = {}) {
-  const id = options.id ? ` id="${escapeHtml(options.id)}"` : "";
-  return `
-    <section class="report-preview"${id}>
-      <div class="report-meta-bar">
-        <div>
-          <span>${escapeHtml(t("generatedBy"))}</span>
-          <strong>${escapeHtml(report.title || t("reportTitle"))}</strong>
-        </div>
-        <div>
-          <span>${escapeHtml(options.companyName || state.profile?.companyName || "Company")}</span>
-          <strong>${escapeHtml(formatReportDateRange(report.periodStart, report.periodEnd))}</strong>
-        </div>
-      </div>
-      <div class="report-body">
-        ${report.htmlContent}
-        ${options.closeButton ? `<button class="btn btn-secondary report-close-btn" data-action="close-archive-report">${escapeHtml(t("closeReport"))}</button>` : ""}
-      </div>
-      ${report.textContent && options.includeTextArea !== false ? `<textarea id="report-text" class="hidden-textarea">${escapeHtml(report.textContent)}</textarea>` : ""}
-    </section>
-  `;
+  return renderReportPreviewPage({
+    report,
+    options,
+    companyName: options.companyName || state.profile?.companyName || "Company",
+    dateRange: formatReportDateRange(report.periodStart, report.periodEnd),
+    generatedByLabel: t("generatedBy"),
+    reportTitleLabel: t("reportTitle"),
+    closeLabel: t("closeReport"),
+    escapeHtml
+  });
 }
 
 function renderSavedReportPreview(savedReport, profile, options = {}) {
@@ -9013,61 +7729,11 @@ function normalizeSavedReportHtml(savedReport) {
 }
 
 function localizeLegacyReportHtml(html) {
-  if (state.language !== "is") return html;
-  return String(html || "")
-    .replaceAll("Tender and opportunity report", "Útboðs- og verkefnayfirlit")
-    .replaceAll("Weekly Opportunity Report", "Útboðs- og verkefnayfirlit")
-    .replaceAll("Open tenders / quote requests", "Opin útboð / verðfyrirspurnir")
-    .replaceAll("Possible upcoming opportunities", "Möguleg væntanleg tækifæri")
-    .replaceAll("Needs review", "Þarfnast staðfestingar")
-    .replaceAll("Strong match", "Sterk samsvörun")
-    .replaceAll("Good match", "Góð samsvörun")
-    .replaceAll("Possible match", "Möguleg samsvörun")
-    .replaceAll("Weak match", "Veik samsvörun")
-    .replaceAll("Quality", "Gæði")
-    .replaceAll("Buyer", "Kaupandi")
-    .replaceAll("Source", "Heimild")
-    .replaceAll("Location", "Svæði")
-    .replaceAll("Deadline", "Skilafrestur")
-    .replaceAll("Estimated value", "Áætlað verðmæti")
-    .replaceAll("Value", "Áætlað verðmæti")
-    .replaceAll("Why this matters", "Af hverju þetta gæti skipt máli")
-    .replaceAll("Why this fits", "Af hverju þetta gæti skipt máli")
-    .replaceAll("Risks / things to check", "Atriði til að staðfesta")
-    .replaceAll("Open source", "Opna heimild")
-    .replaceAll("Unknown buyer", "Óþekktur kaupandi")
-    .replaceAll("All Iceland", "Allt landið")
-    .replaceAll("Not found", "Fannst ekki")
-    .replaceAll("Not listed", "Ekki gefið upp");
+  return localizeLegacyReportContent(html, state.language);
 }
 
 function localizeLegacyReportText(text) {
-  if (state.language !== "is") return text;
-  return String(text || "")
-    .replaceAll("Tender and opportunity report", "Útboðs- og verkefnayfirlit")
-    .replaceAll("Weekly Opportunity Report", "Útboðs- og verkefnayfirlit")
-    .replaceAll("Open tenders / quote requests", "Opin útboð / verðfyrirspurnir")
-    .replaceAll("Possible upcoming opportunities", "Möguleg væntanleg tækifæri")
-    .replaceAll("Needs review", "Þarfnast staðfestingar")
-    .replaceAll("Strong match", "Sterk samsvörun")
-    .replaceAll("Good match", "Góð samsvörun")
-    .replaceAll("Possible match", "Möguleg samsvörun")
-    .replaceAll("Weak match", "Veik samsvörun")
-    .replaceAll("Quality", "Gæði")
-    .replaceAll("Buyer", "Kaupandi")
-    .replaceAll("Source", "Heimild")
-    .replaceAll("Location", "Svæði")
-    .replaceAll("Deadline", "Skilafrestur")
-    .replaceAll("Estimated value", "Áætlað verðmæti")
-    .replaceAll("Value", "Áætlað verðmæti")
-    .replaceAll("Why this matters", "Af hverju þetta gæti skipt máli")
-    .replaceAll("Why this fits", "Af hverju þetta gæti skipt máli")
-    .replaceAll("Risks / things to check", "Atriði til að staðfesta")
-    .replaceAll("Open source", "Opna heimild")
-    .replaceAll("Unknown buyer", "Óþekktur kaupandi")
-    .replaceAll("All Iceland", "Allt landið")
-    .replaceAll("Not found", "Fannst ekki")
-    .replaceAll("Not listed", "Ekki gefið upp");
+  return localizeLegacyReportContent(text, state.language);
 }
 
 function getCustomerReportTitle(report, companyName) {
@@ -9151,18 +7817,6 @@ function sanitizeReportHtml(html) {
   });
 
   return doc.body.innerHTML;
-}
-
-function stripHtmlFromString(html) {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(String(html || ""), "text/html");
-  return doc.body.textContent?.replace(/\s+/g, " ").trim() || "";
-}
-
-function getSafeExternalUrl(value) {
-  const url = String(value || "").trim();
-  if (/^https?:\/\//i.test(url)) return url;
-  return "";
 }
 
 function getReportMatches(mode = "all_current", previouslyReportedIds = new Set()) {
@@ -9663,26 +8317,18 @@ function isTrustedReportSource(opp) {
 }
 
 function renderReportSummaryCard(label, value) {
-  return `
-    <div class="report-summary-card">
-      <span>${escapeHtml(label)}</span>
-      <strong>${value}</strong>
-    </div>
-  `;
+  return renderReportSummaryCardPage({ label, value, escapeHtml });
 }
 
 function renderReportOpportunitySection(title, description, opportunities) {
-  return `
-    <section class="report-section">
-      <div class="report-section-head">
-        <h3>${escapeHtml(title)}</h3>
-        <p>${escapeHtml(description)}</p>
-      </div>
-      ${opportunities.length
-        ? opportunities.map(renderReportOpportunityItem).join("")
-        : `<div class="report-empty">${escapeHtml(state.language === "is" ? "Engin atriði í þessum hluta." : "No items in this section.")}</div>`}
-    </section>
-  `;
+  return renderReportOpportunitySectionPage({
+    title,
+    description,
+    opportunities,
+    emptyText: state.language === "is" ? "Engin atriði í þessum hluta." : "No items in this section.",
+    renderOpportunityItem: renderReportOpportunityItem,
+    escapeHtml
+  });
 }
 
 function renderReportOpportunityItem(opp) {
@@ -9691,125 +8337,53 @@ function renderReportOpportunityItem(opp) {
   const deadlineText = opp.deadline ? formatCustomerReportDate(opp.deadline) : t("notFound");
   const valueText = valueKnown ? formatISK(opp.estimatedValue) : t("notListed");
   const sourceUrl = getSafeExternalUrl(opp.url);
-  return `
-    <article class="report-item">
-      <div class="report-item-top">
-        ${renderReportQualityBadge(opp)}
-        <span class="${badgeClass(opp.matchLabel)}">${escapeHtml(formatReportMatchLabel(opp.matchLabel))} · ${opp.matchScore}</span>
-      </div>
-      <h4>${escapeHtml(opp.title)}</h4>
-      <div class="report-facts">
-        <span><strong>${escapeHtml(t("buyer"))}</strong>${escapeHtml(formatOpportunityBuyer(opp))}</span>
-        <span><strong>${escapeHtml(t("source"))}</strong>${escapeHtml(formatReportMetadataValue("source", opp.source))}</span>
-        <span><strong>${escapeHtml(t("area"))}</strong>${escapeHtml(formatOpportunityLocation(opp))}</span>
-        <span><strong>${escapeHtml(t("deadline"))}</strong><em>${escapeHtml(deadlineText)}</em></span>
-        <span><strong>${escapeHtml(t("estimatedValue"))}</strong><em>${escapeHtml(valueText)}</em></span>
-      </div>
-      <div class="report-detail-grid">
-        <div>
-          <h5>${escapeHtml(t("whyThisMatters"))}</h5>
-          <ul>${(opp.matchReasons.length ? opp.matchReasons : ["Matched to your profile by service, location or keyword overlap."]).slice(0, 4).map((reason) => `<li>${escapeHtml(formatReportReason(reason))}</li>`).join("")}</ul>
-        </div>
-        <div>
-          <h5>${escapeHtml(t("risksToCheck"))}</h5>
-          <ul>${risks.slice(0, 5).map((risk) => `<li>${escapeHtml(formatReportRisk(risk))}</li>`).join("")}</ul>
-        </div>
-      </div>
-      ${sourceUrl ? `<a class="report-source-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener">${escapeHtml(t("openSource"))} <span aria-hidden="true">↗</span></a>` : `<span class="report-source-link is-disabled">${escapeHtml(t("sourceLinkMissing"))}</span>`}
-    </article>
-  `;
+  return renderReportOpportunityItemPage({
+    opp,
+    valueText,
+    deadlineText,
+    sourceUrl,
+    risks,
+    fallbackReason: "Matched to your profile by service, location or keyword overlap.",
+    qualityBadgeHtml: renderReportQualityBadge(opp),
+    matchBadgeClass: badgeClass(opp.matchLabel),
+    matchLabel: formatReportMatchLabel(opp.matchLabel),
+    buyerLabel: t("buyer"),
+    buyerValue: formatOpportunityBuyer(opp),
+    sourceLabel: t("source"),
+    sourceValue: formatReportMetadataValue("source", opp.source),
+    areaLabel: t("area"),
+    areaValue: formatOpportunityLocation(opp),
+    deadlineLabel: t("deadline"),
+    valueLabel: t("estimatedValue"),
+    whyLabel: t("whyThisMatters"),
+    risksLabel: t("risksToCheck"),
+    openSourceLabel: t("openSource"),
+    sourceMissingLabel: t("sourceLinkMissing"),
+    formatReason: formatReportReason,
+    formatRisk: formatReportRisk,
+    escapeHtml
+  });
 }
 
 function renderReportQualityBadge(opp) {
   const status = normalizeOpportunityQualityStatus(opp.qualityStatus, opp);
-  return `<span class="report-quality ${escapeHtml(status)}">${escapeHtml(formatReportQualityLabel(getOpportunityQualityLabel(opp)))}</span>`;
+  return renderReportQualityBadgePage({
+    status,
+    label: formatReportQualityLabel(getOpportunityQualityLabel(opp)),
+    escapeHtml
+  });
 }
 
 function formatReportQualityLabel(label) {
-  const map = {
-    "Confirmed tender": t("confirmedTender"),
-    "Likely opportunity": t("likelyOpportunity"),
-    "Early signal": t("earlySignal"),
-    "Needs review": t("needsReview"),
-    "Tender awarded": t("tenderAwarded"),
-    "Tender already announced": t("tenderAlreadyAnnounced"),
-    "Upcoming tender": t("upcomingTender"),
-    "Project signal": t("projectSignal"),
-    "Original language": t("originalLanguage")
-  };
-  return map[label] || label || "";
+  return formatReportQualityLabelBase(label, t);
 }
 
 function formatReportMatchLabel(label) {
-  const map = {
-    "Strong match": t("strongMatch"),
-    "Good match": t("goodMatch"),
-    "Possible match": t("possibleMatch"),
-    "Weak match": t("weakMatch")
-  };
-  return map[label] || label || "";
+  return formatReportMatchLabelBase(label, t);
 }
 
 function formatReportMetadataValue(type, value) {
-  const text = String(value || "").trim();
-  if (!text) return type === "buyer" ? t("unknownBuyer") : t("notListed");
-  if (type === "buyer") {
-    if (isInvalidBuyerName(text)) return t("unknownBuyer");
-    if (text.toLowerCase() === "unknown buyer") return t("unknownBuyer");
-  }
-  if (type === "location" && text.toLowerCase() === "all iceland") return t("allIceland");
-  if (type === "source") return text.replace(/\bprocurement\b/gi, t("procurement"));
-  return text;
-}
-
-function isInvalidBuyerName(value) {
-  const normalized = normalizeLocationText(value);
-  if (!normalized) return true;
-  if ([
-    "admin",
-    "administrator",
-    "ritstjori",
-    "editor",
-    "noreply",
-    "no reply",
-    "wordpress",
-    "wp admin",
-    "user",
-    "test"
-  ].includes(normalized)) return true;
-  if (normalized.includes("noreply")) return true;
-  if (/^wp\s*[-_]?\s*\d+$/.test(normalized)) return true;
-  return false;
-}
-
-function inferBuyerFromSourceName(sourceName) {
-  const source = String(sourceName || "").trim();
-  const normalized = normalizeLocationText(source);
-  if (!normalized) return "";
-  if (normalized.includes("borgarbyggd")) return "Borgarbyggð";
-  if (normalized.includes("akranes")) return "Akraneskaupstaður";
-  if (normalized.includes("faxafloahafnir")) return "Faxaflóahafnir";
-  if (normalized.includes("gardabaer")) return "Garðabær";
-  if (normalized.includes("reykjanesbaer")) return "Reykjanesbær";
-  if (normalized.includes("kopavogur")) return "Kópavogur";
-  if (normalized.includes("hafnarfjordur")) return "Hafnarfjarðarbær";
-  if (normalized.includes("mosfellsbaer")) return "Mosfellsbær";
-  if (normalized.includes("arborg")) return "Sveitarfélagið Árborg";
-  if (normalized.includes("fjardabyggd")) return "Fjarðabyggð";
-  if (normalized.includes("mulathing")) return "Múlaþing";
-  if (normalized.includes("garðabaer")) return "Garðabær";
-  if (normalized.includes("rikiskaup") || normalized.includes("utbodsvefur")) return "";
-  return "";
-}
-
-function getCleanOpportunityBuyer(buyer, sourceName, rawPayload = {}) {
-  const text = String(buyer || "").trim();
-  if (/reykjavíkurborg/i.test(text)) return "Reykjavíkurborg";
-  if (text && !isInvalidBuyerName(text) && text.toLowerCase() !== "unknown buyer") return text;
-  const payloadBuyer = String(rawPayload.extracted_buyer || rawPayload.buyer || "").trim();
-  if (/reykjavíkurborg/i.test(payloadBuyer)) return "Reykjavíkurborg";
-  if (payloadBuyer && !isInvalidBuyerName(payloadBuyer) && payloadBuyer.toLowerCase() !== "unknown buyer") return payloadBuyer;
-  return inferBuyerFromSourceName(sourceName) || "Unknown buyer";
+  return formatReportMetadataValueBase(type, value, t);
 }
 
 function formatOpportunityBuyer(opp) {
@@ -9824,96 +8398,24 @@ function formatOpportunityLocation(opp) {
   return formatReportMetadataValue("location", opp?.location);
 }
 
-function inferLocationFromSourceName(sourceName) {
-  const normalized = normalizeLocationText(sourceName);
-  if (!normalized) return "";
-  if (normalized.includes("borgarbyggd")) return "Borgarbyggð / Vesturland";
-  if (normalized.includes("akranes")) return "Akranes / Vesturland";
-  if (normalized.includes("faxafloahafnir")) return "Höfuðborgarsvæðið";
-  if (normalized.includes("arborg")) return "Árborg / Suðurland";
-  return "";
-}
-
 function formatOpportunityModalValue(type, value) {
-  const text = formatReportMetadataValue(type, value);
-  if (state.language !== "is") return text;
-  const normalized = String(text || "").trim().toLowerCase();
-  const map = {
-    "public procurement": t("publicProcurement"),
-    "procurement": t("procurement"),
-    "tender": t("tender")
-  };
-  return map[normalized] || text.replace(/\bpublic procurement\b/gi, t("publicProcurement")).replace(/\btender\b/gi, t("tender"));
+  return formatOpportunityModalValueBase(type, value, { language: state.language, translate: t });
 }
 
 function formatCustomerLocation(value) {
-  const text = String(value || "").trim();
-  if (state.language === "is") {
-    const map = {
-      "Capital Area": "Höfuðborgarsvæðið",
-      "South Iceland": "Suðurland",
-      "West Iceland": "Vesturland",
-      "North Iceland": "Norðurland",
-      "East Iceland": "Austurland",
-      "Westfjords": "Vestfirðir",
-      "All Iceland": t("allIceland"),
-      "Remote / Online": "Fjarvinna / netverkefni"
-    };
-    return map[text] || text;
-  }
-  return text;
+  return formatCustomerLocationBase(value, state.language, t);
 }
 
 function formatReportReason(reason) {
-  const text = String(reason || "");
-  const servicePrefix = "Mentions your service:";
-  const keywordPrefix = "Contains your keyword:";
-  if (text.startsWith(servicePrefix)) {
-    return t("mentionsService", { value: text.slice(servicePrefix.length).trim() });
-  }
-  if (text.startsWith(keywordPrefix)) {
-    return t("containsKeyword", { value: text.slice(keywordPrefix.length).trim() });
-  }
-
-  const map = {
-    "National opportunity": t("nationalOpportunity"),
-    "Local match": t("localMatch"),
-    "Located in your selected region": t("localMatch"),
-    "Project value is inside your preferred range": state.language === "is" ? "Áætlað verðmæti er innan óskaðs bils" : "Project value is inside your preferred range",
-    "Deadline is coming up soon": state.language === "is" ? "Skilafrestur nálgast" : "Deadline is coming up soon",
-    "Matched to your company profile.": state.language === "is" ? "Passar við fyrirtækjaprófílinn." : "Matched to your company profile.",
-    "Matched to your profile by service, location or keyword overlap.": state.language === "is" ? "Passar við þjónustu, svæði eða lykilorð í prófílnum." : "Matched to your profile by service, location or keyword overlap."
-  };
-  return map[text] || text || "";
+  return formatReportReasonBase(reason, { language: state.language, translate: t });
 }
 
 function formatReportRisk(risk) {
-  if (state.language !== "is") return risk || "";
-  const map = {
-    "Deadline not available in feed — verify on source page.": "Skilafrestur fannst ekki í innfluttum gögnum — staðfestið á upprunasíðu.",
-    "Deadline not available in imported data — verify on source page.": "Skilafrestur fannst ekki í innfluttum gögnum — staðfestið á upprunasíðu.",
-    "Deadline not available in source — verify page.": "Skilafrestur fannst ekki í heimild - staðfestið á upprunalegri síðu.",
-    "No formal tender deadline extracted — verify source article.": "Formlegur skilafrestur fannst ekki - staðfestið í heimildargrein.",
-    "Formal tender deadline not found yet — monitor source article.": "Formlegur skilafrestur fannst ekki enn - fylgist með heimildargrein.",
-    "Tender appears already announced/awarded — verify source article.": "Útboð virðist þegar auglýst eða afgreitt - staðfestið í heimildargrein.",
-    "Estimated value is not listed in the imported data.": "Áætlað verðmæti er ekki gefið upp í innfluttum gögnum.",
-    "Open the source page and confirm mandatory requirements.": "Opnið upprunalega heimild og staðfestið skyldukröfur.",
-    "Extracted project signal — verify tender timing in the source article.": "Útdregin verkefnavísbending - staðfestið útboðstímasetningu í heimildargrein.",
-    "Imported from broad feed — verify that this is a real tender or business opportunity.": "Innflutt úr breiðum fréttastraumi - staðfestið að þetta sé raunverulegt útboð eða viðskiptatækifæri."
-  };
-  return map[risk] || risk || "";
+  return formatReportRiskBase(risk, state.language);
 }
 
 function formatNextStep(step) {
-  if (state.language !== "is") return step || "";
-  const map = {
-    "Open the source documents": "Opna útboðsgögn",
-    "Confirm mandatory requirements": "Staðfesta kröfur og hæfisskilyrði",
-    "Check capacity and profitability": "Meta getu og arðsemi",
-    "Prepare questions before the deadline": "Undirbúa fyrirspurnir fyrir skilafrest",
-    "Open source documents and confirm requirements.": "Opna útboðsgögn og staðfesta kröfur.",
-  };
-  return map[step] || step || "";
+  return formatNextStepBase(step, state.language);
 }
 
 function getReportRisks(opp) {
@@ -10255,71 +8757,11 @@ function slugifyFilePart(value) {
 }
 
 function renderPricing() {
-  const plans = [
-    {
-      name: t("pricingStarter"),
-      price: "9.900 kr",
-      items: [
-        t("pricingWeeklyReport"),
-        t("pricingFiveMatches"),
-        t("pricingBasicMatching"),
-        t("pricingDeadlineReminders"),
-        t("pricingOneProfile")
-      ]
-    },
-    {
-      name: t("pricingGrowth"),
-      price: "19.900 kr",
-      highlighted: true,
-      items: [
-        t("pricingEverythingStarter"),
-        t("pricingMoreSources"),
-        t("pricingSummaries"),
-        t("pricingLabels"),
-        t("pricingSaved"),
-        t("pricingArchive")
-      ]
-    },
-    {
-      name: t("pricingPro"),
-      price: "29.900 kr",
-      items: [
-        t("pricingEverythingGrowth"),
-        t("pricingDocumentSummaries"),
-        t("pricingRequirements"),
-        t("pricingRiskWarnings"),
-        t("pricingBidChecklist"),
-        t("pricingPrioritySupport")
-      ]
-    }
-  ];
-  return renderShell(`
-    <section class="page-head">
-      <p class="eyebrow">${escapeHtml(t("pricingEyebrow"))}</p>
-      <h1>${escapeHtml(t("pricingHeadline"))}</h1>
-      <p>${escapeHtml(t("pricingSubtitle"))}</p>
-    </section>
-
-    <section class="pricing-grid">
-      ${plans.map(pricingCard).join("")}
-    </section>
-  `);
-}
-
-function pricingCard(plan) {
-  const highlighted = Boolean(plan.highlighted);
-  return `
-    <div class="pricing-card ${highlighted ? "highlighted" : ""}">
-      ${highlighted ? `<span class="popular">${escapeHtml(t("pricingBadge"))}</span>` : ""}
-      <h2>${escapeHtml(plan.name)}</h2>
-      <p class="price">${escapeHtml(plan.price)}<span>${escapeHtml(t("pricingMonth"))}</span></p>
-      <ul class="check-list">
-        ${plan.items.map((i) => `<li>${escapeHtml(i)}</li>`).join("")}
-      </ul>
-      <button class="btn pricing-cta ${highlighted ? "btn-primary" : "btn-secondary"}" data-action="go" data-href="${escapeHtml(getTrialAccessHref())}">${escapeHtml(t("pricingCta"))}</button>
-      <p class="pricing-trial-note">${escapeHtml(t("pricingTrialNoCard"))}</p>
-    </div>
-  `;
+  return renderShell(renderPricingPage({
+    t,
+    escapeHtml,
+    trialHref: getTrialAccessHref()
+  }));
 }
 
 function renderSettings() {
@@ -10348,31 +8790,20 @@ function renderSettings() {
 
   if (!state.profile && !state.profileDraft) {
     return requireProfilePage(
-      state.language === "is" ? "Stofnaðu prófíl fyrst" : "Create a profile first",
-      state.language === "is" ? "Stillingar eru tiltækar eftir að fyrirtækjaprófíll hefur verið stofnaður." : "Settings are available after you create a company profile."
+      t("setupCompanyFirst"),
+      state.language === "is" ? "Stillingar eru tiltækar eftir að fyrirtækið hefur verið sett upp." : "Settings are available after you set up your company."
     );
   }
 
-  return renderShell(`
-    <section class="page-head">
-      <p class="eyebrow">${escapeHtml(t("navSettings"))}</p>
-      <h1>${escapeHtml(state.language === "is" ? "Breyta prófíl" : "Edit profile")}</h1>
-      <p>${escapeHtml(state.language === "is" ? "Uppfærið fyrirtækjaprófíl og samsvörunarstillingar." : "Update your company profile and matching preferences.")}</p>
-      ${state.profileDraftDirty ? `<div class="form-message warning">${escapeHtml(state.language === "is" ? "Óvistaðar breytingar" : "Unsaved changes")}</div>` : ""}
-      ${state.profileLoadError ? `
-        <div class="form-message error">
-          ${escapeHtml(state.profileLoadError)}
-          <button class="btn btn-secondary" type="button" data-action="retry-settings-profile">${escapeHtml(state.language === "is" ? "Reyna aftur" : "Retry")}</button>
-        </div>
-      ` : ""}
-    </section>
-    ${renderProfileForm()}
-    ${canShowDemoReset() ? `<section class="danger-zone">
-      <h2>Reset demo</h2>
-      <p>This clears localStorage profile, saved and ignored opportunities.</p>
-      <button class="btn btn-ghost" data-action="reset">Reset all demo data</button>
-    </section>` : ""}
-  `);
+  return renderShell(renderSettingsPage({
+    t,
+    escapeHtml,
+    language: state.language,
+    profileDraftDirty: state.profileDraftDirty,
+    profileLoadError: state.profileLoadError,
+    showDemoReset: canShowDemoReset(),
+    profileFormHtml: renderProfileForm()
+  }));
 }
 
 function canShowDemoReset() {
@@ -10396,26 +8827,6 @@ ${state.language === "is" ? "Samsvörun" : "Match"}: ${opp.matchScore}/100 (${fo
 ${t("whyThisMatters")}:
 ${opp.matchReasons.map((r) => `- ${formatReportReason(r)}`).join("\n")}
 ${state.language === "is" ? "Næsta skref" : "Next step"}: ${state.language === "is" ? "Opnið upprunalega heimild og staðfestið kröfur." : "Open source documents and confirm requirements."}`;
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function escapeJs(value) {
-  return String(value ?? "")
-    .replaceAll("\\", "\\\\")
-    .replaceAll("'", "\\'")
-    .replaceAll("\n", "\\n");
-}
-
-function capitalize(value) {
-  return String(value || "").charAt(0).toUpperCase() + String(value || "").slice(1);
 }
 
 bootApp();
