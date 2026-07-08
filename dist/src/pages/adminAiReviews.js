@@ -57,6 +57,7 @@ export function renderAdminCompanyAiReviewPanel(company, options) {
         <div>
           <h3>AI match review</h3>
           <p>Run a controlled AI review for current eligible matches. Max 10 per run.</p>
+          <p><strong>Auto AI:</strong> ${company.autoAiReviewEnabled ? "Enabled" : "Disabled"}</p>
         </div>
         <button class="btn btn-secondary btn-small" type="button" data-action="admin-ai-review-company" data-id="${escapeHtml(company.id)}" ${actionState ? "disabled" : ""}>
           ${actionState ? "Running AI review..." : "Run AI review for this company"}

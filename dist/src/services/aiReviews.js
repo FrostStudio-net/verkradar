@@ -74,29 +74,25 @@ export async function requestAutomaticAiReviewRun(options = {}) {
 }
 
 export async function updateCompanyAutoAiReviewEnabled(companyId, enabled) {
-  if (!supabaseClient) throw new Error("Supabase client is not configured.");
-  const { data, error } = await supabaseClient
-    .from("companies")
-    .update({ auto_ai_review_enabled: enabled })
-    .eq("id", companyId)
-    .select("id, company_name, contact_email, auto_ai_review_enabled");
-  if (error) throw error;
-  const rows = data || [];
-  if (!rows.length) {
-    const debugError = new Error(`No company row was updated for company_id=${companyId}. The company may not exist or RLS may block this update.`);
-    debugError.details = {
-      companyId,
-      enabled,
-      rowCount: 0,
-      dataReturned: false,
-    };
-    throw debugError;
+  const endpoint = getAiReviewEndpoint();
+  if (!endpoint) {
+    throw new Error("AI review function is not configured. Set window.VERKRADAR_AI_REVIEW_MATCH_URL or window.VERKRADAR_SUPABASE_URL.");
   }
-  return {
-    row: rows[0],
-    rowCount: rows.length,
-    dataReturned: true,
-  };
+  const headers = await getAiReviewHeaders();
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      setCompanyAutoAiReviewEnabled: true,
+      company_id: companyId,
+      enabled: enabled === true,
+    }),
+  });
+  const payload = await readJsonResponse(response);
+  if (!response.ok) {
+    throw new Error(payload.error || payload.message || `Auto AI toggle failed with status ${response.status}`);
+  }
+  return payload;
 }
 
 export async function loadTodayAiUsageSummary() {

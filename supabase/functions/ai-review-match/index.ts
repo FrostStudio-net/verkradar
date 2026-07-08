@@ -22,8 +22,6 @@ Deno.serve(async (req) => {
     const supabaseUrl = requiredEnv("SUPABASE_URL");
     const anonKey = requiredEnv("SUPABASE_ANON_KEY");
     const serviceRoleKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
-    const openAiKey = requiredEnv("OPENAI_API_KEY");
-    const model = Deno.env.get("OPENAI_MODEL") || "gpt-4.1-mini";
 
     const authHeader = req.headers.get("authorization") || "";
     const userClient = createClient(supabaseUrl, anonKey, {
@@ -47,6 +45,14 @@ Deno.serve(async (req) => {
 
     const body = await safeJson(req);
     const companyId = String(body.companyId || body.company_id || "").trim();
+    if (body.setCompanyAutoAiReviewEnabled === true) {
+      const enabled = body.enabled === true;
+      if (!isUuid(companyId)) return json({ error: "A valid company_id is required." }, 400);
+      const result = await setCompanyAutoAiReviewEnabled(adminClient, companyId, enabled);
+      return json({ ok: true, ...result });
+    }
+    const openAiKey = requiredEnv("OPENAI_API_KEY");
+    const model = Deno.env.get("OPENAI_MODEL") || "gpt-4.1-mini";
     const auto = body.auto === true || body.mode === "auto";
     const batch = body.batch === true || body.mode === "batch";
     const limit = Math.max(1, Math.min(MAX_BATCH_MATCHES, Number(body.limit || MAX_BATCH_MATCHES)));
@@ -254,6 +260,34 @@ async function runBatchReview(
   }
 
   return summary;
+}
+
+async function setCompanyAutoAiReviewEnabled(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+  enabled: boolean,
+) {
+  const { data: existing, error: existingError } = await supabase
+    .from("companies")
+    .select("id")
+    .eq("id", companyId)
+    .maybeSingle();
+  if (existingError) throw existingError;
+  if (!existing) throw new Error("Company not found");
+
+  const { data, error } = await supabase
+    .from("companies")
+    .update({ auto_ai_review_enabled: enabled })
+    .eq("id", companyId)
+    .select("id, company_name, contact_email, auto_ai_review_enabled")
+    .single();
+  if (error) throw error;
+  return {
+    company_id: companyId,
+    enabled,
+    rows_updated: data ? 1 : 0,
+    updated_company: data || null,
+  };
 }
 
 async function runAutomaticAiReview(
