@@ -180,6 +180,7 @@ let state = {
   adminReportMode: "new_only",
   adminOpportunityFilters: {
     source: "all",
+    missingDeadlineSource: "all",
     status: "all",
     country: "all",
     search: "",
@@ -6533,6 +6534,152 @@ function renderAdminOpportunityFilters(opportunities) {
   `;
 }
 
+function hasOpportunityDeadline(opp) {
+  return Boolean(opp?.deadline || opp?.deadlineAt || opp?.rawPayload?.deadline_at || opp?.rawPayload?.deadlineAt);
+}
+
+function getMissingDeadlineOpportunities() {
+  const selectedSource = state.adminOpportunityFilters?.missingDeadlineSource || "all";
+  return (state.opportunities || [])
+    .filter((opp) => !hasOpportunityDeadline(opp))
+    .filter((opp) => !isDemoTestOpportunity(opp))
+    .filter((opp) => selectedSource === "all" || opp.source === selectedSource)
+    .sort((a, b) => String(a.source || "").localeCompare(String(b.source || "")) || String(a.title || "").localeCompare(String(b.title || "")));
+}
+
+function getMissingDeadlineSourceOptions() {
+  const prioritySources = [
+    "Ríkiskaup / island.is procurement",
+    "Vegagerðin",
+    "Akranes útboð",
+    "Garðabær Municipality"
+  ];
+  const dynamicSources = getAdminFilterOptions(
+    (state.opportunities || []).filter((opp) => !hasOpportunityDeadline(opp)),
+    (opp) => opp.source || "Unknown"
+  );
+  return uniqueStrings([...prioritySources, ...dynamicSources]);
+}
+
+function getFetchableSourceUrlInfo(opp) {
+  const raw = opp?.rawPayload || {};
+  const url = String(opp?.url || raw.source_url || raw.link || "").trim();
+  if (!url) return { label: "No source URL", isSafe: false };
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { label: "Invalid URL", isSafe: false };
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) return { label: `Unsupported protocol: ${parsed.protocol}`, isSafe: false };
+  const host = parsed.hostname.replace(/^www\./i, "").toLowerCase();
+  const safeHosts = [
+    "utbodsvefur.is",
+    "vegagerdin.is",
+    "akranes.is",
+    "gardabaer.is",
+    "borgarbyggd.is",
+    "arborg.is",
+    "faxafloahafnir.is",
+    "reykjavik.is",
+    "hafnarfjordur.is",
+    "reykjanesbaer.is",
+    "mulathing.is",
+    "akureyri.is"
+  ];
+  const isSafe = safeHosts.some((safeHost) => host === safeHost || host.endsWith(`.${safeHost}`));
+  return { label: isSafe ? `Yes (${host})` : `Unknown host (${host})`, isSafe };
+}
+
+function getMissingDeadlineReason(opp) {
+  const raw = opp?.rawPayload || {};
+  const debug = raw.deadline_debug && typeof raw.deadline_debug === "object" ? raw.deadline_debug : {};
+  const parts = [
+    raw.deadline_debug_reason,
+    raw.deadline_reenrichment_error,
+    debug.source ? `debug source: ${debug.source}` : "",
+    debug.extractedText ? `extracted: ${debug.extractedText}` : "",
+    debug.parserVersion ? `parser: ${debug.parserVersion}` : "",
+    raw.stale_reason ? `stale: ${raw.stale_reason}` : ""
+  ].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "Still missing after import/re-enrichment, or no debug reason stored yet.";
+}
+
+function renderMissingDeadlineDebugSection() {
+  const missing = getMissingDeadlineOpportunities();
+  const grouped = missing.reduce((acc, opp) => {
+    const source = opp.source || "Unknown";
+    if (!acc[source]) acc[source] = [];
+    acc[source].push(opp);
+    return acc;
+  }, {});
+  const sources = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
+  const selectedSource = state.adminOpportunityFilters?.missingDeadlineSource || "all";
+  const sourceOptions = getMissingDeadlineSourceOptions();
+  return `
+    <section class="ops-card admin-debug-card">
+      <div class="card-header">
+        <div>
+          <h2>Missing deadline debug</h2>
+          <p>${missing.length} opportunities missing deadlines${selectedSource !== "all" ? ` for ${escapeHtml(selectedSource)}` : ""}. Grouped by source.</p>
+        </div>
+        <label class="admin-inline-control">
+          <span>Source</span>
+          <select data-admin-filter="missingDeadlineSource">
+            <option value="all">All sources</option>
+            ${sourceOptions.map((source) => `<option value="${escapeHtml(source)}" ${selectedSource === source ? "selected" : ""}>${escapeHtml(source)}</option>`).join("")}
+          </select>
+        </label>
+      </div>
+      ${sources.length ? sources.map((source) => renderMissingDeadlineSourceGroup(source, grouped[source])).join("") : `<div class="empty-card">No missing-deadline opportunities for this filter.</div>`}
+    </section>
+  `;
+}
+
+function renderMissingDeadlineSourceGroup(source, opportunities) {
+  return `
+    <div class="missing-deadline-source-group">
+      <h3>${escapeHtml(source)} <span class="muted">(${opportunities.length})</span></h3>
+      <div class="ops-table-wrap">
+        <table class="ops-table missing-deadline-table">
+          <thead>
+            <tr>
+              <th>ID / external</th>
+              <th>Title</th>
+              <th>Source URL</th>
+              <th>Published</th>
+              <th>Safety</th>
+              <th>Fetchable</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${opportunities.map(renderMissingDeadlineRow).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function renderMissingDeadlineRow(opp) {
+  const fetchable = getFetchableSourceUrlInfo(opp);
+  const safeUrl = getSafeExternalUrl(opp.url || opp.rawPayload?.source_url || "");
+  const safetyStatus = opp.rawPayload?.safety_status || opp.rawPayload?.quality_status || getOpportunityQualityLabel(opp);
+  const alertEligible = opp.rawPayload?.alert_eligible === true ? "true" : opp.rawPayload?.alert_eligible === false ? "false" : "unknown";
+  return `
+    <tr>
+      <td><code>${escapeHtml(String(opp.id || ""))}</code><br><span>${escapeHtml(opp.externalId || "No external ID")}</span></td>
+      <td><strong>${escapeHtml(opp.title || "Untitled")}</strong><br><span>${escapeHtml(opp.source || "Unknown source")}</span></td>
+      <td>${safeUrl ? `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noreferrer">${escapeHtml(safeUrl)}</a>` : "No source URL"}</td>
+      <td>${opp.publishedDate ? escapeHtml(formatDateTime(opp.publishedDate)) : "Not listed"}</td>
+      <td>${escapeHtml(safetyStatus || "unknown")}<br><span>alert_eligible=${escapeHtml(alertEligible)}</span></td>
+      <td><span class="status-pill ${fetchable.isSafe ? "is-success" : "is-running"}">${escapeHtml(fetchable.label)}</span></td>
+      <td>${escapeHtml(getMissingDeadlineReason(opp))}</td>
+    </tr>
+  `;
+}
+
 function renderLanding() {
   return renderShell(renderLandingPage({
     t,
@@ -7598,6 +7745,8 @@ function renderAdminOpportunitiesSection(opportunities) {
       </div>
     </form>
 
+    ${renderMissingDeadlineDebugSection()}
+
     <section class="admin-list">
       <div class="card-header">
         <div>
@@ -7731,11 +7880,13 @@ function renderAdminOpportunityRow(opp) {
     connectorType: opp.rawPayload?.connector_type,
   });
   const staleReason = opp.rawPayload?.stale_reason || (staleInfo.isStale ? staleInfo.reason : "");
+  const adminSourceUrl = getSafeExternalUrl(opp.url || opp.rawPayload?.source_url || "");
   return `
     <div class="admin-row">
       <div>
         <h3>${escapeHtml(opp.title)}</h3>
-        <p>${escapeHtml(formatAdminBuyer(opp))} · ${escapeHtml(opp.source)} · ${escapeHtml(formatAdminLocation(opp))} · ${escapeHtml(opp.status)}</p>
+        <p><strong>Source:</strong> ${escapeHtml(opp.source || "Unknown source")} · <strong>Buyer:</strong> ${escapeHtml(formatAdminBuyer(opp))} · <strong>Region:</strong> ${escapeHtml(formatAdminLocation(opp))} · <strong>Status:</strong> ${escapeHtml(opp.status)}</p>
+        <p><strong>Source URL:</strong> ${adminSourceUrl ? `<a href="${escapeHtml(adminSourceUrl)}" target="_blank" rel="noreferrer">${escapeHtml(adminSourceUrl)}</a>` : "Not listed"} · <strong>External ID:</strong> ${escapeHtml(opp.externalId || "Not listed")}</p>
         <p>Quality: ${escapeHtml(getOpportunityQualityLabel(opp))} · Intent: ${escapeHtml(formatOpportunityIntent(intent))}${hiddenFromReports ? " · Hidden from reports" : ""}${duplicateReason ? ` · Duplicate: ${escapeHtml(duplicateReason)}` : ""}${staleReason ? ` · Stale / expired: ${escapeHtml(staleReason)}` : ""}</p>
         <p>Debug: hidden_from_reports=${opp.rawPayload?.hidden_from_reports === true ? "true" : "false"} · admin_report_status=${escapeHtml(opp.rawPayload?.admin_report_status || "none")} · stale_status=${escapeHtml(opp.rawPayload?.stale_status || "none")}</p>
         ${renderAdminOpportunityMatchDebug(opp)}
