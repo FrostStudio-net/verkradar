@@ -1862,13 +1862,14 @@ async function enrichRikiskaupOpportunityFromDetailPage(opportunity: NormalizedO
       ...(detail.tenderNumber ? { tender_number: detail.tenderNumber } : {}),
       ...(detail.deadline ? {
         extracted_deadline_text: detail.deadlineRaw,
+        extracted_deadline_source: detail.deadlineSource || "text",
         bid_deadline: detail.deadline,
         deadline_at: detail.deadlineAt || null,
         bid_deadline_at: detail.deadlineAt || null,
       } : {}),
       ...(!detail.deadline && detail.deadlineDebugReason ? { deadline_debug_reason: detail.deadlineDebugReason } : {}),
-      ...(detail.openingDate ? { opening_date: detail.openingDate } : {}),
-      ...(detail.documentsDate ? { tender_documents_date: detail.documentsDate } : {}),
+      ...(detail.openingDate ? { opening_date: detail.openingDate, extracted_opening_text: detail.openingDateRaw || null } : {}),
+      ...(detail.documentsDate ? { tender_documents_date: detail.documentsDate, extracted_published_text: detail.documentsDateRaw || null } : {}),
       ...(detail.completionDate ? { completion_date_text: detail.completionDate } : {}),
       ...(detail.location ? { extracted_location: detail.location } : {}),
       quality_status: detail.deadline ? "confirmed_tender" : opportunity.raw_payload.quality_status,
@@ -1943,17 +1944,31 @@ function isLikelyReykjavikMunicipalTender(text: string) {
 
 function parseRikiskaupTenderDetailPage(html: string) {
   const mainHtml = extractRikiskaupTenderMainHtml(html);
+  const tableFields = extractRikiskaupDetailTableFields(mainHtml);
   const text = cleanConnectorText(mainHtml, "");
+  const tableDeadlineText = getRikiskaupTableField(tableFields, ["Skilafrestur", "Tímafrestur útboðs", "Timafrestur utbods"]);
+  const tableDocumentsDateText = getRikiskaupTableField(tableFields, ["Útboðsgögn afhent", "Utbodsgogn afhent"]);
+  const tableOpeningDateText = getRikiskaupTableField(tableFields, ["Opnun tilboða", "Opnun tilboda"]);
   const buyer = cleanRikiskaupBuyer(
+    getRikiskaupTableField(tableFields, ["Útboðsaðili", "Utboðsaðili", "Utbodsaðili", "Utbodsadili"]) ||
     extractLabeledValue(text, ["Útboðsaðili", "Utboðsaðili", "Utbodsaðili", "Utbodsadili"]) ||
     extractRikiskaupBuyerFromText(text),
   );
-  const type = extractLabeledValue(text, ["Tegund"]) || "";
-  const tenderDeadline = extractRikiskaupTenderDeadline(text);
+  const type = getRikiskaupTableField(tableFields, ["Tegund"]) || extractLabeledValue(text, ["Tegund"]) || "";
+  const tenderDeadline = tableDeadlineText
+    ? {
+        date: parseDeadlineDate(tableDeadlineText),
+        rawText: tableDeadlineText,
+        source: "table",
+        debugReason: parseDeadlineDate(tableDeadlineText) ? null : "table_deadline_value_not_parseable",
+      }
+    : extractRikiskaupTenderDeadline(text);
   const deadlineRaw = tenderDeadline.rawText || "";
   const deadline = tenderDeadline.date;
-  const openingDate = parseDeadlineDate(extractLabeledValue(text, ["Opnun tilboða", "Opnun tilboda"]) || "");
-  const documentsDate = parseDeadlineDate(extractLabeledValue(text, ["Útboðsgögn afhent", "Utbodsgogn afhent"]) || "");
+  const openingDateRaw = tableOpeningDateText || extractLabeledValue(text, ["Opnun tilboða", "Opnun tilboda"]) || "";
+  const documentsDateRaw = tableDocumentsDateText || extractLabeledValue(text, ["Útboðsgögn afhent", "Utbodsgogn afhent"]) || "";
+  const openingDate = parseDeadlineDate(openingDateRaw);
+  const documentsDate = parseDeadlineDate(documentsDateRaw);
   const completionDate = extractCompletionDateText(text);
   const tenderNumber = extractTenderNumber(text);
   const description = buildRikiskaupDetailDescription(text, deadlineRaw);
@@ -1965,10 +1980,13 @@ function parseRikiskaupTenderDetailPage(html: string) {
     tenderNumber,
     deadline,
     deadlineRaw: deadlineRaw || null,
+    deadlineSource: tableDeadlineText ? "table" : tenderDeadline.source || (deadline ? "text" : "none"),
     deadlineDebugReason: tenderDeadline.debugReason || null,
     deadlineAt: deadline ? buildDeadlineAt(deadline, deadlineRaw) : null,
     openingDate,
+    openingDateRaw: openingDateRaw || null,
     documentsDate,
+    documentsDateRaw: documentsDateRaw || null,
     completionDate,
     location,
     description,
@@ -1989,6 +2007,45 @@ function extractRikiskaupTenderMainHtml(html: string) {
   const content = articleMatch?.[1] || mainMatch?.[1] || body;
   const titleStart = content.search(/<h1\b|Útboðsaðili|Utbodsadili|Skilafrestur|F\.h\./i);
   return titleStart >= 0 ? content.slice(titleStart) : content;
+}
+
+function extractRikiskaupDetailTableFields(html: string) {
+  const fields: Record<string, string> = {};
+  const source = String(html || "");
+  const rowPattern = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
+  let rowMatch: RegExpExecArray | null;
+  while ((rowMatch = rowPattern.exec(source))) {
+    const cells = Array.from(rowMatch[1].matchAll(/<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi))
+      .map((match) => cleanConnectorText(match[1], ""));
+    if (cells.length < 2) continue;
+    const label = normalizeRikiskaupDetailLabel(cells[0]);
+    const value = cells.slice(1).join(" ").replace(/\s+/g, " ").trim();
+    if (label && value) fields[label] = value;
+  }
+
+  const titleCellPattern = /<td\b[^>]*class=["'][^"']*\btitle\b[^"']*["'][^>]*>([\s\S]*?)<\/td>\s*<td\b[^>]*>([\s\S]*?)<\/td>/gi;
+  let titleCellMatch: RegExpExecArray | null;
+  while ((titleCellMatch = titleCellPattern.exec(source))) {
+    const label = normalizeRikiskaupDetailLabel(cleanConnectorText(titleCellMatch[1], ""));
+    const value = cleanConnectorText(titleCellMatch[2], "");
+    if (label && value) fields[label] = value;
+  }
+  return fields;
+}
+
+function getRikiskaupTableField(fields: Record<string, string>, labels: string[]) {
+  for (const label of labels) {
+    const normalized = normalizeRikiskaupDetailLabel(label);
+    if (fields[normalized]) return fields[normalized];
+  }
+  return "";
+}
+
+function normalizeRikiskaupDetailLabel(value: string) {
+  return normalizeSearchText(value)
+    .replace(/:$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function extractLabeledValue(text: string, labels: string[]) {
@@ -2050,7 +2107,7 @@ function cleanRikiskaupBuyer(value: string) {
   return cleaned;
 }
 
-function extractRikiskaupTenderDeadline(text: string): { date: string | null; rawText: string | null; debugReason?: string | null } {
+function extractRikiskaupTenderDeadline(text: string): { date: string | null; rawText: string | null; debugReason?: string | null; source?: string } {
   const compact = String(text || "").replace(/\s+/g, " ").trim();
   if (!compact) return { date: null, rawText: null, debugReason: "empty_detail_text" };
 
@@ -2058,15 +2115,15 @@ function extractRikiskaupTenderDeadline(text: string): { date: string | null; ra
   const timeLimitLabeled = extractLabeledValue(compact, ["Tímafrestur útboðs", "Timafrestur utbods"]);
   if (timeLimitLabeled) {
     const parsed = parseDeadlineDate(timeLimitLabeled);
-    if (parsed) return { date: parsed, rawText: timeLimitLabeled };
+    if (parsed) return { date: parsed, rawText: timeLimitLabeled, source: "text" };
   }
   if (labeled) {
     const parsed = parseDeadlineDate(labeled);
-    if (parsed) return { date: parsed, rawText: labeled };
+    if (parsed) return { date: parsed, rawText: labeled, source: "text" };
   }
 
   const extracted = extractDeadline(compact);
-  if (extracted.date) return extracted;
+  if (extracted.date) return { ...extracted, source: "text" };
 
   return {
     date: null,
