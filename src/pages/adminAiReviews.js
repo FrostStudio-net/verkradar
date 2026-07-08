@@ -4,6 +4,31 @@ import {
   getAdminMatchAiDisplay,
 } from "../services/matchDisplay.js";
 
+export function renderAdminAutomaticAiReviewPanel(options) {
+  const {
+    escapeHtml,
+    usageSummary = null,
+    lastResult = null,
+    isRunning = false,
+    formatAiUsageCost = (value) => `$${Number(value || 0).toFixed(4)}`,
+  } = options;
+  return `
+    <section class="ops-card admin-auto-ai-panel">
+      <div class="card-header">
+        <div>
+          <h2>Automatic AI review</h2>
+          <p>Admin-triggered pass for new eligible matches across enabled active/trial companies. Max 10 per run.</p>
+        </div>
+        <button class="btn btn-secondary btn-small" type="button" data-action="admin-run-auto-ai-review" ${isRunning ? "disabled" : ""}>
+          ${isRunning ? "Running automatic AI review..." : "Run automatic AI review now"}
+        </button>
+      </div>
+      ${usageSummary ? renderUsageSummary(usageSummary, { escapeHtml, formatAiUsageCost }) : ""}
+      ${lastResult ? renderAutoRunResult(lastResult, escapeHtml) : ""}
+    </section>
+  `;
+}
+
 export function renderAdminCompanyMatchList(company, options) {
   const { escapeHtml } = options;
   const matches = company.latestMatches || [];
@@ -38,6 +63,9 @@ export function renderAdminCompanyAiReviewPanel(company, options) {
         </button>
         <button class="btn btn-ghost btn-small" type="button" data-action="admin-ai-review-company" data-id="${escapeHtml(company.id)}" data-force="true" ${actionState ? "disabled" : ""}>
           ${actionState ? "Revalidating..." : "Re-run AI review for this company"}
+        </button>
+        <button class="btn btn-ghost btn-small" type="button" data-action="admin-toggle-company-auto-ai" data-id="${escapeHtml(company.id)}" data-enabled="${company.autoAiReviewEnabled ? "false" : "true"}">
+          ${company.autoAiReviewEnabled ? "Disable auto AI" : "Enable auto AI"}
         </button>
       </div>
 
@@ -92,6 +120,24 @@ function renderBatchResult(result, escapeHtml) {
       <span>${Number(result.skipped_score_too_low || 0)} score too low</span>
       <span>${Number(result.skipped_manually_rejected || 0)} manually rejected</span>
       ${result.estimated_cost ? `<span>${escapeHtml(result.estimated_cost)}</span>` : ""}
+    </div>
+  `;
+}
+
+function renderAutoRunResult(result, escapeHtml) {
+  return `
+    <div class="admin-ai-batch-result">
+      <strong>Last automatic run</strong>
+      <span>${Number(result.companies_checked || 0)} companies checked</span>
+      <span>${Number(result.matches_checked || 0)} matches checked</span>
+      <span>${Number(result.ai_reviews_created || 0)} AI reviews created</span>
+      <span>${Number(result.skipped_expired || 0)} expired</span>
+      <span>${Number(result.skipped_missing_deadline || 0)} missing deadline</span>
+      <span>${Number(result.skipped_outside_service_area || 0)} outside service area</span>
+      <span>${Number(result.skipped_already_reviewed || 0)} already reviewed</span>
+      <span>${Number(result.skipped_usage_limit || 0)} usage limit</span>
+      <span>${Number(result.daily_usage_remaining || 0)} daily reviews remaining</span>
+      ${result.error ? `<span>${escapeHtml(result.error)}</span>` : ""}
     </div>
   `;
 }

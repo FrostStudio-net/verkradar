@@ -52,6 +52,27 @@ export async function requestCompanyAiReviewBatch(companyId, options = {}) {
   return payload;
 }
 
+export async function requestAutomaticAiReviewRun(options = {}) {
+  const endpoint = getAiReviewEndpoint();
+  if (!endpoint) {
+    throw new Error("AI review function is not configured. Set window.VERKRADAR_AI_REVIEW_MATCH_URL or window.VERKRADAR_SUPABASE_URL.");
+  }
+  const headers = await getAiReviewHeaders();
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      auto: true,
+      limit: Math.max(1, Math.min(10, Number(options.limit || 10))),
+    }),
+  });
+  const payload = await readJsonResponse(response);
+  if (!response.ok) {
+    throw new Error(payload.error || payload.message || `Automatic AI review failed with status ${response.status}`);
+  }
+  return payload;
+}
+
 export async function loadTodayAiUsageSummary() {
   if (!supabaseClient) {
     return { reviewsToday: 0, estimatedCostToday: 0, remainingReviewsToday: 50 };

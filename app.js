@@ -33,8 +33,10 @@ import {
   loadTodayAiUsageSummary,
   requestCompanyAiReviewBatch,
   requestAiMatchReview,
+  requestAutomaticAiReviewRun,
   PROFILE_SUGGESTIONS,
   mergeAiReviewsIntoAdminMatches,
+  renderAdminAutomaticAiReviewPanel,
   renderAdminCompanyAiReviewPanel,
   renderAdminCompanyMatchList,
   renderForgotPasswordPage,
@@ -604,6 +606,14 @@ document.addEventListener("click", (event) => {
   }
   if (name === "admin-ai-review-company") {
     runAdminCompanyAiReviewBatch(id, { force: action.dataset.force === "true" });
+    return;
+  }
+  if (name === "admin-run-auto-ai-review") {
+    runAdminAutomaticAiReview();
+    return;
+  }
+  if (name === "admin-toggle-company-auto-ai") {
+    toggleCompanyAutoAiReview(id, action.dataset.enabled === "true");
     return;
   }
   if (name === "import-ted") importTedNotices();
@@ -1668,6 +1678,7 @@ function mapAdminCompany(company, related) {
     reportFrequency: company.report_frequency || "weekly",
     reportDay: company.report_day || "monday",
     deadlineReminders: Boolean(company.deadline_reminders),
+    autoAiReviewEnabled: Boolean(company.auto_ai_review_enabled),
     matchCount: matches.length,
     savedCount: 0,
     latestReportDate: reports[0]?.created_at || "",
@@ -1922,6 +1933,61 @@ async function runAdminCompanyAiReviewBatch(companyId, options = {}) {
     const next = { ...(state.adminCompanyAiReviewActions || {}) };
     delete next[companyId];
     state.adminCompanyAiReviewActions = next;
+    render();
+  }
+}
+
+async function runAdminAutomaticAiReview() {
+  if (!state.isAdmin) {
+    state.adminMessage = { type: "error", text: "You do not have access to this action." };
+    render();
+    return;
+  }
+  state.adminAutomaticAiReviewLoading = true;
+  state.adminMessage = null;
+  render();
+  try {
+    const payload = await requestAutomaticAiReviewRun({ limit: 10 });
+    state.adminAutomaticAiReviewResult = payload;
+    await Promise.all([loadAdminCompanies(), loadAdminReviewQueue()]);
+    state.adminMessage = {
+      type: "success",
+      text: `Automatic AI review created ${Number(payload.ai_reviews_created || 0)} reviews across ${Number(payload.companies_checked || 0)} companies.`
+    };
+    showToast("Automatic AI review completed", "success");
+  } catch (error) {
+    console.error("Failed to run automatic AI review:", error);
+    state.adminMessage = {
+      type: "error",
+      text: `Automatic AI review failed. ${formatSupabaseError(error)}`
+    };
+  } finally {
+    state.adminAutomaticAiReviewLoading = false;
+    render();
+  }
+}
+
+async function toggleCompanyAutoAiReview(companyId, enabled) {
+  if (!state.isAdmin || !companyId || !supabaseClient) return;
+  state.adminMessage = null;
+  render();
+  try {
+    const { error } = await supabaseClient
+      .from("companies")
+      .update({ auto_ai_review_enabled: enabled })
+      .eq("id", companyId);
+    if (error) throw error;
+    await loadAdminCompanies();
+    state.adminMessage = {
+      type: "success",
+      text: `Automatic AI review ${enabled ? "enabled" : "disabled"} for company.`
+    };
+  } catch (error) {
+    console.error("Failed to toggle company automatic AI review:", error);
+    state.adminMessage = {
+      type: "error",
+      text: `Failed to update automatic AI review setting. ${formatSupabaseError(error)}`
+    };
     render();
   }
 }
@@ -7601,6 +7667,13 @@ function renderAdminActiveTab(opportunities) {
   if (state.adminActiveTab === "reports") return renderLatestGeneratedReports();
   return `
     ${renderAdminOverview()}
+    ${renderAdminAutomaticAiReviewPanel({
+      escapeHtml,
+      usageSummary: state.adminAiUsageSummary || null,
+      lastResult: state.adminAutomaticAiReviewResult || null,
+      isRunning: Boolean(state.adminAutomaticAiReviewLoading),
+      formatAiUsageCost
+    })}
     ${renderAutomationStatusCard()}
     ${renderAdminCompaniesSection(true)}
   `;

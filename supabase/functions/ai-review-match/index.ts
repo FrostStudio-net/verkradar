@@ -10,6 +10,7 @@ type AiFit = "strong" | "possible" | "weak" | "no_fit";
 
 const DAILY_AI_REVIEW_LIMIT = 50;
 const DAILY_COMPANY_BATCH_LIMIT = 3;
+const DAILY_COMPANY_AUTO_REVIEW_LIMIT = 10;
 const HOURLY_COMPANY_RERUN_LIMIT = 1;
 const MAX_BATCH_MATCHES = 10;
 
@@ -46,9 +47,14 @@ Deno.serve(async (req) => {
 
     const body = await safeJson(req);
     const companyId = String(body.companyId || body.company_id || "").trim();
+    const auto = body.auto === true || body.mode === "auto";
     const batch = body.batch === true || body.mode === "batch";
     const limit = Math.max(1, Math.min(MAX_BATCH_MATCHES, Number(body.limit || MAX_BATCH_MATCHES)));
     const force = body.force === true || body.revalidate === true;
+    if (auto) {
+      const result = await runAutomaticAiReview(adminClient, openAiKey, model, userData.user.id, limit);
+      return json({ ok: true, ...result });
+    }
     if (batch) {
       if (!isUuid(companyId)) return json({ error: "A valid companyId is required for batch review." }, 400);
       await assertAiUsageAllowed(adminClient, {
@@ -250,6 +256,91 @@ async function runBatchReview(
   return summary;
 }
 
+async function runAutomaticAiReview(
+  supabase: ReturnType<typeof createClient>,
+  openAiKey: string,
+  model: string,
+  userId: string,
+  limit: number,
+) {
+  const today = startOfUtcDayIso();
+  const totalUsage = await getAiUsageTotals(supabase, { since: today, opportunityRequired: true });
+  let remainingTotal = Math.max(0, DAILY_AI_REVIEW_LIMIT - totalUsage.count);
+  if (remainingTotal <= 0) {
+    throw new Error("AI daily limit reached. Try again tomorrow or increase the limit.");
+  }
+
+  const { data: companies, error } = await supabase
+    .from("companies")
+    .select("id, company_name, billing_status, plan, selected_plan, auto_ai_review_enabled")
+    .eq("auto_ai_review_enabled", true)
+    .order("created_at", { ascending: true })
+    .limit(100);
+  if (error) throw error;
+
+  const summary = {
+    mode: "auto",
+    companies_checked: 0,
+    matches_checked: 0,
+    ai_reviews_created: 0,
+    strong: 0,
+    possible: 0,
+    weak_or_no_fit: 0,
+    skipped_expired: 0,
+    skipped_missing_deadline: 0,
+    skipped_outside_service_area: 0,
+    skipped_already_reviewed: 0,
+    skipped_usage_limit: 0,
+    skipped_other: 0,
+    daily_usage_remaining: remainingTotal,
+    reviews: [] as Record<string, unknown>[],
+  };
+
+  for (const company of companies || []) {
+    if (summary.ai_reviews_created >= limit || remainingTotal <= 0) break;
+    if (!isActiveCompanyForAutoAi(company as Record<string, unknown>)) continue;
+    summary.companies_checked += 1;
+    const companyId = String(company.id || "");
+    const companyUsage = await getAiUsageTotals(supabase, {
+      since: today,
+      companyId,
+      opportunityRequired: true,
+    });
+    const companyRemaining = Math.max(0, DAILY_COMPANY_AUTO_REVIEW_LIMIT - companyUsage.count);
+    if (companyRemaining <= 0) {
+      summary.skipped_usage_limit += 1;
+      continue;
+    }
+    const candidateLimit = Math.min(limit - summary.ai_reviews_created, remainingTotal, companyRemaining);
+    const candidateResult = await loadBatchCandidates(supabase, companyId, candidateLimit, false);
+    summary.matches_checked += candidateResult.checked;
+    summary.skipped_outside_service_area += candidateResult.skipped.outsideServiceArea;
+    summary.skipped_already_reviewed += candidateResult.skipped.alreadyReviewed;
+    summary.skipped_expired += candidateResult.skipped.expired;
+    summary.skipped_missing_deadline += candidateResult.skipped.missingDeadline;
+
+    for (const candidate of candidateResult.candidates) {
+      if (summary.ai_reviews_created >= limit || remainingTotal <= 0) break;
+      try {
+        const context = await loadReviewContext(supabase, String(candidate.id || ""));
+        validateContextBeforeAi(context, { force: false, allowOutsideServiceArea: false });
+        const saved = await createAndSaveReview(supabase, openAiKey, model, context, userId, "batch_review");
+        summary.ai_reviews_created += 1;
+        remainingTotal -= 1;
+        summary.daily_usage_remaining = remainingTotal;
+        if (saved.fit === "strong") summary.strong += 1;
+        else if (saved.fit === "possible") summary.possible += 1;
+        else summary.weak_or_no_fit += 1;
+        summary.reviews.push(saved);
+      } catch {
+        summary.skipped_other += 1;
+      }
+    }
+  }
+
+  return summary;
+}
+
 async function loadBatchCandidates(supabase: ReturnType<typeof createClient>, companyId: string, limit: number, force: boolean) {
   const company = await loadCompanyForLocationFilter(supabase, companyId);
   const { data: matches, error } = await supabase
@@ -284,11 +375,15 @@ async function loadBatchCandidates(supabase: ReturnType<typeof createClient>, co
     alreadyReviewed: 0,
     outsideServiceArea: 0,
     expiredOrMissingDeadline: 0,
+    expired: 0,
+    missingDeadline: 0,
     scoreTooLow: 0,
     manuallyRejected: 0,
     samples: [] as string[],
   };
+  let checked = 0;
   for (const match of matches || []) {
+    checked += 1;
     const title = String((match.opportunities as Record<string, unknown> | null)?.title || match.opportunity_id || "match");
     if (reviews.has(String(match.opportunity_id || ""))) {
       skipped.alreadyReviewed += 1;
@@ -313,6 +408,8 @@ async function loadBatchCandidates(supabase: ReturnType<typeof createClient>, co
     const opportunity = match.opportunities as Record<string, unknown> | null;
     if (!opportunity || !isBatchEligibleOpportunity(opportunity)) {
       skipped.expiredOrMissingDeadline += 1;
+      if (!opportunity || isMissingDeadlineOpportunity(opportunity)) skipped.missingDeadline += 1;
+      else skipped.expired += 1;
       await markMatchAiSkipped(supabase, String(match.id || ""), "expired_or_missing_deadline", true);
       await markExistingReviewNotSendable(supabase, companyId, String(match.opportunity_id || ""), "Expired or missing deadline under current review rules.");
       if (skipped.samples.length < 5) skipped.samples.push(`${title}: expired or missing deadline`);
@@ -329,7 +426,7 @@ async function loadBatchCandidates(supabase: ReturnType<typeof createClient>, co
     if (candidates.length >= limit) continue;
     candidates.push(match);
   }
-  return { candidates, skipped };
+  return { candidates, skipped, checked };
 }
 
 async function markMatchAiSkipped(supabase: ReturnType<typeof createClient>, matchId: string, reason: string, lowPriority: boolean) {
@@ -456,6 +553,20 @@ function isBatchEligibleOpportunity(opportunity: Record<string, unknown>) {
   return true;
 }
 
+function isMissingDeadlineOpportunity(opportunity: Record<string, unknown>) {
+  const payload = opportunity.raw_payload && typeof opportunity.raw_payload === "object" ? opportunity.raw_payload as Record<string, unknown> : {};
+  return !String(opportunity.deadline || payload.deadline_at || payload.bid_deadline_at || "").trim();
+}
+
+function isActiveCompanyForAutoAi(company: Record<string, unknown>) {
+  if (company.auto_ai_review_enabled !== true) return false;
+  const billingStatus = String(company.billing_status || "").toLowerCase();
+  const plan = String(company.selected_plan || company.plan || "").toLowerCase();
+  if (["cancelled", "canceled", "inactive", "suspended"].includes(billingStatus)) return false;
+  return ["trial", "active", "paying", "paid", "not_started"].includes(billingStatus)
+    || ["trial", "basic", "pro", "priority", "starter", "growth"].includes(plan);
+}
+
 function validateContextBeforeAi(context: Record<string, unknown>, options: { force: boolean; allowOutsideServiceArea: boolean }) {
   const opportunity = context.opportunity as Record<string, unknown>;
   const match = context.match as Record<string, unknown>;
@@ -493,6 +604,14 @@ async function assertAiUsageAllowed(
     opportunityRequired: true,
   });
   if (totalUsage.count + options.requestedReviews > DAILY_AI_REVIEW_LIMIT) {
+    throw new Error("AI daily limit reached. Try again tomorrow or increase the limit.");
+  }
+  const companyReviewUsage = await getAiUsageTotals(supabase, {
+    since: today,
+    companyId: options.companyId,
+    opportunityRequired: true,
+  });
+  if (companyReviewUsage.count + options.requestedReviews > DAILY_COMPANY_AUTO_REVIEW_LIMIT) {
     throw new Error("AI daily limit reached. Try again tomorrow or increase the limit.");
   }
 
