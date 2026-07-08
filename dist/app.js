@@ -30,6 +30,7 @@ import {
   normalizeLocationText,
   parseCommaList,
   formatAiUsageCost,
+  requestDailyPipelineRun,
   loadTodayAiUsageSummary,
   requestCompanyAiReviewBatch,
   requestAiMatchReview,
@@ -37,6 +38,7 @@ import {
   updateCompanyAutoAiReviewEnabled,
   PROFILE_SUGGESTIONS,
   mergeAiReviewsIntoAdminMatches,
+  renderAdminDailyPipelinePanel,
   renderAdminAutomaticAiReviewPanel,
   renderAdminCompanyAiReviewPanel,
   renderAdminCompanyMatchList,
@@ -611,6 +613,10 @@ document.addEventListener("click", (event) => {
   }
   if (name === "admin-run-auto-ai-review") {
     runAdminAutomaticAiReview();
+    return;
+  }
+  if (name === "admin-run-daily-pipeline") {
+    runAdminDailyPipeline();
     return;
   }
   if (name === "admin-toggle-company-auto-ai") {
@@ -1964,6 +1970,28 @@ async function runAdminAutomaticAiReview() {
     };
   } finally {
     state.adminAutomaticAiReviewLoading = false;
+    render();
+  }
+}
+
+async function runAdminDailyPipeline() {
+  if (!state.isAdmin) return;
+  state.adminDailyPipelineLoading = true;
+  state.adminMessage = null;
+  render();
+  try {
+    const payload = await requestDailyPipelineRun();
+    state.adminDailyPipelineResult = payload;
+    await Promise.all([refreshAdminOperationsData(), loadAdminCompanies(), loadAdminReviewQueue()]);
+    state.adminMessage = {
+      type: payload.errors?.length ? "error" : "success",
+      text: `Daily pipeline finished: ${Number(payload.sources_imported || 0)} sources, ${Number(payload.companies_refreshed || 0)} companies, ${Number(payload.ai_reviews_created || 0)} AI reviews.`
+    };
+  } catch (error) {
+    console.error("Failed to run daily pipeline:", error);
+    state.adminMessage = { type: "error", text: `Daily pipeline failed. ${formatSupabaseError(error)}` };
+  } finally {
+    state.adminDailyPipelineLoading = false;
     render();
   }
 }
@@ -7671,6 +7699,11 @@ function renderAdminActiveTab(opportunities) {
   if (state.adminActiveTab === "reports") return renderLatestGeneratedReports();
   return `
     ${renderAdminOverview()}
+    ${renderAdminDailyPipelinePanel({
+      escapeHtml,
+      isRunning: Boolean(state.adminDailyPipelineLoading),
+      result: state.adminDailyPipelineResult || null
+    })}
     ${renderAdminAutomaticAiReviewPanel({
       escapeHtml,
       usageSummary: state.adminAiUsageSummary || null,
