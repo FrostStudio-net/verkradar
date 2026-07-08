@@ -79,10 +79,24 @@ export async function updateCompanyAutoAiReviewEnabled(companyId, enabled) {
     .from("companies")
     .update({ auto_ai_review_enabled: enabled })
     .eq("id", companyId)
-    .select("id, auto_ai_review_enabled")
-    .single();
+    .select("id, company_name, contact_email, auto_ai_review_enabled");
   if (error) throw error;
-  return data;
+  const rows = data || [];
+  if (!rows.length) {
+    const debugError = new Error(`No company row was updated for company_id=${companyId}. The company may not exist or RLS may block this update.`);
+    debugError.details = {
+      companyId,
+      enabled,
+      rowCount: 0,
+      dataReturned: false,
+    };
+    throw debugError;
+  }
+  return {
+    row: rows[0],
+    rowCount: rows.length,
+    dataReturned: true,
+  };
 }
 
 export async function loadTodayAiUsageSummary() {

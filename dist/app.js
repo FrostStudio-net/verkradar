@@ -1970,6 +1970,7 @@ async function runAdminAutomaticAiReview() {
 
 async function toggleCompanyAutoAiReview(companyId, enabled) {
   if (!state.isAdmin || !companyId) return;
+  const selectedCompany = (state.adminCompanies || []).find((company) => company.id === companyId);
   state.adminMessage = null;
   render();
   try {
@@ -1986,9 +1987,10 @@ async function toggleCompanyAutoAiReview(companyId, enabled) {
     render();
   } catch (error) {
     console.error("Failed to toggle company automatic AI review:", error);
+    const debug = error?.details || {};
     state.adminMessage = {
       type: "error",
-      text: `Failed to update automatic AI review setting. ${formatSupabaseError(error)}`
+      text: `Failed to update automatic AI review setting. ${formatSupabaseError(error)} Debug: company_id=${companyId}; company=${selectedCompany?.companyName || "unknown"}; email=${selectedCompany?.contactEmail || "unknown"}; returned_rows=${debug.rowCount ?? "unknown"}; returned_data=${debug.dataReturned === false ? "false" : "unknown"}.`
     };
     render();
   }
