@@ -1464,6 +1464,35 @@ select option:checked {
   color: var(--muted);
 }
 
+.import-failure-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.import-failure-list h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.import-failure-row {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid rgba(255, 122, 122, 0.32);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 88, 88, 0.08);
+}
+
+.import-failure-row p,
+.import-failure-row small {
+  overflow-wrap: anywhere;
+}
+
+.import-failure-row small {
+  color: var(--muted);
+}
+
 .import-stats strong {
   color: var(--text);
 }

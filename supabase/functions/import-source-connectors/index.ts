@@ -9,7 +9,18 @@ type ImportSummary = {
   skipped: number;
   matched: number;
   reports_generated: number;
+  reports?: number;
   errors: string[];
+  failedSources?: FailedSourceResult[];
+};
+
+type FailedSourceResult = {
+  source: string;
+  source_id?: string;
+  connector_type?: string;
+  endpoint_url?: string;
+  status: string;
+  message: string;
 };
 
 type ConnectorRow = {
@@ -301,7 +312,9 @@ Deno.serve(async (req) => {
     skipped: 0,
     matched: 0,
     reports_generated: 0,
+    reports: 0,
     errors: [],
+    failedSources: [],
   };
 
   try {
@@ -515,12 +528,21 @@ Deno.serve(async (req) => {
         await updateConnectorState(adminClient, connector.source_id, "connected", sourceSummary);
       } catch (error) {
         const message = errorMessage(error);
+        const failedSource: FailedSourceResult = {
+          source: source.name,
+          source_id: connector.source_id,
+          connector_type: connector.connector_type,
+          endpoint_url: connector.endpoint_url,
+          status: failureStatusFromMessage(message),
+          message,
+        };
         recordImportSkip(runDetails, {
           source_name: source.name,
           title: source.name,
           reason: message.toLowerCase().includes("fetch failed") ? "fetch_failed" : "parse_failed",
         });
         sourceSummary.errors.push(message);
+        sourceSummary.failedSources = [failedSource];
         runDetails.errors.push(message);
         runDetails.opportunities_imported = sourceSummary.inserted;
         runDetails.opportunities_updated = sourceSummary.updated;
@@ -546,13 +568,18 @@ Deno.serve(async (req) => {
     aggregateRunDetails.opportunities_updated = summary.updated;
     aggregateRunDetails.matches_created_or_updated = summary.matched;
     aggregateRunDetails.reports_generated = summary.reports_generated;
-    aggregateRunDetails.errors = summary.errors;
+    aggregateRunDetails.errors = summary.failedSources?.length
+      ? summary.failedSources.map((failure) => `${failure.source}: ${failure.message}`)
+      : summary.errors;
+    summary.reports = summary.reports_generated;
 
     await finalizeImportRun(adminClient, runId, {
-      status: summary.errors.length ? "error" : "success",
+      status: summary.failedSources?.length ? "partial_success" : "success",
       ...summary,
       query: sourceId ? connectors[0]?.endpoint_url || "" : `enabled connectors: ${connectors.length}`,
-      error: summary.errors.length ? summary.errors.join("; ") : null,
+      error: summary.failedSources?.length
+        ? summary.failedSources.map((failure) => `${failure.source}: ${failure.message}`).join("; ")
+        : summary.errors.length ? summary.errors.join("; ") : null,
       details: aggregateRunDetails,
     });
 
@@ -1224,6 +1251,7 @@ function normalizeConnectorItem(
   const searchText = `${title} ${description} ${content} ${categories.join(" ")}`;
   const extractedDeadline = extractDeadline(searchText);
   const deadline = String(item.deadline || "") || extractedDeadline.date;
+  const completionDateText = extractCompletionDateText(searchText);
   const isExpired = deadline ? daysUntil(deadline) < 0 : false;
   const staleInfo = getStaleOpportunityInfo({
     title,
@@ -1237,6 +1265,8 @@ function normalizeConnectorItem(
   });
   const qualityStatus = staleInfo.isStale
     ? "not_opportunity"
+    : !deadline && completionDateText
+    ? "needs_review"
     : source.name === FAXAFLOAHAFNIR_SOURCE_NAME && !deadline
     ? "needs_review"
     : getConnectorOpportunityQuality(searchText);
@@ -1287,6 +1317,8 @@ function normalizeConnectorItem(
         expired_keywords_detected: staleInfo.expiredKeywords,
       } : {}),
       extracted_deadline_text: extractedDeadline.rawText,
+      ...(completionDateText ? { completion_date_text: completionDateText } : {}),
+      ...(!deadline && completionDateText ? { deadline_debug_reason: "completion_date_found_but_no_bid_deadline" } : {}),
       deadline_warning: deadline ? null : MISSING_DEADLINE_RISK,
       item,
     },
@@ -1609,9 +1641,13 @@ function extractStrictTenderDeadline(text: string) {
   const hasDeadlineIntent = [
     "skilafrestur",
     "tilbodsfrestur",
+    "tilbod skulu hafa borist",
+    "tilbodum skal skila",
+    "skil tilboda",
     "frestur til",
     "skila fyrir",
     "fyrir kl",
+    "eigi sidar en",
   ].some((phrase) => normalized.includes(normalizeSearchText(phrase)));
   if (!hasDeadlineIntent) return { date: null, rawText: null };
   return extractDeadline(text);
@@ -1725,6 +1761,7 @@ async function enrichRikiskaupOpportunityFromDetailPage(opportunity: NormalizedO
       ...(detail.type ? { tender_type: detail.type } : {}),
       ...(detail.tenderNumber ? { tender_number: detail.tenderNumber } : {}),
       ...(detail.deadline ? { extracted_deadline_text: detail.deadlineRaw, deadline_at: detail.deadlineAt || null } : {}),
+      ...(!detail.deadline && detail.deadlineDebugReason ? { deadline_debug_reason: detail.deadlineDebugReason } : {}),
       ...(detail.openingDate ? { opening_date: detail.openingDate } : {}),
       ...(detail.documentsDate ? { tender_documents_date: detail.documentsDate } : {}),
       ...(detail.completionDate ? { completion_date_text: detail.completionDate } : {}),
@@ -1810,8 +1847,8 @@ function parseRikiskaupTenderDetailPage(html: string) {
   const tenderDeadline = extractRikiskaupTenderDeadline(text);
   const deadlineRaw = tenderDeadline.rawText || "";
   const deadline = tenderDeadline.date;
-  const openingDate = parseDeadline(extractLabeledValue(text, ["Opnun tilboða", "Opnun tilboda"]) || "");
-  const documentsDate = parseDeadline(extractLabeledValue(text, ["Útboðsgögn afhent", "Utbodsgogn afhent"]) || "");
+  const openingDate = parseDeadlineDate(extractLabeledValue(text, ["Opnun tilboða", "Opnun tilboda"]) || "");
+  const documentsDate = parseDeadlineDate(extractLabeledValue(text, ["Útboðsgögn afhent", "Utbodsgogn afhent"]) || "");
   const completionDate = extractCompletionDateText(text);
   const tenderNumber = extractTenderNumber(text);
   const description = buildRikiskaupDetailDescription(text, deadlineRaw);
@@ -1823,6 +1860,7 @@ function parseRikiskaupTenderDetailPage(html: string) {
     tenderNumber,
     deadline,
     deadlineRaw: deadlineRaw || null,
+    deadlineDebugReason: tenderDeadline.debugReason || null,
     deadlineAt: deadline ? buildDeadlineAt(deadline, deadlineRaw) : null,
     openingDate,
     documentsDate,
@@ -1905,9 +1943,9 @@ function cleanRikiskaupBuyer(value: string) {
   return cleaned;
 }
 
-function extractRikiskaupTenderDeadline(text: string): { date: string | null; rawText: string | null } {
+function extractRikiskaupTenderDeadline(text: string): { date: string | null; rawText: string | null; debugReason?: string | null } {
   const compact = String(text || "").replace(/\s+/g, " ").trim();
-  if (!compact) return { date: null, rawText: null };
+  if (!compact) return { date: null, rawText: null, debugReason: "empty_detail_text" };
 
   const labeled = extractLabeledValue(compact, ["Skilafrestur"]);
   if (labeled) {
@@ -1915,20 +1953,16 @@ function extractRikiskaupTenderDeadline(text: string): { date: string | null; ra
     if (parsed) return { date: parsed, rawText: labeled };
   }
 
-  const tenderSubmissionPatterns = [
-    /Tilboðum\s+skal\s+skila[\s\S]{0,220}?(?:(?:eigi\s+síðar\s+en)\s*:?\s*)?(?:kl\.?\s*\d{1,2}[:.]\d{2}\s*(?:þann)?\s*)?(\d{1,2}\.?\s+(?:janúar|januar|febrúar|februar|mars|apríl|april|maí|mai|júní|juni|júlí|juli|ágúst|agust|september|október|oktober|nóvember|november|desember)\s+20\d{2}|\d{1,2}[./]\d{1,2}[./]20\d{2})/i,
-    /tilboðum\s+skilað[\s\S]{0,220}?fyrir\s+kl\.?\s*\d{1,2}[:.]\d{2}[\s\S]{0,80}?(\d{1,2}\.?\s+(?:janúar|januar|febrúar|februar|mars|apríl|april|maí|mai|júní|juni|júlí|juli|ágúst|agust|september|október|oktober|nóvember|november|desember)\s+20\d{2}|\d{1,2}[./]\d{1,2}[./]20\d{2})/i,
-    /eigi\s+síðar\s+en[\s\S]{0,160}?(\d{1,2}\.?\s+(?:janúar|januar|febrúar|februar|mars|apríl|april|maí|mai|júní|juni|júlí|juli|ágúst|agust|september|október|oktober|nóvember|november|desember)\s+20\d{2}|\d{1,2}[./]\d{1,2}[./]20\d{2})/i,
-  ];
+  const extracted = extractDeadline(compact);
+  if (extracted.date) return extracted;
 
-  for (const pattern of tenderSubmissionPatterns) {
-    const match = compact.match(pattern);
-    if (!match?.[1]) continue;
-    const parsed = parseDeadlineDate(match[1]);
-    if (parsed) return { date: parsed, rawText: match[0].trim() };
-  }
-
-  return { date: null, rawText: null };
+  return {
+    date: null,
+    rawText: null,
+    debugReason: containsCompletionDateIntent(compact)
+      ? "only_completion_date_found_no_bid_deadline"
+      : "no_bid_deadline_phrase_found",
+  };
 }
 
 function buildRikiskaupDetailDescription(text: string, deadlineRaw = "") {
@@ -1956,7 +1990,7 @@ function buildRikiskaupDetailDescription(text: string, deadlineRaw = "") {
 }
 
 function extractCompletionDateText(text: string) {
-  const match = String(text || "").match(/Verkinu skal[^.]{0,180}\./i);
+  const match = String(text || "").match(/(?:Verkinu skal lokið|Áætluð verklok|Aaetluð verklok|Skiladagur verks|Verklok)[^.]{0,180}\.?/i);
   return match ? match[0].trim() : "";
 }
 
@@ -2731,8 +2765,15 @@ const CIVIL_STRONG_SERVICE_TERMS = [
   "lagnavinna",
   "lagnir",
   "fráveita",
+  "fráveitulagnir",
+  "vatnsveita",
+  "hitaveita",
   "vatnslagnir",
   "regnvatnslagnir",
+  "drenlagnir",
+  "endurnýjun lagna",
+  "brunnar",
+  "dælubrunnar",
   "malbikun",
   "gangstétt",
   "gangstéttir",
@@ -2746,9 +2787,13 @@ const CIVIL_STRONG_SERVICE_TERMS = [
   "undirbygging",
   "yfirborðsfrágangur",
   "hellulögn",
+  "hellulagnir",
   "kantsteinn",
   "kantsteinar",
   "landmótun",
+  "afvötnun",
+  "jarðvegsvinna",
+  "útiframkvæmdir",
   "gatnaframkvæmdir",
 ];
 
@@ -2799,6 +2844,50 @@ const CIVIL_INDOOR_ALLOWED_SERVICE_TERMS = [
   "raflagnir",
   "pípulagnir",
   "byggingarvinna",
+];
+
+const CIVIL_CONSULTING_DOWNGRADE_TERMS = [
+  "for- og verkhönnun",
+  "verkhönnun",
+  "forhönnun",
+  "hönnun",
+  "ráðgjöf",
+  "verkfræðiráðgjöf",
+  "eftirlit",
+  "umsjón",
+  "verkefnastjórn",
+  "verkefnastjórnun",
+];
+
+const CIVIL_CONSULTING_ALLOWED_SERVICE_TERMS = [
+  "hönnun",
+  "for- og verkhönnun",
+  "verkhönnun",
+  "forhönnun",
+  "ráðgjöf",
+  "verkfræðiráðgjöf",
+  "eftirlit",
+  "umsjón",
+  "verkefnastjórn",
+  "verkefnastjórnun",
+];
+
+const CIVIL_CORE_EXECUTION_PROFILE_TERMS = [
+  "jarðvinna",
+  "jarðvegsvinna",
+  "gatnagerð",
+  "gatna- og stígagerð",
+  "stígagerð",
+  "vegagerð",
+  "lóðarframkvæmdir",
+  "gröftur",
+  "jarðvegsskipti",
+  "fyllingar",
+  "afvötnun",
+  "landmótun",
+  "yfirborðsfrágangur",
+  "malbikun",
+  "útiframkvæmdir",
 ];
 
 function normalizedIncludesAny(text: string, terms: string[]) {
@@ -2874,6 +2963,23 @@ function hasExplicitIndoorService(profile: Record<string, unknown>) {
   return normalizedIncludesAny(profileText, CIVIL_INDOOR_ALLOWED_SERVICE_TERMS);
 }
 
+function hasExplicitConsultingService(profile: Record<string, unknown>) {
+  const profileText = [
+    ...asArray(profile.services),
+    ...asArray(profile.includeKeywords),
+  ].filter(Boolean).join(" ");
+  return normalizedIncludesAny(profileText, CIVIL_CONSULTING_ALLOWED_SERVICE_TERMS);
+}
+
+function hasCoreExecutionService(profile: Record<string, unknown>) {
+  const profileText = [
+    profile.industry,
+    ...asArray(profile.services),
+    ...asArray(profile.includeKeywords),
+  ].filter(Boolean).join(" ");
+  return normalizedIncludesAny(profileText, CIVIL_CORE_EXECUTION_PROFILE_TERMS);
+}
+
 function getCivilContractorFit(
   profile: Record<string, unknown>,
   opportunity: Record<string, unknown>,
@@ -2887,6 +2993,10 @@ function getCivilContractorFit(
       keywordHits,
       hasWeakOnlyFit: false,
       hasIndoorMismatch: false,
+      hasConsultingMismatch: false,
+      hasSecondaryOnlyFit: false,
+      hasPromotedBroadFit: false,
+      hasWinterOnlyFit: false,
     };
   }
 
@@ -2903,20 +3013,37 @@ function getCivilContractorFit(
   const hasEligibleWinterTerm = hasWinterTerm && allowsWinterWork;
   const hasIndoorTerm = normalizedIncludesAny(opportunityTextValue, CIVIL_INDOOR_DOWNGRADE_TERMS);
   const allowsIndoorWork = hasExplicitIndoorService(profile);
+  const hasConsultingTerm = normalizedIncludesAny(opportunityTextValue, CIVIL_CONSULTING_DOWNGRADE_TERMS);
+  const allowsConsultingWork = hasExplicitConsultingService(profile);
   const detectedStrongTerms = getStrongCivilTermsInText(opportunityTextValue);
   const detectedWinterTerms = hasEligibleWinterTerm ? getOptionalWinterTermsInText(opportunityTextValue) : [];
   const serviceHitsAreWeakOnly = serviceHits.length > 0 && serviceHits.every(isCivilWeakGenericTerm);
   const keywordHitsAreWeakOnly = keywordHits.length > 0 && keywordHits.every(isCivilWeakGenericTerm);
   const hasAnySpecificHit = [...serviceHits, ...keywordHits].some((hit) => !isCivilWeakGenericTerm(hit));
-  const expandedServiceHits = (hasStrongCivilTerm || hasEligibleWinterTerm) ? Array.from(new Set([...serviceHits, ...detectedStrongTerms, ...detectedWinterTerms])) : serviceHits;
+  const hasWeakGenericHit = [...serviceHits, ...keywordHits].some(isCivilWeakGenericTerm);
+  const shouldPromoteWeakTerms = !hasAnySpecificHit && hasWeakGenericHit && hasStrongCivilTerm;
+  const expandedServiceHits = (shouldPromoteWeakTerms || hasEligibleWinterTerm)
+    ? Array.from(new Set([...serviceHits, ...(shouldPromoteWeakTerms ? detectedStrongTerms : []), ...detectedWinterTerms]))
+    : serviceHits;
   const shouldScoreWeakTerms = hasStrongCivilTerm || hasEligibleWinterTerm || hasAnySpecificHit;
+  const filteredServiceHits = shouldScoreWeakTerms
+    ? (shouldPromoteWeakTerms ? promoteWeakGenericHitsToSpecificCivilTerms(expandedServiceHits, opportunityTextValue) : expandedServiceHits.filter((service) => !isCivilWeakGenericTerm(service)))
+    : expandedServiceHits.filter((service) => !isCivilWeakGenericTerm(service));
+  const filteredKeywordHits = shouldScoreWeakTerms
+    ? (shouldPromoteWeakTerms ? promoteWeakGenericHitsToSpecificCivilTerms(keywordHits, opportunityTextValue) : keywordHits.filter((keyword) => !isCivilWeakGenericTerm(keyword)))
+    : keywordHits.filter((keyword) => !isCivilWeakGenericTerm(keyword));
+  const specificHits = Array.from(new Set([...filteredServiceHits, ...filteredKeywordHits].filter((hit) => !isCivilWeakGenericTerm(hit))));
+  const lacksCoreExecutionProfile = !hasCoreExecutionService(profile);
 
   return {
-    serviceHits: sortMatchTermsBySpecificity(shouldScoreWeakTerms ? promoteWeakGenericHitsToSpecificCivilTerms(expandedServiceHits, opportunityTextValue) : expandedServiceHits.filter((service) => !isCivilWeakGenericTerm(service))),
-    keywordHits: sortMatchTermsBySpecificity(shouldScoreWeakTerms ? promoteWeakGenericHitsToSpecificCivilTerms(keywordHits, opportunityTextValue) : keywordHits.filter((keyword) => !isCivilWeakGenericTerm(keyword))),
+    serviceHits: sortMatchTermsBySpecificity(filteredServiceHits),
+    keywordHits: sortMatchTermsBySpecificity(filteredKeywordHits),
     hasWeakOnlyFit: !hasStrongCivilTerm && !hasEligibleWinterTerm && !hasAnySpecificHit && (serviceHitsAreWeakOnly || keywordHitsAreWeakOnly),
     hasIndoorMismatch: hasIndoorTerm && !hasStrongCivilTerm && !allowsIndoorWork,
+    hasConsultingMismatch: hasConsultingTerm && !allowsConsultingWork,
     hasWinterOnlyFit: hasEligibleWinterTerm && !hasStrongCivilTerm,
+    hasSecondaryOnlyFit: hasAnySpecificHit && lacksCoreExecutionProfile && specificHits.length <= 2 && detectedStrongTerms.length >= 3,
+    hasPromotedBroadFit: shouldPromoteWeakTerms,
   };
 }
 
@@ -3024,6 +3151,21 @@ function calculateMatch(profile: Record<string, unknown>, opportunity: Record<st
   if (civilFit.hasIndoorMismatch) {
     score = Math.min(score - 20, 40);
     risks.push("Appears to be indoor/building finishing work outside your core civil services");
+  }
+
+  if (civilFit.hasConsultingMismatch) {
+    score = Math.min(score - 30, 35);
+    risks.push("Appears to be design, consulting, supervision, or project management work outside your execution services");
+  }
+
+  if (civilFit.hasSecondaryOnlyFit) {
+    score = Math.min(score, 84);
+    risks.push("Secondary service match in a broader infrastructure tender; verify scope");
+  }
+
+  if (civilFit.hasPromotedBroadFit) {
+    score = Math.min(score, 72);
+    risks.push("Broad construction terms matched; verify the specific work type");
   }
 
   if (civilFit.hasWinterOnlyFit) {
@@ -3684,37 +3826,37 @@ function stringFromPath(value: Record<string, unknown>, path: string[]) {
 
 function extractDeadline(text: string): { date: string | null; rawText: string | null } {
   const cleanText = stripHtml(text);
-  const keywordPattern = "(skilafrestur|tilboðsfrestur|tilbodsfrestur|frestur til|eigi síðar en|eigi sidar en|tilboðum skal skila|tilbodum skal skila|tilboðum skilað|tilbodum skilad|skal tilboðum skila|skal tilbodum skila)";
+  const keywordPattern = "(skilafrestur|tilboðsfrestur|tilbodsfrestur|skil tilboða|skil tilboda|tilboðum skal skila|tilbodum skal skila|tilboðum skilað|tilbodum skilad|skal tilboðum skila|skal tilbodum skila|tilboð skulu hafa borist|tilbod skulu hafa borist|tilboð skulu berast|tilbod skulu berast|eigi síðar en|eigi sidar en|frestur til|skila fyrir|fyrir kl\\.?)";
   const numericDatePattern = "(\\d{1,2}[./]\\d{1,2}[./]20\\d{2}|20\\d{2}-\\d{2}-\\d{2})";
   const monthDatePattern = "(\\d{1,2}\\.?\\s+(janúar|januar|febrúar|februar|mars|apríl|april|maí|mai|júní|juni|júlí|juli|ágúst|agust|september|október|oktober|nóvember|november|desember)\\s+20\\d{2})";
 
-  const keywordThenDate = new RegExp(`${keywordPattern}[\\s\\S]{0,120}?(${numericDatePattern}|${monthDatePattern})`, "i");
+  const keywordThenDate = new RegExp(`${keywordPattern}[\\s\\S]{0,220}?(${numericDatePattern}|${monthDatePattern})`, "i");
   const keywordMatch = cleanText.match(keywordThenDate);
-  if (keywordMatch) {
+  if (keywordMatch && !isCompletionOnlyDeadlineSnippet(keywordMatch[0])) {
     const parsed = parseDeadlineDate(keywordMatch[2]);
     if (parsed) return { date: parsed, rawText: keywordMatch[0].trim() };
   }
 
-  const dateThenKeyword = new RegExp(`(${numericDatePattern}|${monthDatePattern})[\\s\\S]{0,80}?${keywordPattern}`, "i");
+  const dateThenKeyword = new RegExp(`(${numericDatePattern}|${monthDatePattern})[\\s\\S]{0,120}?${keywordPattern}`, "i");
   const reverseKeywordMatch = cleanText.match(dateThenKeyword);
-  if (reverseKeywordMatch) {
+  if (reverseKeywordMatch && !isCompletionOnlyDeadlineSnippet(reverseKeywordMatch[0])) {
     const parsed = parseDeadlineDate(reverseKeywordMatch[1]);
     if (parsed) return { date: parsed, rawText: reverseKeywordMatch[0].trim() };
   }
 
-  const numericMatch = cleanText.match(new RegExp(numericDatePattern, "i"));
-  if (numericMatch) {
-    const parsed = parseDeadlineDate(numericMatch[1]);
-    if (parsed) return { date: parsed, rawText: numericMatch[0].trim() };
-  }
-
-  const monthMatch = cleanText.match(new RegExp(monthDatePattern, "i"));
-  if (monthMatch) {
-    const parsed = parseDeadlineDate(monthMatch[1]);
-    if (parsed) return { date: parsed, rawText: monthMatch[0].trim() };
-  }
-
   return { date: null, rawText: null };
+}
+
+function containsCompletionDateIntent(value: string) {
+  return normalizeSearchText(value).match(/\b(verkinu skal lokid|aaetlud verklok|skiladagur verks|verklok)\b/) !== null;
+}
+
+function containsBidDeadlineIntent(value: string) {
+  return normalizeSearchText(value).match(/\b(skilafrestur|tilbodsfrestur|skil tilboda|tilbodum skal skila|tilbod skulu hafa borist|tilbod skulu berast|eigi sidar en|frestur til|skila fyrir|fyrir kl)\b/) !== null;
+}
+
+function isCompletionOnlyDeadlineSnippet(value: string) {
+  return containsCompletionDateIntent(value) && !containsBidDeadlineIntent(value);
 }
 
 function parseDeadline(text: string) {
@@ -3899,7 +4041,14 @@ function mergeSummary(target: ImportSummary, source: ImportSummary) {
   target.skipped += source.skipped;
   target.matched += source.matched;
   target.reports_generated += source.reports_generated;
-  target.errors.push(...source.errors);
+  target.reports = target.reports_generated;
+  target.failedSources = [
+    ...(target.failedSources || []),
+    ...(source.failedSources || []),
+  ];
+  if (source.errors.length && !source.failedSources?.length) {
+    target.errors.push(...source.errors);
+  }
 }
 
 async function safeJson(req: Request) {
@@ -3930,6 +4079,11 @@ function requiredEnv(name: string) {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function failureStatusFromMessage(message: string) {
+  const match = String(message || "").match(/\((\d{3})\)|\bwith\s+(\d{3})\b/i);
+  return match?.[1] || match?.[2] || "error";
 }
 
 function json(payload: unknown, status = 200) {

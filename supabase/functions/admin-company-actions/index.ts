@@ -435,8 +435,15 @@ const CIVIL_STRONG_SERVICE_TERMS = [
   "lagnavinna",
   "lagnir",
   "fráveita",
+  "fráveitulagnir",
+  "vatnsveita",
+  "hitaveita",
   "vatnslagnir",
   "regnvatnslagnir",
+  "drenlagnir",
+  "endurnýjun lagna",
+  "brunnar",
+  "dælubrunnar",
   "malbikun",
   "gangstétt",
   "gangstéttir",
@@ -450,9 +457,13 @@ const CIVIL_STRONG_SERVICE_TERMS = [
   "undirbygging",
   "yfirborðsfrágangur",
   "hellulögn",
+  "hellulagnir",
   "kantsteinn",
   "kantsteinar",
   "landmótun",
+  "afvötnun",
+  "jarðvegsvinna",
+  "útiframkvæmdir",
   "gatnaframkvæmdir",
 ];
 
@@ -503,6 +514,50 @@ const CIVIL_INDOOR_ALLOWED_SERVICE_TERMS = [
   "raflagnir",
   "pípulagnir",
   "byggingarvinna",
+];
+
+const CIVIL_CONSULTING_DOWNGRADE_TERMS = [
+  "for- og verkhönnun",
+  "verkhönnun",
+  "forhönnun",
+  "hönnun",
+  "ráðgjöf",
+  "verkfræðiráðgjöf",
+  "eftirlit",
+  "umsjón",
+  "verkefnastjórn",
+  "verkefnastjórnun",
+];
+
+const CIVIL_CONSULTING_ALLOWED_SERVICE_TERMS = [
+  "hönnun",
+  "for- og verkhönnun",
+  "verkhönnun",
+  "forhönnun",
+  "ráðgjöf",
+  "verkfræðiráðgjöf",
+  "eftirlit",
+  "umsjón",
+  "verkefnastjórn",
+  "verkefnastjórnun",
+];
+
+const CIVIL_CORE_EXECUTION_PROFILE_TERMS = [
+  "jarðvinna",
+  "jarðvegsvinna",
+  "gatnagerð",
+  "gatna- og stígagerð",
+  "stígagerð",
+  "vegagerð",
+  "lóðarframkvæmdir",
+  "gröftur",
+  "jarðvegsskipti",
+  "fyllingar",
+  "afvötnun",
+  "landmótun",
+  "yfirborðsfrágangur",
+  "malbikun",
+  "útiframkvæmdir",
 ];
 
 function normalizedIncludesAny(text: string, terms: string[]) {
@@ -578,6 +633,23 @@ function hasExplicitIndoorService(profile: CompanyProfile) {
   return normalizedIncludesAny(profileText, CIVIL_INDOOR_ALLOWED_SERVICE_TERMS);
 }
 
+function hasExplicitConsultingService(profile: CompanyProfile) {
+  const profileText = [
+    ...(Array.isArray(profile.services) ? profile.services : []),
+    ...(Array.isArray(profile.includeKeywords) ? profile.includeKeywords : []),
+  ].filter(Boolean).join(" ");
+  return normalizedIncludesAny(profileText, CIVIL_CONSULTING_ALLOWED_SERVICE_TERMS);
+}
+
+function hasCoreExecutionService(profile: CompanyProfile) {
+  const profileText = [
+    profile.industry,
+    ...(Array.isArray(profile.services) ? profile.services : []),
+    ...(Array.isArray(profile.includeKeywords) ? profile.includeKeywords : []),
+  ].filter(Boolean).join(" ");
+  return normalizedIncludesAny(profileText, CIVIL_CORE_EXECUTION_PROFILE_TERMS);
+}
+
 function getCivilContractorFit(
   profile: CompanyProfile,
   opportunity: Record<string, unknown>,
@@ -590,6 +662,10 @@ function getCivilContractorFit(
       keywordHits,
       hasWeakOnlyFit: false,
       hasIndoorMismatch: false,
+      hasConsultingMismatch: false,
+      hasSecondaryOnlyFit: false,
+      hasPromotedBroadFit: false,
+      hasWinterOnlyFit: false,
     };
   }
 
@@ -600,20 +676,37 @@ function getCivilContractorFit(
   const hasEligibleWinterTerm = hasWinterTerm && allowsWinterWork;
   const hasIndoorTerm = normalizedIncludesAny(opportunityTextValue, CIVIL_INDOOR_DOWNGRADE_TERMS);
   const allowsIndoorWork = hasExplicitIndoorService(profile);
+  const hasConsultingTerm = normalizedIncludesAny(opportunityTextValue, CIVIL_CONSULTING_DOWNGRADE_TERMS);
+  const allowsConsultingWork = hasExplicitConsultingService(profile);
   const detectedStrongTerms = getStrongCivilTermsInText(opportunityTextValue);
   const detectedWinterTerms = hasEligibleWinterTerm ? getOptionalWinterTermsInText(opportunityTextValue) : [];
   const serviceHitsAreWeakOnly = serviceHits.length > 0 && serviceHits.every(isCivilWeakGenericTerm);
   const keywordHitsAreWeakOnly = keywordHits.length > 0 && keywordHits.every(isCivilWeakGenericTerm);
   const hasAnySpecificHit = [...serviceHits, ...keywordHits].some((hit) => !isCivilWeakGenericTerm(hit));
-  const expandedServiceHits = (hasStrongCivilTerm || hasEligibleWinterTerm) ? Array.from(new Set([...serviceHits, ...detectedStrongTerms, ...detectedWinterTerms])) : serviceHits;
+  const hasWeakGenericHit = [...serviceHits, ...keywordHits].some(isCivilWeakGenericTerm);
+  const shouldPromoteWeakTerms = !hasAnySpecificHit && hasWeakGenericHit && hasStrongCivilTerm;
+  const expandedServiceHits = (shouldPromoteWeakTerms || hasEligibleWinterTerm)
+    ? Array.from(new Set([...serviceHits, ...(shouldPromoteWeakTerms ? detectedStrongTerms : []), ...detectedWinterTerms]))
+    : serviceHits;
   const shouldScoreWeakTerms = hasStrongCivilTerm || hasEligibleWinterTerm || hasAnySpecificHit;
+  const filteredServiceHits = shouldScoreWeakTerms
+    ? (shouldPromoteWeakTerms ? promoteWeakGenericHitsToSpecificCivilTerms(expandedServiceHits, opportunityTextValue) : expandedServiceHits.filter((service) => !isCivilWeakGenericTerm(service)))
+    : expandedServiceHits.filter((service) => !isCivilWeakGenericTerm(service));
+  const filteredKeywordHits = shouldScoreWeakTerms
+    ? (shouldPromoteWeakTerms ? promoteWeakGenericHitsToSpecificCivilTerms(keywordHits, opportunityTextValue) : keywordHits.filter((keyword) => !isCivilWeakGenericTerm(keyword)))
+    : keywordHits.filter((keyword) => !isCivilWeakGenericTerm(keyword));
+  const specificHits = Array.from(new Set([...filteredServiceHits, ...filteredKeywordHits].filter((hit) => !isCivilWeakGenericTerm(hit))));
+  const lacksCoreExecutionProfile = !hasCoreExecutionService(profile);
 
   return {
-    serviceHits: sortMatchTermsBySpecificity(shouldScoreWeakTerms ? promoteWeakGenericHitsToSpecificCivilTerms(expandedServiceHits, opportunityTextValue) : expandedServiceHits.filter((service) => !isCivilWeakGenericTerm(service))),
-    keywordHits: sortMatchTermsBySpecificity(shouldScoreWeakTerms ? promoteWeakGenericHitsToSpecificCivilTerms(keywordHits, opportunityTextValue) : keywordHits.filter((keyword) => !isCivilWeakGenericTerm(keyword))),
+    serviceHits: sortMatchTermsBySpecificity(filteredServiceHits),
+    keywordHits: sortMatchTermsBySpecificity(filteredKeywordHits),
     hasWeakOnlyFit: !hasStrongCivilTerm && !hasEligibleWinterTerm && !hasAnySpecificHit && (serviceHitsAreWeakOnly || keywordHitsAreWeakOnly),
     hasIndoorMismatch: hasIndoorTerm && !hasStrongCivilTerm && !allowsIndoorWork,
+    hasConsultingMismatch: hasConsultingTerm && !allowsConsultingWork,
     hasWinterOnlyFit: hasEligibleWinterTerm && !hasStrongCivilTerm,
+    hasSecondaryOnlyFit: hasAnySpecificHit && lacksCoreExecutionProfile && specificHits.length <= 2 && detectedStrongTerms.length >= 3,
+    hasPromotedBroadFit: shouldPromoteWeakTerms,
   };
 }
 
@@ -706,6 +799,21 @@ function calculateMatch(profile: CompanyProfile, opportunity: Record<string, unk
   if (civilFit.hasIndoorMismatch) {
     score = Math.min(score - 20, 40);
     risks.push("Appears to be indoor/building finishing work outside your core civil services");
+  }
+
+  if (civilFit.hasConsultingMismatch) {
+    score = Math.min(score - 30, 35);
+    risks.push("Appears to be design, consulting, supervision, or project management work outside your execution services");
+  }
+
+  if (civilFit.hasSecondaryOnlyFit) {
+    score = Math.min(score, 84);
+    risks.push("Secondary service match in a broader infrastructure tender; verify scope");
+  }
+
+  if (civilFit.hasPromotedBroadFit) {
+    score = Math.min(score, 72);
+    risks.push("Broad construction terms matched; verify the specific work type");
   }
 
   if (civilFit.hasWinterOnlyFit) {

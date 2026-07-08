@@ -2413,6 +2413,16 @@ function getAdminCompanyActionsEndpoint() {
   return null;
 }
 
+async function readFunctionResponsePayload(response) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { errors: [text] };
+  }
+}
+
 async function importTedNotices() {
   if (!state.isAdmin) {
     state.importStatus = { errors: ["You do not have access to import TED notices."] };
@@ -2440,7 +2450,7 @@ async function importTedNotices() {
       headers: await getTedImportHeaders(),
       body: JSON.stringify({ limit: 50, importMode: state.tedImportMode }),
     });
-    const payload = await response.json();
+    const payload = await readFunctionResponsePayload(response);
     state.importStatus = response.ok ? payload : { ...payload, errors: payload.errors || [`Import failed with status ${response.status}`] };
     if (response.ok) {
       await loadOpportunities();
@@ -2488,8 +2498,18 @@ async function importSourceConnectors(sourceId = "") {
       headers: await getTedImportHeaders(),
       body: JSON.stringify({ limit: 50, sourceId: sourceId || undefined }),
     });
-    const payload = await response.json();
-    state.connectorImportStatus = response.ok ? payload : { ...payload, errors: payload.errors || [`Source import failed with status ${response.status}`] };
+    const payload = await readFunctionResponsePayload(response);
+    const responseErrors = Array.isArray(payload.errors) ? payload.errors : [];
+    const failedSources = Array.isArray(payload.failedSources) ? payload.failedSources : [];
+    state.connectorImportStatus = response.ok
+      ? { ...payload, failedSources }
+      : {
+          ...payload,
+          failedSources,
+          errors: responseErrors.length
+            ? responseErrors
+            : [`Source import failed with status ${response.status}${response.statusText ? ` ${response.statusText}` : ""}`],
+        };
     if (response.ok) {
       await loadOpportunities();
       await refreshAdminOperationsData();
@@ -4067,8 +4087,15 @@ const CIVIL_STRONG_SERVICE_TERMS = [
   "lagnavinna",
   "lagnir",
   "fráveita",
+  "fráveitulagnir",
+  "vatnsveita",
+  "hitaveita",
   "vatnslagnir",
   "regnvatnslagnir",
+  "drenlagnir",
+  "endurnýjun lagna",
+  "brunnar",
+  "dælubrunnar",
   "malbikun",
   "gangstétt",
   "gangstéttir",
@@ -4082,9 +4109,13 @@ const CIVIL_STRONG_SERVICE_TERMS = [
   "undirbygging",
   "yfirborðsfrágangur",
   "hellulögn",
+  "hellulagnir",
   "kantsteinn",
   "kantsteinar",
   "landmótun",
+  "afvötnun",
+  "jarðvegsvinna",
+  "útiframkvæmdir",
   "gatnaframkvæmdir"
 ];
 
@@ -4135,6 +4166,50 @@ const CIVIL_INDOOR_ALLOWED_SERVICE_TERMS = [
   "raflagnir",
   "pípulagnir",
   "byggingarvinna"
+];
+
+const CIVIL_CONSULTING_DOWNGRADE_TERMS = [
+  "for- og verkhönnun",
+  "verkhönnun",
+  "forhönnun",
+  "hönnun",
+  "ráðgjöf",
+  "verkfræðiráðgjöf",
+  "eftirlit",
+  "umsjón",
+  "verkefnastjórn",
+  "verkefnastjórnun"
+];
+
+const CIVIL_CONSULTING_ALLOWED_SERVICE_TERMS = [
+  "hönnun",
+  "for- og verkhönnun",
+  "verkhönnun",
+  "forhönnun",
+  "ráðgjöf",
+  "verkfræðiráðgjöf",
+  "eftirlit",
+  "umsjón",
+  "verkefnastjórn",
+  "verkefnastjórnun"
+];
+
+const CIVIL_CORE_EXECUTION_PROFILE_TERMS = [
+  "jarðvinna",
+  "jarðvegsvinna",
+  "gatnagerð",
+  "gatna- og stígagerð",
+  "stígagerð",
+  "vegagerð",
+  "lóðarframkvæmdir",
+  "gröftur",
+  "jarðvegsskipti",
+  "fyllingar",
+  "afvötnun",
+  "landmótun",
+  "yfirborðsfrágangur",
+  "malbikun",
+  "útiframkvæmdir"
 ];
 
 function normalizeMatchText(value) {
@@ -4214,6 +4289,23 @@ function hasExplicitIndoorService(profile = {}) {
   return normalizedContainsAny(profileText, CIVIL_INDOOR_ALLOWED_SERVICE_TERMS);
 }
 
+function hasExplicitConsultingService(profile = {}) {
+  const profileText = [
+    ...(Array.isArray(profile.services) ? profile.services : []),
+    ...(Array.isArray(profile.includeKeywords) ? profile.includeKeywords : [])
+  ].filter(Boolean).join(" ");
+  return normalizedContainsAny(profileText, CIVIL_CONSULTING_ALLOWED_SERVICE_TERMS);
+}
+
+function hasCoreExecutionService(profile = {}) {
+  const profileText = [
+    profile.industry,
+    ...(Array.isArray(profile.services) ? profile.services : []),
+    ...(Array.isArray(profile.includeKeywords) ? profile.includeKeywords : [])
+  ].filter(Boolean).join(" ");
+  return normalizedContainsAny(profileText, CIVIL_CORE_EXECUTION_PROFILE_TERMS);
+}
+
 function getCivilContractorFit(profile, opp, serviceHits, keywordHits) {
   const isCivilProfile = isCivilContractorProfile(profile);
   if (!isCivilProfile) {
@@ -4222,7 +4314,11 @@ function getCivilContractorFit(profile, opp, serviceHits, keywordHits) {
       serviceHits,
       keywordHits,
       hasWeakOnlyFit: false,
-      hasIndoorMismatch: false
+      hasIndoorMismatch: false,
+      hasConsultingMismatch: false,
+      hasSecondaryOnlyFit: false,
+      hasPromotedBroadFit: false,
+      hasWinterOnlyFit: false
     };
   }
 
@@ -4233,20 +4329,28 @@ function getCivilContractorFit(profile, opp, serviceHits, keywordHits) {
   const hasEligibleWinterTerm = hasWinterTerm && allowsWinterWork;
   const hasIndoorTerm = normalizedContainsAny(text, CIVIL_INDOOR_DOWNGRADE_TERMS);
   const allowsIndoorWork = hasExplicitIndoorService(profile);
+  const hasConsultingTerm = normalizedContainsAny(text, CIVIL_CONSULTING_DOWNGRADE_TERMS);
+  const allowsConsultingWork = hasExplicitConsultingService(profile);
   const detectedStrongTerms = getStrongCivilTermsInText(text);
   const detectedWinterTerms = hasEligibleWinterTerm ? getOptionalWinterTermsInText(text) : [];
   const serviceHitsAreWeakOnly = serviceHits.length > 0 && serviceHits.every(isCivilWeakGenericTerm);
   const keywordHitsAreWeakOnly = keywordHits.length > 0 && keywordHits.every(isCivilWeakGenericTerm);
   const hasAnySpecificHit = [...serviceHits, ...keywordHits].some((hit) => !isCivilWeakGenericTerm(hit));
-  const expandedServiceHits = (hasStrongCivilTerm || hasEligibleWinterTerm) ? [...new Set([...serviceHits, ...detectedStrongTerms, ...detectedWinterTerms])] : serviceHits;
+  const hasWeakGenericHit = [...serviceHits, ...keywordHits].some(isCivilWeakGenericTerm);
+  const shouldPromoteWeakTerms = !hasAnySpecificHit && hasWeakGenericHit && hasStrongCivilTerm;
+  const expandedServiceHits = (shouldPromoteWeakTerms || hasEligibleWinterTerm)
+    ? [...new Set([...serviceHits, ...(shouldPromoteWeakTerms ? detectedStrongTerms : []), ...detectedWinterTerms])]
+    : serviceHits;
 
   const shouldScoreWeakTerms = hasStrongCivilTerm || hasEligibleWinterTerm || hasAnySpecificHit;
   const filteredServiceHits = shouldScoreWeakTerms
-    ? promoteWeakGenericHitsToSpecificCivilTerms(expandedServiceHits, text)
+    ? (shouldPromoteWeakTerms ? promoteWeakGenericHitsToSpecificCivilTerms(expandedServiceHits, text) : expandedServiceHits.filter((service) => !isCivilWeakGenericTerm(service)))
     : expandedServiceHits.filter((service) => !isCivilWeakGenericTerm(service));
   const filteredKeywordHits = shouldScoreWeakTerms
-    ? promoteWeakGenericHitsToSpecificCivilTerms(keywordHits, text)
+    ? (shouldPromoteWeakTerms ? promoteWeakGenericHitsToSpecificCivilTerms(keywordHits, text) : keywordHits.filter((keyword) => !isCivilWeakGenericTerm(keyword)))
     : keywordHits.filter((keyword) => !isCivilWeakGenericTerm(keyword));
+  const specificHits = [...new Set([...filteredServiceHits, ...filteredKeywordHits].filter((hit) => !isCivilWeakGenericTerm(hit)))];
+  const lacksCoreExecutionProfile = !hasCoreExecutionService(profile);
 
   return {
     isCivilProfile: true,
@@ -4254,7 +4358,10 @@ function getCivilContractorFit(profile, opp, serviceHits, keywordHits) {
     keywordHits: sortMatchTermsBySpecificity(filteredKeywordHits),
     hasWeakOnlyFit: !hasStrongCivilTerm && !hasEligibleWinterTerm && !hasAnySpecificHit && (serviceHitsAreWeakOnly || keywordHitsAreWeakOnly),
     hasIndoorMismatch: hasIndoorTerm && !hasStrongCivilTerm && !allowsIndoorWork,
-    hasWinterOnlyFit: hasEligibleWinterTerm && !hasStrongCivilTerm
+    hasConsultingMismatch: hasConsultingTerm && !allowsConsultingWork,
+    hasWinterOnlyFit: hasEligibleWinterTerm && !hasStrongCivilTerm,
+    hasSecondaryOnlyFit: hasAnySpecificHit && lacksCoreExecutionProfile && specificHits.length <= 2 && detectedStrongTerms.length >= 3,
+    hasPromotedBroadFit: shouldPromoteWeakTerms
   };
 }
 
@@ -4512,6 +4619,21 @@ function calculateMatch(profile, opp) {
   if (civilFit.hasIndoorMismatch) {
     score = Math.min(score - 20, 40);
     risks.push("Appears to be indoor/building finishing work outside your core civil services");
+  }
+
+  if (civilFit.hasConsultingMismatch) {
+    score = Math.min(score - 30, 35);
+    risks.push("Appears to be design, consulting, supervision, or project management work outside your execution services");
+  }
+
+  if (civilFit.hasSecondaryOnlyFit) {
+    score = Math.min(score, 84);
+    risks.push("Secondary service match in a broader infrastructure tender; verify scope");
+  }
+
+  if (civilFit.hasPromotedBroadFit) {
+    score = Math.min(score, 72);
+    risks.push("Broad construction terms matched; verify the specific work type");
   }
 
   if (civilFit.hasWinterOnlyFit) {
@@ -5445,6 +5567,8 @@ function renderConnectorImportStatus() {
 
   const status = state.connectorImportStatus || {};
   const errors = Array.isArray(status.errors) ? status.errors : [];
+  const failedSources = Array.isArray(status.failedSources) ? status.failedSources : [];
+  const hasFailures = errors.length || failedSources.length;
 
   return `
     <section class="import-panel">
@@ -5456,7 +5580,20 @@ function renderConnectorImportStatus() {
         <span><strong>${Number(status.matched || 0)}</strong> matches</span>
         <span><strong>${Number(status.reports_generated || 0)}</strong> reports</span>
       </div>
-      ${errors.length ? `<ul class="risk-list">${errors.map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul>` : `<p>Automatic source import completed.</p>`}
+      ${failedSources.length ? `
+        <div class="import-failure-list">
+          <h3>${failedSources.length} source${failedSources.length === 1 ? "" : "s"} failed</h3>
+          ${failedSources.map((failure) => `
+            <div class="import-failure-row">
+              <strong>${escapeHtml(failure.source || "Unknown source")}</strong>
+              <p>${escapeHtml(failure.message || failure.error || "Unknown source import error")}</p>
+              ${failure.endpoint_url ? `<small>${escapeHtml(failure.endpoint_url)}</small>` : ""}
+            </div>
+          `).join("")}
+        </div>
+      ` : ""}
+      ${errors.length ? `<ul class="risk-list">${errors.map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul>` : ""}
+      ${!hasFailures ? `<p>Automatic source import completed.</p>` : `<p>Automatic source import completed with source-level failures. Successful sources were still imported.</p>`}
     </section>
   `;
 }
