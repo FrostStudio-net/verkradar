@@ -129,6 +129,9 @@ function renderAutoRunResult(result, escapeHtml) {
     <div class="admin-ai-batch-result">
       <strong>Last automatic run</strong>
       <span>${Number(result.companies_checked || 0)} companies checked</span>
+      <span>${Number(result.total_companies_found || 0)} total companies</span>
+      <span>${Number(result.enabled_companies_found || 0)} auto AI enabled</span>
+      <span>${Number(result.eligible_companies || 0)} eligible companies</span>
       <span>${Number(result.matches_checked || 0)} matches checked</span>
       <span>${Number(result.ai_reviews_created || 0)} AI reviews created</span>
       <span>${Number(result.skipped_expired || 0)} expired</span>
@@ -136,8 +139,26 @@ function renderAutoRunResult(result, escapeHtml) {
       <span>${Number(result.skipped_outside_service_area || 0)} outside service area</span>
       <span>${Number(result.skipped_already_reviewed || 0)} already reviewed</span>
       <span>${Number(result.skipped_usage_limit || 0)} usage limit</span>
+      <span>${Number(result.skipped_no_candidate_matches || 0)} no candidate matches</span>
       <span>${Number(result.daily_usage_remaining || 0)} daily reviews remaining</span>
       ${result.error ? `<span>${escapeHtml(result.error)}</span>` : ""}
+    </div>
+    ${renderAutoCompanyDiagnostics(result.company_diagnostics || [], escapeHtml)}
+  `;
+}
+
+function renderAutoCompanyDiagnostics(rows, escapeHtml) {
+  if (!rows.length) return "";
+  return `
+    <div class="admin-ai-diagnostics">
+      ${rows.slice(0, 8).map((row) => `
+        <div>
+          <strong>${escapeHtml(row.company_name || "Company")}</strong>
+          <span>${escapeHtml(row.reason || "checked")}</span>
+          <span>${Number(row.candidate_matches_found || 0)} candidates · ${Number(row.reviewed_count || 0)} reviewed</span>
+          <span>${Number(row.skipped_already_reviewed || 0)} already reviewed · ${Number(row.skipped_missing_deadline || 0)} missing deadline · ${Number(row.skipped_outside_service_area || 0)} outside area · ${Number(row.skipped_score_too_low || 0)} low score</span>
+        </div>
+      `).join("")}
     </div>
   `;
 }

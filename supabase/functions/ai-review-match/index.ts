@@ -272,14 +272,16 @@ async function runAutomaticAiReview(
 
   const { data: companies, error } = await supabase
     .from("companies")
-    .select("id, company_name, billing_status, plan, selected_plan, auto_ai_review_enabled")
-    .eq("auto_ai_review_enabled", true)
+    .select("id, company_name, contact_email, industry, base_location, service_areas, billing_status, plan, selected_plan, auto_ai_review_enabled")
     .order("created_at", { ascending: true })
     .limit(100);
   if (error) throw error;
 
   const summary = {
     mode: "auto",
+    total_companies_found: (companies || []).length,
+    enabled_companies_found: 0,
+    eligible_companies: 0,
     companies_checked: 0,
     matches_checked: 0,
     ai_reviews_created: 0,
@@ -291,16 +293,42 @@ async function runAutomaticAiReview(
     skipped_outside_service_area: 0,
     skipped_already_reviewed: 0,
     skipped_usage_limit: 0,
+    skipped_no_candidate_matches: 0,
     skipped_other: 0,
+    skipped_companies: {
+      auto_ai_disabled: 0,
+      inactive_status: 0,
+      incomplete_profile: 0,
+      no_candidate_matches: 0,
+      usage_limit: 0,
+    } as Record<string, number>,
+    company_diagnostics: [] as Record<string, unknown>[],
     daily_usage_remaining: remainingTotal,
     reviews: [] as Record<string, unknown>[],
   };
 
   for (const company of companies || []) {
     if (summary.ai_reviews_created >= limit || remainingTotal <= 0) break;
-    if (!isActiveCompanyForAutoAi(company as Record<string, unknown>)) continue;
-    summary.companies_checked += 1;
     const companyId = String(company.id || "");
+    const companyName = String(company.company_name || "Unnamed company");
+    if ((company as Record<string, unknown>).auto_ai_review_enabled !== true) {
+      summary.skipped_companies.auto_ai_disabled += 1;
+      continue;
+    }
+    summary.enabled_companies_found += 1;
+    if (!isActiveCompanyForAutoAi(company as Record<string, unknown>)) {
+      summary.skipped_companies.inactive_status += 1;
+      summary.company_diagnostics.push(createCompanyDiagnostic(companyId, companyName, "inactive_status"));
+      continue;
+    }
+    const profile = await loadAutoAiCompanyProfile(supabase, companyId);
+    if (!isCompleteAutoAiProfile(company as Record<string, unknown>, profile)) {
+      summary.skipped_companies.incomplete_profile += 1;
+      summary.company_diagnostics.push(createCompanyDiagnostic(companyId, companyName, "incomplete_profile"));
+      continue;
+    }
+    summary.eligible_companies += 1;
+    summary.companies_checked += 1;
     const companyUsage = await getAiUsageTotals(supabase, {
       since: today,
       companyId,
@@ -309,6 +337,8 @@ async function runAutomaticAiReview(
     const companyRemaining = Math.max(0, DAILY_COMPANY_AUTO_REVIEW_LIMIT - companyUsage.count);
     if (companyRemaining <= 0) {
       summary.skipped_usage_limit += 1;
+      summary.skipped_companies.usage_limit += 1;
+      summary.company_diagnostics.push(createCompanyDiagnostic(companyId, companyName, "usage_limit"));
       continue;
     }
     const candidateLimit = Math.min(limit - summary.ai_reviews_created, remainingTotal, companyRemaining);
@@ -318,6 +348,20 @@ async function runAutomaticAiReview(
     summary.skipped_already_reviewed += candidateResult.skipped.alreadyReviewed;
     summary.skipped_expired += candidateResult.skipped.expired;
     summary.skipped_missing_deadline += candidateResult.skipped.missingDeadline;
+    if (!candidateResult.candidates.length) {
+      summary.skipped_no_candidate_matches += 1;
+      summary.skipped_companies.no_candidate_matches += 1;
+    }
+    const diagnostic = createCompanyDiagnostic(companyId, companyName, candidateResult.candidates.length ? "candidates_found" : "no_candidate_matches", {
+      matches_checked: candidateResult.checked,
+      candidate_matches_found: candidateResult.candidates.length,
+      skipped_expired: candidateResult.skipped.expired,
+      skipped_missing_deadline: candidateResult.skipped.missingDeadline,
+      skipped_outside_service_area: candidateResult.skipped.outsideServiceArea,
+      skipped_already_reviewed: candidateResult.skipped.alreadyReviewed,
+      skipped_score_too_low: candidateResult.skipped.scoreTooLow,
+      reviewed_count: 0,
+    });
 
     for (const candidate of candidateResult.candidates) {
       if (summary.ai_reviews_created >= limit || remainingTotal <= 0) break;
@@ -326,6 +370,7 @@ async function runAutomaticAiReview(
         validateContextBeforeAi(context, { force: false, allowOutsideServiceArea: false });
         const saved = await createAndSaveReview(supabase, openAiKey, model, context, userId, "batch_review");
         summary.ai_reviews_created += 1;
+        diagnostic.reviewed_count = Number(diagnostic.reviewed_count || 0) + 1;
         remainingTotal -= 1;
         summary.daily_usage_remaining = remainingTotal;
         if (saved.fit === "strong") summary.strong += 1;
@@ -336,9 +381,26 @@ async function runAutomaticAiReview(
         summary.skipped_other += 1;
       }
     }
+    summary.company_diagnostics.push(diagnostic);
   }
 
   return summary;
+}
+
+function createCompanyDiagnostic(companyId: string, companyName: string, reason: string, extra: Record<string, unknown> = {}) {
+  return {
+    company_id: companyId,
+    company_name: companyName,
+    reason,
+    candidate_matches_found: 0,
+    skipped_expired: 0,
+    skipped_missing_deadline: 0,
+    skipped_outside_service_area: 0,
+    skipped_already_reviewed: 0,
+    skipped_score_too_low: 0,
+    reviewed_count: 0,
+    ...extra,
+  };
 }
 
 async function loadBatchCandidates(supabase: ReturnType<typeof createClient>, companyId: string, limit: number, force: boolean) {
@@ -489,6 +551,26 @@ async function loadCompanyForLocationFilter(supabase: ReturnType<typeof createCl
     nationalProjects: Boolean(company.national_projects),
     updatedAt: String(company.updated_at || ""),
   };
+}
+
+async function loadAutoAiCompanyProfile(supabase: ReturnType<typeof createClient>, companyId: string) {
+  const [servicesResult, locationsResult] = await Promise.all([
+    supabase.from("company_services").select("service").eq("company_id", companyId),
+    supabase.from("company_locations").select("location").eq("company_id", companyId),
+  ]);
+  if (servicesResult.error) throw servicesResult.error;
+  if (locationsResult.error) throw locationsResult.error;
+  return {
+    services: (servicesResult.data || []).map((row) => String(row.service || "")).filter(Boolean),
+    locations: (locationsResult.data || []).map((row) => String(row.location || "")).filter(Boolean),
+  };
+}
+
+function isCompleteAutoAiProfile(company: Record<string, unknown>, profile: { services: string[]; locations: string[] }) {
+  const hasBasics = Boolean(company.company_name && company.contact_email && company.industry);
+  const serviceAreas = Array.isArray(company.service_areas) ? company.service_areas.map(String).filter(Boolean) : [];
+  const hasLocation = Boolean(company.base_location) || serviceAreas.length > 0 || profile.locations.length > 0;
+  return hasBasics && profile.services.length > 0 && hasLocation;
 }
 
 function assessCompanyOpportunityLocation(company: Record<string, unknown>, opportunity: Record<string, unknown>) {

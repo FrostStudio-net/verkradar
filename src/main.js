@@ -2,7 +2,7 @@ export { STORAGE_KEYS } from "./state.js";
 export { getInitialLanguage, translate, translations } from "./i18n.js";
 export { createEmptyProfile, DEFAULT_PROFILE, PROFILE_SUGGESTIONS } from "./services/companies.js";
 export { getLegalPageData } from "./services/legal.js";
-export { formatAiUsageCost, loadTodayAiUsageSummary, requestAiMatchReview, requestAutomaticAiReviewRun, requestCompanyAiReviewBatch } from "./services/aiReviews.js";
+export { formatAiUsageCost, loadTodayAiUsageSummary, requestAiMatchReview, requestAutomaticAiReviewRun, requestCompanyAiReviewBatch, updateCompanyAutoAiReviewEnabled } from "./services/aiReviews.js";
 export { mergeAiReviewsIntoAdminMatches } from "./services/matchDisplay.js";
 export { renderForgotPasswordPage, renderLoginPage, renderResetPasswordPage, renderSignupPage } from "./pages/auth.js";
 export { renderAdminAutomaticAiReviewPanel, renderAdminCompanyAiReviewPanel, renderAdminCompanyMatchList } from "./pages/adminAiReviews.js";

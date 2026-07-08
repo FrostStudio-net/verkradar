@@ -34,6 +34,7 @@ import {
   requestCompanyAiReviewBatch,
   requestAiMatchReview,
   requestAutomaticAiReviewRun,
+  updateCompanyAutoAiReviewEnabled,
   PROFILE_SUGGESTIONS,
   mergeAiReviewsIntoAdminMatches,
   renderAdminAutomaticAiReviewPanel,
@@ -1968,20 +1969,21 @@ async function runAdminAutomaticAiReview() {
 }
 
 async function toggleCompanyAutoAiReview(companyId, enabled) {
-  if (!state.isAdmin || !companyId || !supabaseClient) return;
+  if (!state.isAdmin || !companyId) return;
   state.adminMessage = null;
   render();
   try {
-    const { error } = await supabaseClient
-      .from("companies")
-      .update({ auto_ai_review_enabled: enabled })
-      .eq("id", companyId);
-    if (error) throw error;
+    await updateCompanyAutoAiReviewEnabled(companyId, enabled);
+    state.adminCompanies = (state.adminCompanies || []).map((company) => company.id === companyId ? {
+      ...company,
+      autoAiReviewEnabled: enabled
+    } : company);
     await loadAdminCompanies();
     state.adminMessage = {
       type: "success",
       text: `Automatic AI review ${enabled ? "enabled" : "disabled"} for company.`
     };
+    render();
   } catch (error) {
     console.error("Failed to toggle company automatic AI review:", error);
     state.adminMessage = {

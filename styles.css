@@ -2247,6 +2247,27 @@ select option:checked {
   color: var(--muted);
 }
 
+.admin-ai-diagnostics {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.admin-ai-diagnostics div {
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--radius-sm);
+  background: rgba(0,0,0,0.18);
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.admin-ai-diagnostics strong {
+  color: var(--text);
+}
+
 .source-items-row td {
   background: rgba(255,255,255,0.018);
 }

@@ -73,6 +73,18 @@ export async function requestAutomaticAiReviewRun(options = {}) {
   return payload;
 }
 
+export async function updateCompanyAutoAiReviewEnabled(companyId, enabled) {
+  if (!supabaseClient) throw new Error("Supabase client is not configured.");
+  const { data, error } = await supabaseClient
+    .from("companies")
+    .update({ auto_ai_review_enabled: enabled })
+    .eq("id", companyId)
+    .select("id, auto_ai_review_enabled")
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 export async function loadTodayAiUsageSummary() {
   if (!supabaseClient) {
     return { reviewsToday: 0, estimatedCostToday: 0, remainingReviewsToday: 50 };
