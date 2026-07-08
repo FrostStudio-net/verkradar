@@ -3940,10 +3940,22 @@ function extractDeadline(text: string): { date: string | null; rawText: string |
   const numericDatePattern = "(\\d{1,2}[./]\\d{1,2}[./]20\\d{2}|20\\d{2}-\\d{2}-\\d{2})";
   const monthDatePattern = "(\\d{1,2}\\.?\\s+(janúar|januar|febrúar|februar|mars|apríl|april|maí|mai|júní|juni|júlí|juli|ágúst|agust|september|október|oktober|nóvember|november|desember)\\s+20\\d{2})";
 
+  const explicitTimeBeforeDatePatterns = [
+    new RegExp(`${keywordPattern}[\\s\\S]{0,260}?\\bkl\\.?\\s*\\d{1,2}[:.]\\d{2}\\s*(?:þann|thann)?\\s*(${numericDatePattern}|${monthDatePattern})`, "i"),
+    new RegExp(`${keywordPattern}[\\s\\S]{0,260}?\\b(?:þann|thann)\\s*(${numericDatePattern}|${monthDatePattern})[\\s\\S]{0,80}?\\bkl\\.?\\s*\\d{1,2}[:.]\\d{2}`, "i"),
+    new RegExp(`${keywordPattern}[\\s\\S]{0,260}?(${numericDatePattern}|${monthDatePattern})[\\s\\S]{0,80}?\\bkl\\.?\\s*\\d{1,2}[:.]\\d{2}`, "i"),
+  ];
+  for (const pattern of explicitTimeBeforeDatePatterns) {
+    const match = cleanText.match(pattern);
+    if (!match || isCompletionOnlyDeadlineSnippet(match[0])) continue;
+    const parsed = parseDeadlineDate(match[0]);
+    if (parsed) return { date: parsed, rawText: match[0].trim() };
+  }
+
   const keywordThenDate = new RegExp(`${keywordPattern}[\\s\\S]{0,220}?(${numericDatePattern}|${monthDatePattern})`, "i");
   const keywordMatch = cleanText.match(keywordThenDate);
   if (keywordMatch && !isCompletionOnlyDeadlineSnippet(keywordMatch[0])) {
-    const parsed = parseDeadlineDate(keywordMatch[2]);
+    const parsed = parseDeadlineDate(keywordMatch[0]) || parseDeadlineDate(keywordMatch[2]);
     if (parsed) return { date: parsed, rawText: keywordMatch[0].trim() };
   }
 
@@ -4095,6 +4107,26 @@ function decodeHtml(value: string) {
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'")
     .replace(/&nbsp;/g, " ")
+    .replace(/&aacute;/g, "á")
+    .replace(/&Aacute;/g, "Á")
+    .replace(/&eacute;/g, "é")
+    .replace(/&Eacute;/g, "É")
+    .replace(/&iacute;/g, "í")
+    .replace(/&Iacute;/g, "Í")
+    .replace(/&oacute;/g, "ó")
+    .replace(/&Oacute;/g, "Ó")
+    .replace(/&uacute;/g, "ú")
+    .replace(/&Uacute;/g, "Ú")
+    .replace(/&yacute;/g, "ý")
+    .replace(/&Yacute;/g, "Ý")
+    .replace(/&eth;/g, "ð")
+    .replace(/&ETH;/g, "Ð")
+    .replace(/&thorn;/g, "þ")
+    .replace(/&THORN;/g, "Þ")
+    .replace(/&aelig;/g, "æ")
+    .replace(/&AElig;/g, "Æ")
+    .replace(/&ouml;/g, "ö")
+    .replace(/&Ouml;/g, "Ö")
     .replace(/&#8211;/g, "-")
     .replace(/&#8217;/g, "'")
     .replace(/&#038;/g, "&")
