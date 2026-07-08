@@ -32,7 +32,9 @@ import {
   requestCompanyAiReviewBatch,
   requestAiMatchReview,
   PROFILE_SUGGESTIONS,
+  mergeAiReviewsIntoAdminMatches,
   renderAdminCompanyAiReviewPanel,
+  renderAdminCompanyMatchList,
   renderForgotPasswordPage,
   renderLandingPage,
   renderLegalPageContent,
@@ -1445,17 +1447,19 @@ async function loadAdminCompanies() {
     let keywords = [];
     let matches = [];
     let reports = [];
+    let aiReviews = [];
 
     if (companyIds.length) {
-      const [servicesResult, locationsResult, keywordsResult, matchesResult, reportsResult] = await Promise.all([
+      const [servicesResult, locationsResult, keywordsResult, matchesResult, reportsResult, aiReviewsResult] = await Promise.all([
         supabaseClient.from("company_services").select("company_id, service").in("company_id", companyIds),
         supabaseClient.from("company_locations").select("company_id, location").in("company_id", companyIds),
         supabaseClient.from("company_keywords").select("company_id, keyword, type").in("company_id", companyIds),
         supabaseClient
           .from("opportunity_matches")
-          .select("id, company_id, opportunity_id, match_score, match_label, safety_status, ai_review_status, ai_review_fit, ai_review_confidence, ai_reviewed_at, opportunities(title, buyer, source_id, sources(name))")
+          .select("id, company_id, opportunity_id, match_score, match_label, safety_status, ai_review_status, ai_review_fit, ai_review_confidence, ai_reviewed_at, ai_review_skipped_reason, opportunities(title, buyer, source_id, sources(name))")
           .in("company_id", companyIds),
-        supabaseClient.from("reports").select("id, company_id, title, created_at, period_start, period_end, status").in("company_id", companyIds).order("created_at", { ascending: false })
+        supabaseClient.from("reports").select("id, company_id, title, created_at, period_start, period_end, status").in("company_id", companyIds).order("created_at", { ascending: false }),
+        supabaseClient.from("ai_match_reviews").select("id, company_id, opportunity_id, match_id, fit, confidence, send_to_client, reason, created_at, updated_at").in("company_id", companyIds)
       ]);
 
       services = servicesResult.error ? [] : servicesResult.data || [];
@@ -1463,13 +1467,17 @@ async function loadAdminCompanies() {
       keywords = keywordsResult.error ? [] : keywordsResult.data || [];
       matches = matchesResult.error ? [] : matchesResult.data || [];
       reports = reportsResult.error ? [] : reportsResult.data || [];
+      aiReviews = aiReviewsResult.error ? [] : aiReviewsResult.data || [];
     }
 
     state.adminCompanies = companyRows.map((company) => mapAdminCompany(company, {
       services: services.filter((row) => row.company_id === company.id),
       locations: locations.filter((row) => row.company_id === company.id),
       keywords: keywords.filter((row) => row.company_id === company.id),
-      matches: matches.filter((row) => row.company_id === company.id),
+      matches: mergeAiReviewsIntoAdminMatches(
+        matches.filter((row) => row.company_id === company.id),
+        aiReviews.filter((row) => row.company_id === company.id)
+      ),
       reports: reports.filter((row) => row.company_id === company.id)
     }));
     state.adminCompaniesLoaded = true;
@@ -8056,16 +8064,7 @@ function renderAdminCompanyDetails(company) {
 
             <section class="side-panel">
               <h3>Latest matches</h3>
-              ${company.latestMatches.length ? `
-                <ul class="admin-detail-list">
-                  ${company.latestMatches.map((match) => `
-                    <li>
-                      <strong>${escapeHtml(match.opportunities?.title || "Opportunity")}</strong>
-                      <span>${Number(match.match_score || 0)} · ${escapeHtml(match.match_label || getMatchLabel(Number(match.match_score || 0)))}</span>
-                    </li>
-                  `).join("")}
-                </ul>
-              ` : `<p>No stored matches yet.</p>`}
+              ${renderAdminCompanyMatchList(company, { escapeHtml })}
               <h3>Latest reports</h3>
               ${company.latestReports.length ? `
                 <ul class="admin-detail-list">

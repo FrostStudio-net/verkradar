@@ -1,3 +1,20 @@
+import {
+  filterAdminMatchesByAiStatus,
+  formatSkippedReason,
+  getAdminMatchAiDisplay,
+} from "../services/matchDisplay.js";
+
+export function renderAdminCompanyMatchList(company, options) {
+  const { escapeHtml } = options;
+  const matches = company.latestMatches || [];
+  if (!matches.length) return `<p>No stored matches yet.</p>`;
+  return `
+    <ul class="admin-detail-list admin-ai-aware-match-list">
+      ${matches.map((match) => renderCompactMatchRow(match, { escapeHtml })).join("")}
+    </ul>
+  `;
+}
+
 export function renderAdminCompanyAiReviewPanel(company, options) {
   const {
     escapeHtml,
@@ -6,7 +23,7 @@ export function renderAdminCompanyAiReviewPanel(company, options) {
     filter = "not_reviewed",
     lastResult = null,
   } = options;
-  const matches = getFilteredMatches(company.latestMatches || [], filter);
+  const matches = filterAdminMatchesByAiStatus(company.latestMatches || [], filter);
   return `
     <section class="side-panel admin-company-ai-panel">
       <div class="admin-company-ai-header">
@@ -25,10 +42,11 @@ export function renderAdminCompanyAiReviewPanel(company, options) {
         <span>AI review filter</span>
         <select data-admin-company-ai-filter>
           ${[
-            ["not_reviewed", "Not reviewed"],
-            ["strong", "Strong"],
-            ["possible", "Possible"],
-            ["weak_no_fit", "Weak / no fit"]
+            ["ai_recommended", "AI recommended"],
+            ["ai_possible", "AI possible"],
+            ["needs_review", "Needs review"],
+            ["outside_service_area", "Outside service area"],
+            ["not_reviewed", "Not AI reviewed"]
           ].map(([value, label]) => `<option value="${value}" ${filter === value ? "selected" : ""}>${label}</option>`).join("")}
         </select>
       </label>
@@ -42,18 +60,6 @@ export function renderAdminCompanyAiReviewPanel(company, options) {
   `;
 }
 
-function getFilteredMatches(matches, filter) {
-  return (matches || []).filter((match) => {
-    const status = String(match.ai_review_status || "not_reviewed");
-    const fit = String(match.ai_review_fit || "");
-    if (filter === "not_reviewed") return status === "not_reviewed";
-    if (filter === "strong") return fit === "strong";
-    if (filter === "possible") return fit === "possible";
-    if (filter === "weak_no_fit") return fit === "weak" || fit === "no_fit" || status === "low_priority";
-    return true;
-  });
-}
-
 function renderBatchResult(result, escapeHtml) {
   return `
     <div class="admin-ai-batch-result">
@@ -63,31 +69,46 @@ function renderBatchResult(result, escapeHtml) {
       <span>${Number(result.possible || 0)} possible</span>
       <span>${Number(result.weak_or_no_fit || 0)} weak/no fit</span>
       <span>${Number(result.skipped || 0)} skipped</span>
+      <span>${Number(result.skipped_outside_service_area || 0)} outside service area</span>
+      <span>${Number(result.skipped_already_reviewed || 0)} already reviewed</span>
+      <span>${Number(result.skipped_expired_or_missing_deadline || 0)} expired/missing deadline</span>
+      <span>${Number(result.skipped_score_too_low || 0)} score too low</span>
+      <span>${Number(result.skipped_manually_rejected || 0)} manually rejected</span>
       ${result.estimated_cost ? `<span>${escapeHtml(result.estimated_cost)}</span>` : ""}
     </div>
   `;
 }
 
-function renderAiMatchRow(match, { escapeHtml, formatDateTime }) {
+function renderCompactMatchRow(match, { escapeHtml }) {
   const opportunity = match.opportunities || {};
-  const fit = match.ai_review_fit || "not reviewed";
-  const confidence = match.ai_review_confidence == null ? "" : ` · ${Math.round(Number(match.ai_review_confidence || 0) * 100)}%`;
-  const reviewedAt = match.ai_reviewed_at ? ` · ${formatDateTime(match.ai_reviewed_at)}` : "";
+  const display = getAdminMatchAiDisplay(match);
+  const score = Number(match.match_score || 0);
   return `
-    <li>
+    <li class="admin-ai-aware-match ${escapeHtml(display.tone || "muted")}">
       <strong>${escapeHtml(opportunity.title || "Opportunity")}</strong>
-      <span>${escapeHtml(match.match_label || "Match")} · ${Number(match.match_score || 0)} · AI: ${escapeHtml(formatAiFit(fit))}${escapeHtml(confidence)}${escapeHtml(reviewedAt)}</span>
+      <span>
+        <b>${escapeHtml(display.label)}</b>
+        ${display.confidence ? ` · ${Math.round(display.confidence * 100)}%` : ""}
+        · Rule score ${score}
+        ${display.bucket === "outside_service_area" ? " · Rule label suppressed" : ` · ${escapeHtml(match.match_label || "Match")}`}
+      </span>
+      ${match.ai_review_skipped_reason ? `<small>Skipped: ${escapeHtml(formatSkippedReason(match.ai_review_skipped_reason))}</small>` : ""}
     </li>
   `;
 }
 
-function formatAiFit(value) {
-  const labels = {
-    strong: "Strong",
-    possible: "Possible",
-    weak: "Weak",
-    no_fit: "No fit",
-    not_reviewed: "Not reviewed"
-  };
-  return labels[String(value || "")] || "Not reviewed";
+function renderAiMatchRow(match, { escapeHtml, formatDateTime }) {
+  const opportunity = match.opportunities || {};
+  const display = getAdminMatchAiDisplay(match);
+  const confidence = display.confidence ? ` · ${Math.round(display.confidence * 100)}%` : "";
+  const reviewedAt = match.ai_reviewed_at ? ` · ${formatDateTime(match.ai_reviewed_at)}` : "";
+  const skipped = match.ai_review_skipped_reason ? ` · Skipped: ${formatSkippedReason(match.ai_review_skipped_reason)}` : "";
+  return `
+    <li class="admin-ai-match-row ${escapeHtml(display.tone || "muted")}">
+      <strong>${escapeHtml(opportunity.title || "Opportunity")}</strong>
+      <span>${escapeHtml(display.label)}${escapeHtml(confidence)}${escapeHtml(reviewedAt)}${escapeHtml(skipped)}</span>
+      <span>Rule score ${Number(match.match_score || 0)} · ${escapeHtml(match.match_label || "Match")}</span>
+      <span class="admin-ai-debug">company_id=${escapeHtml(match.company_id || "")} · opportunity_id=${escapeHtml(match.opportunity_id || "")} · ai_review_found=${match.ai_review_found === true ? "true" : "false"}</span>
+    </li>
+  `;
 }

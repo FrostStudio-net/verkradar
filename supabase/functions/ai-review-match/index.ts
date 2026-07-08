@@ -112,37 +112,40 @@ async function loadReviewContext(supabase: ReturnType<typeof createClient>, matc
   if (locationsResult.error) throw locationsResult.error;
 
   const keywords = keywordsResult.data || [];
+  const companyContext = {
+    id: String(match.companies.id),
+    name: String(match.companies.company_name || ""),
+    industry: String(match.companies.industry || ""),
+    services: (servicesResult.data || []).map((row) => String(row.service || "")).filter(Boolean),
+    includeKeywords: keywords.filter((row) => row.type === "include").map((row) => String(row.keyword || "")).filter(Boolean),
+    excludeKeywords: keywords.filter((row) => row.type === "exclude").map((row) => String(row.keyword || "")).filter(Boolean),
+    locations: (locationsResult.data || []).map((row) => String(row.location || "")).filter(Boolean),
+    baseLocation: String(match.companies.base_location || ""),
+    serviceAreas: Array.isArray(match.companies.service_areas) ? match.companies.service_areas.map(String) : [],
+    willingToTravel: Boolean(match.companies.willing_to_travel),
+    nationalProjects: Boolean(match.companies.national_projects),
+    remoteProjects: Boolean(match.companies.remote_projects),
+  };
+  const opportunityContext = {
+    id: String(match.opportunities.id),
+    title: String(match.opportunities.title || ""),
+    description: String(match.opportunities.description || ""),
+    buyer: String(match.opportunities.buyer || ""),
+    location: String(match.opportunities.location || ""),
+    source: String(match.opportunities.sources?.name || match.opportunities.raw_payload?.source_name || ""),
+    sourceType: String(match.opportunities.sources?.source_type || ""),
+    deadline: match.opportunities.deadline ? String(match.opportunities.deadline) : "",
+    deadlineAt: String(match.opportunities.raw_payload?.deadline_at || ""),
+    category: String(match.opportunities.category || ""),
+    type: String(match.opportunities.type || ""),
+    status: String(match.opportunities.status || ""),
+    rawPayload: match.opportunities.raw_payload && typeof match.opportunities.raw_payload === "object" ? match.opportunities.raw_payload : {},
+  };
   return {
     match,
-    company: {
-      id: String(match.companies.id),
-      name: String(match.companies.company_name || ""),
-      industry: String(match.companies.industry || ""),
-      services: (servicesResult.data || []).map((row) => String(row.service || "")).filter(Boolean),
-      includeKeywords: keywords.filter((row) => row.type === "include").map((row) => String(row.keyword || "")).filter(Boolean),
-      excludeKeywords: keywords.filter((row) => row.type === "exclude").map((row) => String(row.keyword || "")).filter(Boolean),
-      locations: (locationsResult.data || []).map((row) => String(row.location || "")).filter(Boolean),
-      baseLocation: String(match.companies.base_location || ""),
-      serviceAreas: Array.isArray(match.companies.service_areas) ? match.companies.service_areas.map(String) : [],
-      willingToTravel: Boolean(match.companies.willing_to_travel),
-      nationalProjects: Boolean(match.companies.national_projects),
-      remoteProjects: Boolean(match.companies.remote_projects),
-    },
-    opportunity: {
-      id: String(match.opportunities.id),
-      title: String(match.opportunities.title || ""),
-      description: String(match.opportunities.description || ""),
-      buyer: String(match.opportunities.buyer || ""),
-      location: String(match.opportunities.location || ""),
-      source: String(match.opportunities.sources?.name || match.opportunities.raw_payload?.source_name || ""),
-      sourceType: String(match.opportunities.sources?.source_type || ""),
-      deadline: match.opportunities.deadline ? String(match.opportunities.deadline) : "",
-      deadlineAt: String(match.opportunities.raw_payload?.deadline_at || ""),
-      category: String(match.opportunities.category || ""),
-      type: String(match.opportunities.type || ""),
-      status: String(match.opportunities.status || ""),
-      rawPayload: match.opportunities.raw_payload && typeof match.opportunities.raw_payload === "object" ? match.opportunities.raw_payload : {},
-    },
+    company: companyContext,
+    opportunity: opportunityContext,
+    locationAssessment: assessCompanyOpportunityLocation(companyContext, opportunityContext),
   };
 }
 
@@ -153,7 +156,8 @@ async function runBatchReview(
   companyId: string,
   limit: number,
 ) {
-  const candidates = await loadBatchCandidates(supabase, companyId, limit);
+  const candidateResult = await loadBatchCandidates(supabase, companyId, limit);
+  const candidates = candidateResult.candidates;
   const summary = {
     company_id: companyId,
     reviewed: 0,
@@ -161,11 +165,35 @@ async function runBatchReview(
     possible: 0,
     weak_or_no_fit: 0,
     skipped: 0,
+    skipped_outside_service_area: 0,
+    skipped_already_reviewed: 0,
+    skipped_expired_or_missing_deadline: 0,
+    skipped_score_too_low: 0,
+    skipped_manually_rejected: 0,
     token_usage: null as null | Record<string, unknown>,
     estimated_cost: null as null | string,
     reviews: [] as Record<string, unknown>[],
     skipped_samples: [] as string[],
+    skipped_reasons: {} as Record<string, number>,
   };
+  summary.skipped_outside_service_area = candidateResult.skipped.outsideServiceArea;
+  summary.skipped_already_reviewed = candidateResult.skipped.alreadyReviewed;
+  summary.skipped_expired_or_missing_deadline = candidateResult.skipped.expiredOrMissingDeadline;
+  summary.skipped_score_too_low = candidateResult.skipped.scoreTooLow;
+  summary.skipped_manually_rejected = candidateResult.skipped.manuallyRejected;
+  summary.skipped += candidateResult.skipped.outsideServiceArea
+    + candidateResult.skipped.alreadyReviewed
+    + candidateResult.skipped.expiredOrMissingDeadline
+    + candidateResult.skipped.scoreTooLow
+    + candidateResult.skipped.manuallyRejected;
+  summary.skipped_reasons = {
+    "Outside service area": candidateResult.skipped.outsideServiceArea,
+    "Already reviewed": candidateResult.skipped.alreadyReviewed,
+    "Expired or missing deadline": candidateResult.skipped.expiredOrMissingDeadline,
+    "Score too low": candidateResult.skipped.scoreTooLow,
+    "Manually rejected": candidateResult.skipped.manuallyRejected,
+  };
+  summary.skipped_samples.push(...candidateResult.skipped.samples);
 
   for (const candidate of candidates) {
     try {
@@ -186,6 +214,7 @@ async function runBatchReview(
 }
 
 async function loadBatchCandidates(supabase: ReturnType<typeof createClient>, companyId: string, limit: number) {
+  const company = await loadCompanyForLocationFilter(supabase, companyId);
   const { data: matches, error } = await supabase
     .from("opportunity_matches")
     .select(`
@@ -194,35 +223,86 @@ async function loadBatchCandidates(supabase: ReturnType<typeof createClient>, co
       match_score,
       match_label,
       safety_status,
+      review_note,
       reviewed_at,
       ai_review_status,
+      ai_review_skipped_reason,
       opportunities (
         id,
         title,
+        location,
         deadline,
         status,
         raw_payload
       )
     `)
     .eq("company_id", companyId)
-    .gte("match_score", 50)
-    .neq("safety_status", "hidden")
     .order("match_score", { ascending: false })
     .limit(100);
   if (error) throw error;
 
   const reviews = await loadExistingReviewKeys(supabase, companyId, (matches || []).map((match) => String(match.opportunity_id || "")));
   const candidates = [];
+  const skipped = {
+    alreadyReviewed: 0,
+    outsideServiceArea: 0,
+    expiredOrMissingDeadline: 0,
+    scoreTooLow: 0,
+    manuallyRejected: 0,
+    samples: [] as string[],
+  };
   for (const match of matches || []) {
-    if (candidates.length >= limit) break;
-    if (reviews.has(String(match.opportunity_id || ""))) continue;
-    if (String(match.ai_review_status || "not_reviewed") !== "not_reviewed") continue;
-    if (match.reviewed_at && String(match.safety_status || "") === "hidden") continue;
+    const title = String((match.opportunities as Record<string, unknown> | null)?.title || match.opportunity_id || "match");
+    if (reviews.has(String(match.opportunity_id || ""))) {
+      skipped.alreadyReviewed += 1;
+      await markMatchAiSkipped(supabase, String(match.id || ""), "already_reviewed", false);
+      continue;
+    }
+    if (String(match.ai_review_status || "not_reviewed") !== "not_reviewed" && !match.ai_review_skipped_reason) continue;
+    if (String(match.safety_status || "") === "hidden" || (match.reviewed_at && /reject|hafna|hidden/i.test(String(match.review_note || "")))) {
+      skipped.manuallyRejected += 1;
+      await markMatchAiSkipped(supabase, String(match.id || ""), "manually_rejected", true);
+      continue;
+    }
+    if (Number(match.match_score || 0) < 50) {
+      skipped.scoreTooLow += 1;
+      await markMatchAiSkipped(supabase, String(match.id || ""), "score_too_low", false);
+      continue;
+    }
     const opportunity = match.opportunities as Record<string, unknown> | null;
-    if (!opportunity || !isBatchEligibleOpportunity(opportunity)) continue;
+    if (!opportunity || !isBatchEligibleOpportunity(opportunity)) {
+      skipped.expiredOrMissingDeadline += 1;
+      await markMatchAiSkipped(supabase, String(match.id || ""), "expired_or_missing_deadline", true);
+      if (skipped.samples.length < 5) skipped.samples.push(`${title}: expired or missing deadline`);
+      continue;
+    }
+    const locationAssessment = assessCompanyOpportunityLocation(company, opportunity);
+    if (locationAssessment.outsideServiceArea) {
+      skipped.outsideServiceArea += 1;
+      await markMatchAiSkipped(supabase, String(match.id || ""), "outside_service_area", true);
+      if (skipped.samples.length < 5) skipped.samples.push(`${title}: Outside service area`);
+      continue;
+    }
+    if (candidates.length >= limit) continue;
     candidates.push(match);
   }
-  return candidates;
+  return { candidates, skipped };
+}
+
+async function markMatchAiSkipped(supabase: ReturnType<typeof createClient>, matchId: string, reason: string, lowPriority: boolean) {
+  if (!isUuid(matchId)) return;
+  const payload: Record<string, unknown> = {
+    ai_review_skipped_reason: reason,
+  };
+  if (lowPriority) {
+    payload.ai_review_status = "low_priority";
+    payload.ai_reviewed_at = new Date().toISOString();
+  }
+  const { error } = await supabase
+    .from("opportunity_matches")
+    .update(payload)
+    .eq("id", matchId);
+  if (error) throw error;
 }
 
 async function loadExistingReviewKeys(supabase: ReturnType<typeof createClient>, companyId: string, opportunityIds: string[]) {
@@ -235,6 +315,75 @@ async function loadExistingReviewKeys(supabase: ReturnType<typeof createClient>,
     .in("opportunity_id", ids);
   if (error) throw error;
   return new Set((data || []).map((row) => String(row.opportunity_id || "")));
+}
+
+async function loadCompanyForLocationFilter(supabase: ReturnType<typeof createClient>, companyId: string) {
+  const [{ data: company, error: companyError }, locationsResult] = await Promise.all([
+    supabase.from("companies").select("id, company_name, base_location, service_areas, willing_to_travel, national_projects").eq("id", companyId).single(),
+    supabase.from("company_locations").select("location").eq("company_id", companyId),
+  ]);
+  if (companyError) throw companyError;
+  if (locationsResult.error) throw locationsResult.error;
+  return {
+    id: String(company.id || ""),
+    name: String(company.company_name || ""),
+    baseLocation: String(company.base_location || ""),
+    serviceAreas: Array.isArray(company.service_areas) ? company.service_areas.map(String) : [],
+    locations: (locationsResult.data || []).map((row) => String(row.location || "")).filter(Boolean),
+    willingToTravel: Boolean(company.willing_to_travel),
+    nationalProjects: Boolean(company.national_projects),
+  };
+}
+
+function assessCompanyOpportunityLocation(company: Record<string, unknown>, opportunity: Record<string, unknown>) {
+  if (company.nationalProjects === true || company.willingToTravel === true) {
+    return { outsideServiceArea: false, reason: "Company accepts national/travel opportunities" };
+  }
+  const serviceText = normalizeText([
+    company.baseLocation,
+    ...(Array.isArray(company.serviceAreas) ? company.serviceAreas : []),
+    ...(Array.isArray(company.locations) ? company.locations : []),
+  ].join(" "));
+  if (!serviceText) return { outsideServiceArea: false, reason: "No service area configured" };
+  if (/all iceland|allt land|national|landsdekkandi/.test(serviceText)) {
+    return { outsideServiceArea: false, reason: "Company accepts national opportunities" };
+  }
+  const opportunityText = normalizeText([
+    opportunity.title,
+    opportunity.location,
+    (opportunity.rawPayload as Record<string, unknown> | undefined)?.region,
+    (opportunity.rawPayload as Record<string, unknown> | undefined)?.extracted_location,
+    (opportunity.raw_payload as Record<string, unknown> | undefined)?.region,
+    (opportunity.raw_payload as Record<string, unknown> | undefined)?.extracted_location,
+  ].join(" "));
+  if (!opportunityText) return { outsideServiceArea: false, reason: "Opportunity location unclear" };
+  const outsideNorth = /(dalvik|akureyri|boggvisbraut|birkiholar|north iceland|nordurland|nordurland)/.test(opportunityText) &&
+    !/(dalvik|akureyri|north iceland|nordurland|nordurland)/.test(serviceText);
+  if (outsideNorth) return { outsideServiceArea: true, reason: "Outside service area" };
+  const outsideSnaefellsnes = /(olafsvik|snaefellsnes|snaefellsnes|stykkisholmur|grundarfjordur)/.test(opportunityText) &&
+    !/(olafsvik|snaefellsnes|snaefellsnes|stykkisholmur|grundarfjordur)/.test(serviceText);
+  if (outsideSnaefellsnes) return { outsideServiceArea: true, reason: "Outside service area" };
+  const serviceRegions = getKnownLocationTokens(serviceText);
+  const opportunityRegions = getKnownLocationTokens(opportunityText);
+  if (!opportunityRegions.length || !serviceRegions.length) return { outsideServiceArea: false, reason: "Location could not be compared confidently" };
+  const overlaps = opportunityRegions.some((token) => serviceRegions.includes(token));
+  return { outsideServiceArea: !overlaps, reason: overlaps ? "Location matches service area" : "Outside service area" };
+}
+
+function getKnownLocationTokens(text: string) {
+  const tokens: string[] = [];
+  const checks: Array<[string, RegExp]> = [
+    ["capital_area", /reykjavik|capital area|hofudborg|hofudborg|gardabaer|kopavogur|seltjarnarnes|mosfellsbaer/],
+    ["south", /selfoss|arborg|sudurland|hveragerdi|olfus|rangarthing/],
+    ["west", /akranes|borgarnes|borgarbyggd|vesturland|hvalfjordur/],
+    ["north", /dalvik|akureyri|nordurland|birkiholar|boggvisbraut/],
+    ["east", /austurland|egilsstadir|fjardabyggd|mulathing/],
+    ["westfjords", /vestfirdir|isafjordur/],
+  ];
+  for (const [token, pattern] of checks) {
+    if (pattern.test(text)) tokens.push(token);
+  }
+  return tokens;
 }
 
 function isBatchEligibleOpportunity(opportunity: Record<string, unknown>) {
@@ -293,6 +442,7 @@ async function updateMatchAiReviewStatus(supabase: ReturnType<typeof createClien
       ai_review_fit: review.fit,
       ai_review_confidence: review.confidence,
       ai_reviewed_at: new Date().toISOString(),
+      ai_review_skipped_reason: null,
       ...(review.fit === "weak" || review.fit === "no_fit" ? { review_required: true } : {}),
     })
     .eq("id", matchId);
@@ -318,6 +468,9 @@ async function callOpenAiForReview(openAiKey: string, model: string, context: Re
           "Assess whether the opportunity is relevant for the company profile.",
           "Return strict JSON only. No markdown.",
           "Use fit: strong, possible, weak, or no_fit.",
+          "Strong fit must be rare and requires all three: clear core service match, clear service-area/location match, and valid future deadline.",
+          "If the project is broad civil works but only partially matches the company services, fit must be possible, not strong.",
+          "If location is outside service area and the company is not national/travel, fit must be weak or no_fit.",
           "Set send_to_client=false if the deadline is missing, expired, hidden, needs manual deadline review, outside service area, wrong work type, or uncertain.",
         ].join(" "),
       }],
@@ -341,7 +494,10 @@ async function callOpenAiForReview(openAiKey: string, model: string, context: Re
               "If deadline is missing, send_to_client=false.",
               "If deadline is expired, send_to_client=false.",
               "If opportunity is hidden/needs_review because of missing deadline, send_to_client=false.",
+              "Strong fit requires clear service match AND clear location match AND future deadline.",
+              "If broad civil works only partially matches company services, use possible, not strong.",
               "If location is clearly outside service area and company is not national/travel, downgrade.",
+              "If locationAssessment.outsideServiceArea=true, fit must be weak or no_fit and send_to_client=false.",
               "If tender is supervision/consulting/design but company is execution contractor, downgrade.",
               "If uncertain, fit should be possible or weak and send_to_client=false.",
             ],
@@ -422,6 +578,7 @@ function normalizeAiReview(value: Record<string, unknown>) {
 function applyHardSafetyRules(review: ReturnType<typeof normalizeAiReview>, context: Record<string, unknown>) {
   const opportunity = context.opportunity as Record<string, unknown>;
   const match = context.match as Record<string, unknown>;
+  const locationAssessment = context.locationAssessment as Record<string, unknown> | undefined;
   const rawPayload = opportunity.rawPayload && typeof opportunity.rawPayload === "object" ? opportunity.rawPayload as Record<string, unknown> : {};
   const deadline = String(opportunity.deadline || "");
   const deadlineAt = String(opportunity.deadlineAt || rawPayload.deadline_at || "");
@@ -430,10 +587,11 @@ function applyHardSafetyRules(review: ReturnType<typeof normalizeAiReview>, cont
   const isExpired = Number.isFinite(days) && days < 0;
   const hidden = opportunity.status === "hidden" || rawPayload.hidden_from_reports === true || ["hidden", "noise", "deleted"].includes(String(rawPayload.admin_report_status || ""));
   const missingDeadlineReview = String(rawPayload.deadline_debug_reason || rawPayload.deadline_warning || "").toLowerCase().includes("missing");
-  if (isMissingDeadline || isExpired || hidden || missingDeadlineReview || String(match.safety_status || "") === "hidden") {
+  const outsideServiceArea = locationAssessment?.outsideServiceArea === true;
+  if (isMissingDeadline || isExpired || hidden || missingDeadlineReview || outsideServiceArea || String(match.safety_status || "") === "hidden") {
     return {
       ...review,
-      fit: review.fit === "strong" ? "possible" : review.fit,
+      fit: outsideServiceArea ? "no_fit" : review.fit === "strong" ? "possible" : review.fit,
       send_to_client: false,
       risks_or_questions: uniqueStrings([
         ...review.risks_or_questions,
@@ -441,6 +599,7 @@ function applyHardSafetyRules(review: ReturnType<typeof normalizeAiReview>, cont
         isExpired ? "Deadline appears expired; do not send automatically." : "",
         hidden ? "Opportunity is hidden or excluded by system rules." : "",
         missingDeadlineReview ? "Opportunity requires manual deadline review." : "",
+        outsideServiceArea ? "Outside service area." : "",
       ]),
     };
   }
@@ -464,6 +623,20 @@ function toStringArray(value: unknown) {
 
 function uniqueStrings(values: string[]) {
   return Array.from(new Set(values.map((value) => String(value || "").trim()).filter(Boolean)));
+}
+
+function normalizeText(value: unknown) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/þ/g, "th")
+    .replace(/ð/g, "d")
+    .replace(/æ/g, "ae")
+    .replace(/ö/g, "o")
+    .replace(/[^a-z0-9\s/-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function requiredEnv(name: string) {

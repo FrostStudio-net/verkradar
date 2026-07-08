@@ -2211,6 +2211,40 @@ select option:checked {
   overflow-wrap: anywhere;
 }
 
+.admin-ai-aware-match-list li,
+.admin-ai-match-row {
+  gap: 6px;
+}
+
+.admin-ai-aware-match small,
+.admin-ai-debug {
+  display: block;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.admin-ai-aware-match.success b,
+.admin-ai-match-row.success span:first-of-type {
+  color: #7ee787;
+}
+
+.admin-ai-aware-match.notice b,
+.admin-ai-match-row.notice span:first-of-type {
+  color: var(--accent);
+}
+
+.admin-ai-aware-match.warning b,
+.admin-ai-match-row.warning span:first-of-type {
+  color: #f6c35b;
+}
+
+.admin-ai-aware-match.muted b,
+.admin-ai-match-row.muted span:first-of-type {
+  color: var(--muted);
+}
+
 .source-items-row td {
   background: rgba(255,255,255,0.018);
 }
