@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 type ConnectorType = "rss_feed" | "wordpress_rest" | "page_monitor_allowed";
 
 type ImportSummary = {
+  ok?: boolean;
   fetched: number;
   inserted: number;
   updated: number;
@@ -10,8 +11,14 @@ type ImportSummary = {
   matched: number;
   reports_generated: number;
   reports?: number;
+  sources_processed?: number;
+  sources_remaining?: number;
+  matching_skipped?: boolean;
+  reports_skipped?: boolean;
+  message?: string;
   errors: string[];
   failedSources?: FailedSourceResult[];
+  timedOutSources?: FailedSourceResult[];
 };
 
 type FailedSourceResult = {
@@ -31,6 +38,7 @@ type ConnectorRow = {
   include_keywords: string[];
   exclude_keywords: string[];
   require_any_keyword: boolean;
+  last_success_at?: string | null;
   sources: {
     id: string;
     name: string;
@@ -183,6 +191,10 @@ type SourceMatchDetails = {
 
 const SUPPORTED_CONNECTORS = new Set(["rss_feed", "wordpress_rest", "page_monitor_allowed"]);
 const DEFAULT_LIMIT = 50;
+const DEFAULT_BATCH_LIMIT = 20;
+const DEFAULT_MAX_SOURCES_PER_RUN = 6;
+const SOURCE_FETCH_TIMEOUT_MS = 8000;
+const FUNCTION_TIME_BUDGET_MS = 18000;
 const MIN_MATCH_SCORE = 50;
 const MAX_MATCH_DEBUG_SAMPLES = 20;
 const MAX_IMPORT_SKIP_SAMPLES = 10;
@@ -315,9 +327,11 @@ Deno.serve(async (req) => {
     reports: 0,
     errors: [],
     failedSources: [],
+    timedOutSources: [],
   };
 
   try {
+    const startedAt = Date.now();
     const supabaseUrl = requiredEnv("SUPABASE_URL");
     const anonKey = requiredEnv("SUPABASE_ANON_KEY");
     const serviceRoleKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
@@ -355,14 +369,29 @@ Deno.serve(async (req) => {
     }
 
     const body = await safeJson(req);
-    const limit = clamp(Number(body.limit || DEFAULT_LIMIT), 1, 100);
     const sourceId = firstString(body.sourceId, body.source_id, body.connectorId, body.connector_id);
-    const connectors = await loadEnabledConnectors(adminClient, sourceId);
+    const isSingleSourceRun = Boolean(sourceId);
+    const limit = clamp(Number(body.limit || (isSingleSourceRun ? DEFAULT_LIMIT : DEFAULT_BATCH_LIMIT)), 1, isSingleSourceRun ? 100 : DEFAULT_BATCH_LIMIT);
+    const maxSources = isSingleSourceRun ? 1 : clamp(Number(body.maxSources || body.max_sources || DEFAULT_MAX_SOURCES_PER_RUN), 1, 25);
+    const runMatching = body.refreshMatches === true || body.refresh_matches === true || body.runMatching === true || body.run_matching === true || isSingleSourceRun;
+    const runReports = body.generateReports === true || body.generate_reports === true;
+    const allConnectors = await loadEnabledConnectors(adminClient, sourceId);
+    const connectors = allConnectors.slice(0, maxSources);
+    const remainingConnectors = Math.max(0, allConnectors.length - connectors.length);
 
+    if (!allConnectors.length) {
+      return json({
+        ...summary,
+        ok: true,
+        errors: sourceId ? ["No enabled safe connector found for this source."] : [],
+      });
+    }
     if (!connectors.length) {
       return json({
         ...summary,
-        errors: sourceId ? ["No enabled safe connector found for this source."] : [],
+        ok: false,
+        message: "No sources completed before CPU limit / timeout.",
+        errors: ["No source connectors selected for this run."],
       });
     }
 
@@ -372,22 +401,38 @@ Deno.serve(async (req) => {
       connectorType: sourceId ? connectors[0]?.connector_type || "source_connector" : "source_connectors_batch",
     });
     aggregateRunDetails.sources_checked = 0;
-    aggregateRunDetails.connectors_checked = connectors.length;
+    aggregateRunDetails.connectors_checked = allConnectors.length;
     aggregateRunDetails.source_names_checked = [];
 
     const runId = await startImportRun(adminClient, {
       runType: isAutomation ? "source-connectors-automation" : "source-connectors-manual",
       sourceName: sourceId ? connectors[0]?.sources?.name || "Source connector" : "All source connectors",
       importMode: sourceId ? connectors[0]?.connector_type || "source_connector" : "source-connectors-batch",
-      query: sourceId ? connectors[0]?.endpoint_url || "" : `enabled connectors: ${connectors.length}`,
+      query: sourceId ? connectors[0]?.endpoint_url || "" : `enabled connectors: ${allConnectors.length}; processing: ${connectors.length}; item limit: ${limit}; matching: ${runMatching}; reports: ${runReports}`,
     });
 
-    for (const connector of connectors) {
+    let processedSources = 0;
+    for (let connectorIndex = 0; connectorIndex < connectors.length; connectorIndex += 1) {
+      const connector = connectors[connectorIndex];
+      if (Date.now() - startedAt > FUNCTION_TIME_BUDGET_MS) {
+        const timedOut = connectors.slice(connectorIndex).map((remainingConnector) => ({
+          source: remainingConnector.sources?.name || "Unknown source",
+          source_id: remainingConnector.source_id,
+          connector_type: remainingConnector.connector_type,
+          endpoint_url: remainingConnector.endpoint_url,
+          status: "timeout_budget",
+          message: "Skipped before processing because the import run was close to the Edge Function CPU/runtime budget.",
+        }));
+        summary.timedOutSources = [...(summary.timedOutSources || []), ...timedOut];
+        break;
+      }
+
       const source = connector.sources;
       if (!source?.id || !source.name) {
         summary.skipped += 1;
         continue;
       }
+      processedSources += 1;
 
       const sourceSummary: ImportSummary = {
         fetched: 0,
@@ -396,7 +441,10 @@ Deno.serve(async (req) => {
         skipped: 0,
         matched: 0,
         reports_generated: 0,
+        reports: 0,
         errors: [],
+        failedSources: [],
+        timedOutSources: [],
       };
       const runDetails = createImportDebugDetails({
         sourceName: source.name,
@@ -406,7 +454,11 @@ Deno.serve(async (req) => {
 
       try {
         await updateConnectorState(adminClient, connector.source_id, "running");
-        const items = await fetchConnectorItems(connector, limit);
+        const items = await withTimeout(
+          fetchConnectorItems(connector, limit),
+          SOURCE_FETCH_TIMEOUT_MS,
+          `${source.name} fetch/parser timed out after ${SOURCE_FETCH_TIMEOUT_MS}ms`,
+        );
         sourceSummary.fetched = items.length;
         runDetails.items_seen = items.length;
 
@@ -446,7 +498,21 @@ Deno.serve(async (req) => {
         });
 
         const normalized: NormalizedOpportunity[] = [];
-        for (const item of filteredItems) {
+        for (let itemIndex = 0; itemIndex < filteredItems.length; itemIndex += 1) {
+          const item = filteredItems[itemIndex];
+          if (Date.now() - startedAt > FUNCTION_TIME_BUDGET_MS) {
+            const remainingItems = filteredItems.length - itemIndex;
+            sourceSummary.skipped += Math.max(0, remainingItems);
+            sourceSummary.timedOutSources = [{
+              source: source.name,
+              source_id: connector.source_id,
+              connector_type: connector.connector_type,
+              endpoint_url: connector.endpoint_url,
+              status: "timeout_budget",
+              message: "Stopped this source before all items were parsed because the import run was close to the Edge Function CPU/runtime budget.",
+            }];
+            break;
+          }
           const opportunities = await normalizeConnectorItems(item, connector, source);
           if (opportunities.length) {
             normalized.push(...opportunities);
@@ -505,7 +571,7 @@ Deno.serve(async (req) => {
         runDetails.updated = sourceSummary.updated;
         runDetails.skipped = sourceSummary.skipped;
 
-        if (sourceSummary.inserted || sourceSummary.updated) {
+        if (runMatching && (sourceSummary.inserted || sourceSummary.updated)) {
           const matchDetails = await refreshMatchesForAllCompanies(adminClient, {
             sourceId: connector.source_id,
             sourceName: source.name,
@@ -521,7 +587,10 @@ Deno.serve(async (req) => {
           runDetails.skipped_not_visible = matchDetails.skipped_not_visible;
           runDetails.match_skipped_samples = matchDetails.skipped_samples;
           runDetails.matching_by_source = [matchDetails];
-          sourceSummary.reports_generated = await generateWeeklyReports(adminClient);
+          if (runReports) {
+            sourceSummary.reports_generated = await generateWeeklyReports(adminClient);
+            sourceSummary.reports = sourceSummary.reports_generated;
+          }
         }
 
         await updateSourceStatus(adminClient, connector.source_id, "connected", sourceSummary);
@@ -536,13 +605,17 @@ Deno.serve(async (req) => {
           status: failureStatusFromMessage(message),
           message,
         };
+        if (isTimeoutMessage(message)) {
+          sourceSummary.timedOutSources = [failedSource];
+        } else {
+          sourceSummary.failedSources = [failedSource];
+        }
         recordImportSkip(runDetails, {
           source_name: source.name,
           title: source.name,
           reason: message.toLowerCase().includes("fetch failed") ? "fetch_failed" : "parse_failed",
         });
         sourceSummary.errors.push(message);
-        sourceSummary.failedSources = [failedSource];
         runDetails.errors.push(message);
         runDetails.opportunities_imported = sourceSummary.inserted;
         runDetails.opportunities_updated = sourceSummary.updated;
@@ -568,24 +641,50 @@ Deno.serve(async (req) => {
     aggregateRunDetails.opportunities_updated = summary.updated;
     aggregateRunDetails.matches_created_or_updated = summary.matched;
     aggregateRunDetails.reports_generated = summary.reports_generated;
-    aggregateRunDetails.errors = summary.failedSources?.length
-      ? summary.failedSources.map((failure) => `${failure.source}: ${failure.message}`)
-      : summary.errors;
+    aggregateRunDetails.errors = [
+      ...(summary.failedSources || []).map((failure) => `${failure.source}: ${failure.message}`),
+      ...(summary.timedOutSources || []).map((failure) => `${failure.source}: ${failure.message}`),
+      ...summary.errors,
+    ];
     summary.reports = summary.reports_generated;
+    summary.ok = !summary.errors.length;
+    summary.sources_processed = processedSources;
+    summary.sources_remaining = remainingConnectors + Math.max(0, connectors.length - processedSources);
+    summary.matching_skipped = !runMatching;
+    summary.reports_skipped = !runReports;
+    if (!processedSources) {
+      summary.ok = false;
+      summary.message = "No sources completed before CPU limit / timeout.";
+      if (!summary.errors.length) summary.errors.push(summary.message);
+    } else if (summary.sources_remaining) {
+      summary.message = `Processed ${processedSources} source${processedSources === 1 ? "" : "s"}; ${summary.sources_remaining} source${summary.sources_remaining === 1 ? "" : "s"} remaining for the next run.`;
+    } else if (summary.failedSources?.length || summary.timedOutSources?.length) {
+      summary.message = "Source import completed with source-level failures. Successful sources were still imported.";
+    } else {
+      summary.message = "Source import completed.";
+    }
 
     await finalizeImportRun(adminClient, runId, {
-      status: summary.failedSources?.length ? "partial_success" : "success",
+      status: !processedSources ? "error" : (summary.failedSources?.length || summary.timedOutSources?.length || summary.sources_remaining ? "partial_success" : "success"),
       ...summary,
-      query: sourceId ? connectors[0]?.endpoint_url || "" : `enabled connectors: ${connectors.length}`,
-      error: summary.failedSources?.length
-        ? summary.failedSources.map((failure) => `${failure.source}: ${failure.message}`).join("; ")
+      query: sourceId ? connectors[0]?.endpoint_url || "" : `enabled connectors: ${allConnectors.length}; processed: ${processedSources}; remaining: ${summary.sources_remaining}; item limit: ${limit}; matching: ${runMatching}; reports: ${runReports}`,
+      error: summary.failedSources?.length || summary.timedOutSources?.length
+        ? [
+            ...(summary.failedSources || []).map((failure) => `${failure.source}: ${failure.message}`),
+            ...(summary.timedOutSources || []).map((failure) => `${failure.source}: ${failure.message}`),
+          ].join("; ")
         : summary.errors.length ? summary.errors.join("; ") : null,
       details: aggregateRunDetails,
     });
 
     return json(summary);
   } catch (error) {
-    summary.errors.push(errorMessage(error));
+    const message = errorMessage(error);
+    summary.ok = false;
+    summary.message = isTimeoutMessage(message)
+      ? "No sources completed before CPU limit / timeout."
+      : "Source import failed before the batch could complete.";
+    summary.errors.push(message);
     return json(summary, 500);
   }
 });
@@ -601,6 +700,7 @@ async function loadEnabledConnectors(supabase: ReturnType<typeof createClient>, 
       include_keywords,
       exclude_keywords,
       require_any_keyword,
+      last_success_at,
       sources (
         id,
         name,
@@ -609,7 +709,8 @@ async function loadEnabledConnectors(supabase: ReturnType<typeof createClient>, 
       )
     `)
     .eq("enabled", true)
-    .in("connector_type", Array.from(SUPPORTED_CONNECTORS));
+    .in("connector_type", Array.from(SUPPORTED_CONNECTORS))
+    .order("last_success_at", { ascending: true, nullsFirst: true });
 
   if (sourceId) query = query.eq("source_id", sourceId);
 
@@ -623,7 +724,7 @@ async function loadEnabledConnectors(supabase: ReturnType<typeof createClient>, 
 
 async function fetchConnectorItems(connector: ConnectorRow, limit: number) {
   if (connector.connector_type === "rss_feed") {
-    const response = await fetch(connector.endpoint_url, {
+    const response = await fetchWithAbortTimeout(connector.endpoint_url, SOURCE_FETCH_TIMEOUT_MS, {
       headers: { accept: "application/rss+xml, application/xml, text/xml" },
     });
     if (!response.ok) throw new Error(`RSS fetch failed (${response.status})`);
@@ -638,7 +739,7 @@ async function fetchConnectorItems(connector: ConnectorRow, limit: number) {
   if (!url.searchParams.has("per_page")) url.searchParams.set("per_page", String(limit));
   if (!url.searchParams.has("_embed")) url.searchParams.set("_embed", "1");
 
-  const response = await fetch(url.toString(), {
+  const response = await fetchWithAbortTimeout(url.toString(), SOURCE_FETCH_TIMEOUT_MS, {
     headers: { accept: "application/json" },
   });
   if (!response.ok) throw new Error(`WordPress REST fetch failed (${response.status})`);
@@ -651,7 +752,7 @@ async function fetchPageMonitorItems(connector: ConnectorRow, limit: number) {
     throw new Error("Unsupported page monitor connector");
   }
 
-  const response = await fetch(connector.endpoint_url, {
+  const response = await fetchWithAbortTimeout(connector.endpoint_url, SOURCE_FETCH_TIMEOUT_MS, {
     headers: {
       accept: "text/html,application/xhtml+xml",
       "user-agent": "VerkRadar source connector (+support@verkradar.is)",
@@ -1118,7 +1219,7 @@ function mergeImportDetails(
     skipped: context.summary.skipped,
     matched: context.summary.matched,
     reports_generated: context.summary.reports_generated,
-    status: context.summary.errors.length ? "error" : "success",
+    status: context.summary.timedOutSources?.length ? "timeout" : context.summary.errors.length ? "error" : "success",
     error: context.summary.errors[0] || null,
   });
 }
@@ -1251,6 +1352,7 @@ function normalizeConnectorItem(
   const searchText = `${title} ${description} ${content} ${categories.join(" ")}`;
   const extractedDeadline = extractDeadline(searchText);
   const deadline = String(item.deadline || "") || extractedDeadline.date;
+  const deadlineAt = deadline ? buildDeadlineAt(deadline, extractedDeadline.rawText) : null;
   const completionDateText = extractCompletionDateText(searchText);
   const isExpired = deadline ? daysUntil(deadline) < 0 : false;
   const staleInfo = getStaleOpportunityInfo({
@@ -1317,6 +1419,11 @@ function normalizeConnectorItem(
         expired_keywords_detected: staleInfo.expiredKeywords,
       } : {}),
       extracted_deadline_text: extractedDeadline.rawText,
+      ...(deadline ? {
+        bid_deadline: deadline,
+        deadline_at: deadlineAt,
+        bid_deadline_at: deadlineAt,
+      } : {}),
       ...(completionDateText ? { completion_date_text: completionDateText } : {}),
       ...(!deadline && completionDateText ? { deadline_debug_reason: "completion_date_found_but_no_bid_deadline" } : {}),
       deadline_warning: deadline ? null : MISSING_DEADLINE_RISK,
@@ -1431,21 +1538,14 @@ function isSafeVegagerdinArticleUrl(value: string) {
 }
 
 async function fetchTextWithTimeout(url: string, timeoutMs: number) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, {
-      headers: {
-        accept: "text/html,application/xhtml+xml",
-        "user-agent": "VerkRadar source connector (+support@verkradar.is)",
-      },
-      signal: controller.signal,
-    });
-    if (!response.ok) throw new Error(`Article fetch failed with ${response.status}`);
-    return await response.text();
-  } finally {
-    clearTimeout(timeout);
-  }
+  const response = await fetchWithAbortTimeout(url, timeoutMs, {
+    headers: {
+      accept: "text/html,application/xhtml+xml",
+      "user-agent": "VerkRadar source connector (+support@verkradar.is)",
+    },
+  });
+  if (!response.ok) throw new Error(`Article fetch failed with ${response.status}`);
+  return await response.text();
 }
 
 function parseVegagerdinProjectArticle(html: string): VegagerdinProject[] {
@@ -1731,7 +1831,7 @@ async function enrichRikiskaupOpportunityFromDetailPage(opportunity: NormalizedO
   try {
     const pageUrl = new URL(url);
     if (pageUrl.hostname.replace(/^www\./i, "") !== "utbodsvefur.is") return;
-    const response = await fetch(pageUrl.toString(), {
+    const response = await fetchWithAbortTimeout(pageUrl.toString(), 5000, {
       headers: {
         accept: "text/html,application/xhtml+xml",
         "user-agent": "VerkRadar source connector (+support@verkradar.is)",
@@ -1760,7 +1860,12 @@ async function enrichRikiskaupOpportunityFromDetailPage(opportunity: NormalizedO
       ...(detail.buyer ? { buyer: detail.buyer, extracted_buyer: detail.buyer } : {}),
       ...(detail.type ? { tender_type: detail.type } : {}),
       ...(detail.tenderNumber ? { tender_number: detail.tenderNumber } : {}),
-      ...(detail.deadline ? { extracted_deadline_text: detail.deadlineRaw, deadline_at: detail.deadlineAt || null } : {}),
+      ...(detail.deadline ? {
+        extracted_deadline_text: detail.deadlineRaw,
+        bid_deadline: detail.deadline,
+        deadline_at: detail.deadlineAt || null,
+        bid_deadline_at: detail.deadlineAt || null,
+      } : {}),
       ...(!detail.deadline && detail.deadlineDebugReason ? { deadline_debug_reason: detail.deadlineDebugReason } : {}),
       ...(detail.openingDate ? { opening_date: detail.openingDate } : {}),
       ...(detail.documentsDate ? { tender_documents_date: detail.documentsDate } : {}),
@@ -1901,6 +2006,8 @@ function extractLabeledValue(text: string, labels: string[]) {
     "Útboðsgögn afhent",
     "Utbodsgogn afhent",
     "Skilafrestur",
+    "Tímafrestur útboðs",
+    "Timafrestur utbods",
     "Opnun tilboða",
     "Opnun tilboda",
     "F.h.",
@@ -1915,13 +2022,13 @@ function extractLabeledValue(text: string, labels: string[]) {
 function cleanLabeledValue(value: string) {
   return String(value || "")
     .replace(/\s+/g, " ")
-    .replace(/^(Útboðsaðili|Utbodsadili|Tegund|Skilafrestur|Opnun tilboða|Opnun tilboda)\s*:?/i, "")
+    .replace(/^(Útboðsaðili|Utbodsadili|Tegund|Skilafrestur|Tímafrestur útboðs|Timafrestur utbods|Opnun tilboða|Opnun tilboda)\s*:?/i, "")
     .trim();
 }
 
 function extractRikiskaupBuyerFromText(text: string) {
   const value = String(text || "");
-  const explicit = value.match(/\bÚtboðsaðili\s*:?\s*([^:]{3,160}?)(?=\s+(?:Tegund|Útboðsgögn|Skilafrestur|Opnun tilboða)\b|$)/i);
+  const explicit = value.match(/\bÚtboðsaðili\s*:?\s*([^:]{3,160}?)(?=\s+(?:Tegund|Útboðsgögn|Skilafrestur|Tímafrestur útboðs|Opnun tilboða)\b|$)/i);
   if (explicit?.[1]) return explicit[1].trim();
   const match = value.match(/F\.h\.\s+([^,.]{3,120}?Reykjavíkurborgar)/i);
   if (match?.[1]) return match[1].trim();
@@ -1948,6 +2055,11 @@ function extractRikiskaupTenderDeadline(text: string): { date: string | null; ra
   if (!compact) return { date: null, rawText: null, debugReason: "empty_detail_text" };
 
   const labeled = extractLabeledValue(compact, ["Skilafrestur"]);
+  const timeLimitLabeled = extractLabeledValue(compact, ["Tímafrestur útboðs", "Timafrestur utbods"]);
+  if (timeLimitLabeled) {
+    const parsed = parseDeadlineDate(timeLimitLabeled);
+    if (parsed) return { date: parsed, rawText: timeLimitLabeled };
+  }
   if (labeled) {
     const parsed = parseDeadlineDate(labeled);
     if (parsed) return { date: parsed, rawText: labeled };
@@ -3222,8 +3334,6 @@ function classifyMatchSafety(
   const hasFutureDeadline = Boolean(deadline) && daysUntil(deadline) >= 0;
   const qualityText = getSafetyQualityText(opportunity);
   const risks = Array.isArray(match.risks) ? match.risks.map(String) : [];
-  const hasRecentHighIntentSignal = isRecentOpportunity(opportunity, isHighIntentSource(opportunity) ? 30 : 14) &&
-    (hasProcurementIntent(qualityText) || hasUpcomingTenderIntentText(qualityText) || isHighIntentSource(opportunity));
   const hasStrongWorkTypeFit = hasStrongWorkTypeMatch(opportunity, match);
 
   if (!deadline) reasons.push("No reliable deadline was found");
@@ -3249,7 +3359,7 @@ function classifyMatchSafety(
     };
   }
 
-  const autoApproved = (hasFutureDeadline || hasRecentHighIntentSignal) &&
+  const autoApproved = hasFutureDeadline &&
     hasStrongWorkTypeFit &&
     !reasons.some((reason) => /missing|generic|broad|mismatch|consulting|supervision|project management/i.test(reason));
 
@@ -3257,7 +3367,7 @@ function classifyMatchSafety(
     return {
       safety_status: "auto_approved",
       safety_reasons: [
-        hasFutureDeadline ? "Valid future deadline found" : "Recent high-intent procurement signal",
+        "Valid future deadline found",
         "Strong service/work-type fit",
       ],
       alert_eligible: String(profile.autoAlertMode || "auto_safe_only") !== "dashboard_only",
@@ -3826,7 +3936,7 @@ function stringFromPath(value: Record<string, unknown>, path: string[]) {
 
 function extractDeadline(text: string): { date: string | null; rawText: string | null } {
   const cleanText = stripHtml(text);
-  const keywordPattern = "(skilafrestur|tilboðsfrestur|tilbodsfrestur|skil tilboða|skil tilboda|tilboðum skal skila|tilbodum skal skila|tilboðum skilað|tilbodum skilad|skal tilboðum skila|skal tilbodum skila|tilboð skulu hafa borist|tilbod skulu hafa borist|tilboð skulu berast|tilbod skulu berast|eigi síðar en|eigi sidar en|frestur til|skila fyrir|fyrir kl\\.?)";
+  const keywordPattern = "(skilafrestur|tímafrestur útboðs|timafrestur utbods|tilboðsfrestur|tilbodsfrestur|skil tilboða|skil tilboda|tilboðum skal skila|tilbodum skal skila|tilboðum skilað|tilbodum skilad|skal tilboðum skila|skal tilbodum skila|tilboð skulu hafa borist|tilbod skulu hafa borist|tilboð skulu berast|tilbod skulu berast|eigi síðar en|eigi sidar en|frestur til|skila fyrir|fyrir kl\\.?)";
   const numericDatePattern = "(\\d{1,2}[./]\\d{1,2}[./]20\\d{2}|20\\d{2}-\\d{2}-\\d{2})";
   const monthDatePattern = "(\\d{1,2}\\.?\\s+(janúar|januar|febrúar|februar|mars|apríl|april|maí|mai|júní|juni|júlí|juli|ágúst|agust|september|október|oktober|nóvember|november|desember)\\s+20\\d{2})";
 
@@ -3852,7 +3962,7 @@ function containsCompletionDateIntent(value: string) {
 }
 
 function containsBidDeadlineIntent(value: string) {
-  return normalizeSearchText(value).match(/\b(skilafrestur|tilbodsfrestur|skil tilboda|tilbodum skal skila|tilbod skulu hafa borist|tilbod skulu berast|eigi sidar en|frestur til|skila fyrir|fyrir kl)\b/) !== null;
+  return normalizeSearchText(value).match(/\b(skilafrestur|timafrestur utbods|tilbodsfrestur|skil tilboda|tilbodum skal skila|tilbod skulu hafa borist|tilbod skulu berast|eigi sidar en|frestur til|skila fyrir|fyrir kl)\b/) !== null;
 }
 
 function isCompletionOnlyDeadlineSnippet(value: string) {
@@ -4046,7 +4156,11 @@ function mergeSummary(target: ImportSummary, source: ImportSummary) {
     ...(target.failedSources || []),
     ...(source.failedSources || []),
   ];
-  if (source.errors.length && !source.failedSources?.length) {
+  target.timedOutSources = [
+    ...(target.timedOutSources || []),
+    ...(source.timedOutSources || []),
+  ];
+  if (source.errors.length && !source.failedSources?.length && !source.timedOutSources?.length) {
     target.errors.push(...source.errors);
   }
 }
@@ -4081,8 +4195,43 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeoutId: number | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
+async function fetchWithAbortTimeout(url: string, timeoutMs: number, init: RequestInit = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error(`Fetch timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function isTimeoutMessage(message: string) {
+  return /timed out|timeout|cpu|runtime budget/i.test(String(message || ""));
+}
+
 function failureStatusFromMessage(message: string) {
   const match = String(message || "").match(/\((\d{3})\)|\bwith\s+(\d{3})\b/i);
+  if (isTimeoutMessage(message)) return "timeout";
   return match?.[1] || match?.[2] || "error";
 }
 

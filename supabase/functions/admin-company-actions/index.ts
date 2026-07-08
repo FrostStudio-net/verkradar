@@ -868,8 +868,6 @@ function classifyMatchSafety(profile: CompanyProfile, match: Record<string, unkn
 
   const deadline = String(match.deadline || "");
   const hasFutureDeadline = Boolean(deadline) && daysUntilDeadline(deadline) >= 0;
-  const hasRecentHighIntentSignal = isRecentOpportunity(match, isHighIntentSource(match) ? 30 : 14) &&
-    (hasOpenTenderOrQuoteIntent(match) || hasUpcomingTenderIntent(match) || isProcurementSource(match));
   const hasStrongWorkTypeFit = hasStrongWorkTypeMatch(match);
   const risks = Array.isArray(match.risks) ? match.risks.map(String) : [];
   if (!deadline) reasons.push("No reliable deadline was found");
@@ -889,7 +887,7 @@ function classifyMatchSafety(profile: CompanyProfile, match: Record<string, unkn
     };
   }
 
-  const autoApproved = (hasFutureDeadline || hasRecentHighIntentSignal) &&
+  const autoApproved = hasFutureDeadline &&
     hasStrongWorkTypeFit &&
     !reasons.some((reason) => /missing|generic|broad|mismatch|consulting|supervision|project management/i.test(reason));
 
@@ -897,7 +895,7 @@ function classifyMatchSafety(profile: CompanyProfile, match: Record<string, unkn
     return {
       safetyStatus: "auto_approved",
       safetyReasons: uniqueStrings([
-        hasFutureDeadline ? "Valid future deadline found" : "Recent high-intent procurement signal",
+        "Valid future deadline found",
         "Strong service/work-type fit",
       ]),
       alertEligible: profile.autoAlertMode !== "dashboard_only",

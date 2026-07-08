@@ -2496,7 +2496,13 @@ async function importSourceConnectors(sourceId = "") {
     const response = await fetch(endpoint, {
       method: "POST",
       headers: await getTedImportHeaders(),
-      body: JSON.stringify({ limit: 50, sourceId: sourceId || undefined }),
+      body: JSON.stringify({
+        limit: sourceId ? 50 : 20,
+        maxSources: sourceId ? 1 : 6,
+        sourceId: sourceId || undefined,
+        refreshMatches: Boolean(sourceId),
+        generateReports: false,
+      }),
     });
     const payload = await readFunctionResponsePayload(response);
     const responseErrors = Array.isArray(payload.errors) ? payload.errors : [];
@@ -5562,13 +5568,17 @@ function renderConnectorImportStatus() {
   if (!state.connectorImportLoading && !state.connectorTestingSourceId && !state.connectorImportStatus) return "";
 
   if (state.connectorImportLoading || state.connectorTestingSourceId) {
-    return `<section class="import-panel"><strong>Running automatic source imports...</strong><p>Fetching enabled RSS/WordPress connectors and refreshing matches when new rows are saved.</p></section>`;
+    return `<section class="import-panel"><strong>Running automatic source imports...</strong><p>Fetching enabled source connectors in a limited batch. Refresh matches separately after imports finish.</p></section>`;
   }
 
   const status = state.connectorImportStatus || {};
   const errors = Array.isArray(status.errors) ? status.errors : [];
   const failedSources = Array.isArray(status.failedSources) ? status.failedSources : [];
-  const hasFailures = errors.length || failedSources.length;
+  const timedOutSources = Array.isArray(status.timedOutSources) ? status.timedOutSources : [];
+  const hasFailures = errors.length || failedSources.length || timedOutSources.length;
+  const sourceProgress = Number.isFinite(Number(status.sources_processed))
+    ? `<p>${Number(status.sources_processed || 0)} source${Number(status.sources_processed || 0) === 1 ? "" : "s"} processed${Number(status.sources_remaining || 0) ? ` · ${Number(status.sources_remaining || 0)} remaining for next run` : ""}.</p>`
+    : "";
 
   return `
     <section class="import-panel">
@@ -5580,6 +5590,9 @@ function renderConnectorImportStatus() {
         <span><strong>${Number(status.matched || 0)}</strong> matches</span>
         <span><strong>${Number(status.reports_generated || 0)}</strong> reports</span>
       </div>
+      ${status.message ? `<p>${escapeHtml(status.message)}</p>` : sourceProgress}
+      ${status.matching_skipped ? `<p>Matching was skipped for this batch to stay within Edge Function CPU limits. Refresh company matches from Admin after imports finish.</p>` : ""}
+      ${status.reports_skipped ? `<p>Report generation was skipped for this batch.</p>` : ""}
       ${failedSources.length ? `
         <div class="import-failure-list">
           <h3>${failedSources.length} source${failedSources.length === 1 ? "" : "s"} failed</h3>
@@ -5587,6 +5600,18 @@ function renderConnectorImportStatus() {
             <div class="import-failure-row">
               <strong>${escapeHtml(failure.source || "Unknown source")}</strong>
               <p>${escapeHtml(failure.message || failure.error || "Unknown source import error")}</p>
+              ${failure.endpoint_url ? `<small>${escapeHtml(failure.endpoint_url)}</small>` : ""}
+            </div>
+          `).join("")}
+        </div>
+      ` : ""}
+      ${timedOutSources.length ? `
+        <div class="import-failure-list">
+          <h3>${timedOutSources.length} source${timedOutSources.length === 1 ? "" : "s"} timed out or were skipped</h3>
+          ${timedOutSources.map((failure) => `
+            <div class="import-failure-row">
+              <strong>${escapeHtml(failure.source || "Unknown source")}</strong>
+              <p>${escapeHtml(failure.message || failure.reason || "Skipped because the source import was close to the runtime limit")}</p>
               ${failure.endpoint_url ? `<small>${escapeHtml(failure.endpoint_url)}</small>` : ""}
             </div>
           `).join("")}
