@@ -52,6 +52,32 @@ export async function requestCompanyAiReviewBatch(companyId, options = {}) {
   return payload;
 }
 
+export async function loadTodayAiUsageSummary() {
+  if (!supabaseClient) {
+    return { reviewsToday: 0, estimatedCostToday: 0, remainingReviewsToday: 50 };
+  }
+  const start = new Date();
+  start.setUTCHours(0, 0, 0, 0);
+  const { data, error } = await supabaseClient
+    .from("ai_usage_log")
+    .select("opportunity_id, estimated_cost")
+    .gte("created_at", start.toISOString());
+  if (error) throw error;
+  const rows = data || [];
+  const reviewsToday = rows.filter((row) => row.opportunity_id).length;
+  const estimatedCostToday = rows.reduce((sum, row) => sum + Number(row.estimated_cost || 0), 0);
+  return {
+    reviewsToday,
+    estimatedCostToday,
+    remainingReviewsToday: Math.max(0, 50 - reviewsToday),
+  };
+}
+
+export function formatAiUsageCost(value) {
+  const amount = Number(value || 0);
+  return `$${amount.toFixed(amount >= 1 ? 2 : 4)}`;
+}
+
 async function getAiReviewHeaders() {
   const headers = { "content-type": "application/json" };
   const anonKey = window.VERKRADAR_SUPABASE_ANON_KEY || SUPABASE_ANON_KEY;

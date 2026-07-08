@@ -2190,7 +2190,8 @@ select option:checked {
   width: min(340px, 100%);
 }
 
-.admin-ai-batch-result {
+.admin-ai-batch-result,
+.admin-ai-usage-summary {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -2203,7 +2204,8 @@ select option:checked {
   font-size: 0.84rem;
 }
 
-.admin-ai-batch-result strong {
+.admin-ai-batch-result strong,
+.admin-ai-usage-summary strong {
   color: var(--text);
 }
 

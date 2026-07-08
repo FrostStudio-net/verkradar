@@ -29,6 +29,8 @@ import {
   localizeLegacyReportContent,
   normalizeLocationText,
   parseCommaList,
+  formatAiUsageCost,
+  loadTodayAiUsageSummary,
   requestCompanyAiReviewBatch,
   requestAiMatchReview,
   PROFILE_SUGGESTIONS,
@@ -1433,6 +1435,10 @@ async function loadAdminCompanies() {
   render();
 
   try {
+    state.adminAiUsageSummary = await loadTodayAiUsageSummary().catch((error) => {
+      console.warn("Failed to load AI usage summary:", error);
+      return null;
+    });
     const { data: companies, error } = await supabaseClient
       .from("companies")
       .select("*")
@@ -8100,7 +8106,9 @@ function renderAdminCompanyDetails(company) {
               formatDateTime,
               actionState: state.adminCompanyAiReviewActions?.[company.id] ? "running" : "",
               filter: state.adminCompanyAiReviewFilter,
-              lastResult: state.adminCompanyAiReviewResults?.[company.id] || null
+              lastResult: state.adminCompanyAiReviewResults?.[company.id] || null,
+              usageSummary: state.adminAiUsageSummary || null,
+              formatAiUsageCost
             })}
           </div>
         </div>

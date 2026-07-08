@@ -8,6 +8,11 @@ const corsHeaders = {
 
 type AiFit = "strong" | "possible" | "weak" | "no_fit";
 
+const DAILY_AI_REVIEW_LIMIT = 50;
+const DAILY_COMPANY_BATCH_LIMIT = 3;
+const HOURLY_COMPANY_RERUN_LIMIT = 1;
+const MAX_BATCH_MATCHES = 10;
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -42,11 +47,19 @@ Deno.serve(async (req) => {
     const body = await safeJson(req);
     const companyId = String(body.companyId || body.company_id || "").trim();
     const batch = body.batch === true || body.mode === "batch";
-    const limit = Math.max(1, Math.min(20, Number(body.limit || 10)));
+    const limit = Math.max(1, Math.min(MAX_BATCH_MATCHES, Number(body.limit || MAX_BATCH_MATCHES)));
     const force = body.force === true || body.revalidate === true;
     if (batch) {
       if (!isUuid(companyId)) return json({ error: "A valid companyId is required for batch review." }, 400);
-      const result = await runBatchReview(adminClient, openAiKey, model, companyId, limit, force);
+      await assertAiUsageAllowed(adminClient, {
+        userId: userData.user.id,
+        companyId,
+        action: force ? "rerun" : "batch_review",
+        requestedReviews: limit,
+        force,
+        isBatch: true,
+      });
+      const result = await runBatchReview(adminClient, openAiKey, model, companyId, limit, force, userData.user.id);
       return json({ ok: true, ...result });
     }
 
@@ -65,7 +78,16 @@ Deno.serve(async (req) => {
       if (existing) return json({ ok: true, cached: true, review: existing });
     }
 
-    const saved = await createAndSaveReview(adminClient, openAiKey, model, context);
+    validateContextBeforeAi(context, { force, allowOutsideServiceArea: body.allowOutsideServiceArea === true });
+    await assertAiUsageAllowed(adminClient, {
+      userId: userData.user.id,
+      companyId: String(context.company.id || ""),
+      action: force ? "rerun" : "single_review",
+      requestedReviews: 1,
+      force,
+      isBatch: false,
+    });
+    const saved = await createAndSaveReview(adminClient, openAiKey, model, context, userData.user.id, force ? "rerun" : "single_review");
     return json({ ok: true, cached: false, review: saved });
   } catch (error) {
     console.error("AI match review failed:", error);
@@ -157,9 +179,20 @@ async function runBatchReview(
   companyId: string,
   limit: number,
   force: boolean,
+  userId: string,
 ) {
   const candidateResult = await loadBatchCandidates(supabase, companyId, limit, force);
   const candidates = candidateResult.candidates;
+  await logAiUsage(supabase, {
+    userId,
+    companyId,
+    opportunityId: null,
+    action: force ? "rerun" : "batch_review",
+    model,
+    inputTokens: null,
+    outputTokens: null,
+    estimatedCost: 0,
+  });
   const summary = {
     company_id: companyId,
     force,
@@ -201,7 +234,8 @@ async function runBatchReview(
   for (const candidate of candidates) {
     try {
       const context = await loadReviewContext(supabase, String(candidate.id || ""));
-      const saved = await createAndSaveReview(supabase, openAiKey, model, context);
+      validateContextBeforeAi(context, { force, allowOutsideServiceArea: false });
+      const saved = await createAndSaveReview(supabase, openAiKey, model, context, userId, force ? "rerun" : "batch_review");
       summary.reviewed += 1;
       if (saved.fit === "strong") summary.strong += 1;
       else if (saved.fit === "possible") summary.possible += 1;
@@ -422,14 +456,165 @@ function isBatchEligibleOpportunity(opportunity: Record<string, unknown>) {
   return true;
 }
 
+function validateContextBeforeAi(context: Record<string, unknown>, options: { force: boolean; allowOutsideServiceArea: boolean }) {
+  const opportunity = context.opportunity as Record<string, unknown>;
+  const match = context.match as Record<string, unknown>;
+  const locationAssessment = context.locationAssessment as Record<string, unknown> | undefined;
+  const rawPayload = opportunity.rawPayload && typeof opportunity.rawPayload === "object" ? opportunity.rawPayload as Record<string, unknown> : {};
+  const deadline = String(opportunity.deadline || opportunity.deadlineAt || rawPayload.deadline_at || rawPayload.bid_deadline_at || "").trim();
+  const expired = deadline ? daysUntil(deadline) < 0 : false;
+  const hidden = String(opportunity.status || "").toLowerCase() === "hidden"
+    || String(match.safety_status || "").toLowerCase() === "hidden"
+    || rawPayload.hidden_from_reports === true
+    || ["hidden", "noise", "deleted"].includes(String(rawPayload.admin_report_status || "").toLowerCase());
+  if (!deadline) throw new Error("AI review skipped: missing deadline.");
+  if (expired) throw new Error("AI review skipped: expired opportunity.");
+  if (hidden) throw new Error("AI review skipped: hidden opportunity.");
+  if (locationAssessment?.outsideServiceArea === true && !(options.force && options.allowOutsideServiceArea)) {
+    throw new Error("AI review skipped: outside service area.");
+  }
+}
+
+async function assertAiUsageAllowed(
+  supabase: ReturnType<typeof createClient>,
+  options: {
+    userId: string;
+    companyId: string;
+    action: "single_review" | "batch_review" | "rerun";
+    requestedReviews: number;
+    force: boolean;
+    isBatch: boolean;
+  },
+) {
+  const today = startOfUtcDayIso();
+  const hourAgo = new Date(Date.now() - 3600000).toISOString();
+  const totalUsage = await getAiUsageTotals(supabase, {
+    since: today,
+    opportunityRequired: true,
+  });
+  if (totalUsage.count + options.requestedReviews > DAILY_AI_REVIEW_LIMIT) {
+    throw new Error("AI daily limit reached. Try again tomorrow or increase the limit.");
+  }
+
+  if (options.isBatch && !options.force) {
+    const companyBatches = await countAiUsage(supabase, {
+      since: today,
+      companyId: options.companyId,
+      action: "batch_review",
+      opportunityRequired: false,
+      opportunityIsNull: true,
+    });
+    if (companyBatches >= DAILY_COMPANY_BATCH_LIMIT) {
+      throw new Error("AI daily limit reached. Try again tomorrow or increase the limit.");
+    }
+  }
+
+  if (options.force) {
+    const companyReruns = await countAiUsage(supabase, {
+      since: hourAgo,
+      companyId: options.companyId,
+      action: "rerun",
+      opportunityRequired: false,
+    });
+    if (companyReruns >= HOURLY_COMPANY_RERUN_LIMIT) {
+      throw new Error("AI daily limit reached. Try again tomorrow or increase the limit.");
+    }
+  }
+}
+
+async function getAiUsageTotals(
+  supabase: ReturnType<typeof createClient>,
+  options: {
+    since: string;
+    companyId?: string;
+    action?: string;
+    opportunityRequired?: boolean;
+    opportunityIsNull?: boolean;
+  },
+) {
+  let dataQuery = supabase
+    .from("ai_usage_log")
+    .select("estimated_cost")
+    .gte("created_at", options.since);
+  if (options.companyId) dataQuery = dataQuery.eq("company_id", options.companyId);
+  if (options.action) dataQuery = dataQuery.eq("action", options.action);
+  if (options.opportunityRequired) dataQuery = dataQuery.not("opportunity_id", "is", null);
+  if (options.opportunityIsNull) dataQuery = dataQuery.is("opportunity_id", null);
+  const { data, error } = await dataQuery;
+  if (error) throw error;
+  return {
+    count: (data || []).length,
+    estimatedCost: (data || []).reduce((sum, row) => sum + Number(row.estimated_cost || 0), 0),
+  };
+}
+
+async function countAiUsage(
+  supabase: ReturnType<typeof createClient>,
+  options: {
+    since: string;
+    companyId?: string;
+    action?: string;
+    opportunityRequired?: boolean;
+    opportunityIsNull?: boolean;
+  },
+) {
+  let query = supabase
+    .from("ai_usage_log")
+    .select("id", { count: "exact", head: true })
+    .gte("created_at", options.since);
+  if (options.companyId) query = query.eq("company_id", options.companyId);
+  if (options.action) query = query.eq("action", options.action);
+  if (options.opportunityRequired) query = query.not("opportunity_id", "is", null);
+  if (options.opportunityIsNull) query = query.is("opportunity_id", null);
+  const { count, error } = await query;
+  if (error) throw error;
+  return Number(count || 0);
+}
+
+async function logAiUsage(
+  supabase: ReturnType<typeof createClient>,
+  entry: {
+    userId: string;
+    companyId: string;
+    opportunityId: string | null;
+    action: "single_review" | "batch_review" | "rerun";
+    model: string;
+    inputTokens: number | null;
+    outputTokens: number | null;
+    estimatedCost: number;
+  },
+) {
+  const { error } = await supabase
+    .from("ai_usage_log")
+    .insert({
+      user_id: entry.userId,
+      company_id: entry.companyId,
+      opportunity_id: entry.opportunityId,
+      action: entry.action,
+      model: entry.model,
+      input_tokens: entry.inputTokens,
+      output_tokens: entry.outputTokens,
+      estimated_cost: entry.estimatedCost,
+    });
+  if (error) throw error;
+}
+
+function startOfUtcDayIso() {
+  const date = new Date();
+  date.setUTCHours(0, 0, 0, 0);
+  return date.toISOString();
+}
+
 async function createAndSaveReview(
   supabase: ReturnType<typeof createClient>,
   openAiKey: string,
   model: string,
   context: Record<string, unknown>,
+  userId: string,
+  action: "single_review" | "batch_review" | "rerun",
 ) {
-  const rawReview = await callOpenAiForReview(openAiKey, model, context);
-  const review = applyHardSafetyRules(rawReview, context);
+  const aiResult = await callOpenAiForReview(openAiKey, model, context);
+  const review = applyHardSafetyRules(aiResult.review, context);
   const match = context.match as Record<string, unknown>;
   const company = context.company as Record<string, unknown>;
   const opportunity = context.opportunity as Record<string, unknown>;
@@ -459,6 +644,16 @@ async function createAndSaveReview(
     .single();
   if (saveError) throw saveError;
   await updateMatchAiReviewStatus(supabase, String(match.id || ""), review);
+  await logAiUsage(supabase, {
+    userId,
+    companyId: String(company.id || ""),
+    opportunityId: String(opportunity.id || ""),
+    action,
+    model,
+    inputTokens: aiResult.usage.inputTokens,
+    outputTokens: aiResult.usage.outputTokens,
+    estimatedCost: estimateOpenAiCost(model, aiResult.usage.inputTokens, aiResult.usage.outputTokens),
+  });
   return saved;
 }
 
@@ -608,7 +803,33 @@ async function callOpenAiForReview(openAiKey: string, model: string, context: Re
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload?.error?.message || `OpenAI request failed with status ${response.status}`);
-  return normalizeAiReview(parseOpenAiJson(payload));
+  return {
+    review: normalizeAiReview(parseOpenAiJson(payload)),
+    usage: parseOpenAiUsage(payload),
+  };
+}
+
+function parseOpenAiUsage(payload: Record<string, unknown>) {
+  const usage = payload.usage && typeof payload.usage === "object" ? payload.usage as Record<string, unknown> : {};
+  return {
+    inputTokens: nullableNumber(usage.input_tokens ?? usage.prompt_tokens),
+    outputTokens: nullableNumber(usage.output_tokens ?? usage.completion_tokens),
+  };
+}
+
+function nullableNumber(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function estimateOpenAiCost(model: string, inputTokens: number | null, outputTokens: number | null) {
+  const input = Number(inputTokens || 0);
+  const output = Number(outputTokens || 0);
+  const normalized = String(model || "").toLowerCase();
+  const rates = normalized.includes("gpt-4.1-mini")
+    ? { input: 0.40, output: 1.60 }
+    : { input: 0, output: 0 };
+  return Number((((input / 1000000) * rates.input) + ((output / 1000000) * rates.output)).toFixed(6));
 }
 
 function parseOpenAiJson(payload: Record<string, unknown>) {

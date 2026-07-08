@@ -19,9 +19,11 @@ export function renderAdminCompanyAiReviewPanel(company, options) {
   const {
     escapeHtml,
     formatDateTime,
+    formatAiUsageCost = (value) => `$${Number(value || 0).toFixed(4)}`,
     actionState = "",
     filter = "not_reviewed",
     lastResult = null,
+    usageSummary = null,
   } = options;
   const matches = filterAdminMatchesByAiStatus(company.latestMatches || [], filter, company);
   return `
@@ -39,6 +41,7 @@ export function renderAdminCompanyAiReviewPanel(company, options) {
         </button>
       </div>
 
+      ${usageSummary ? renderUsageSummary(usageSummary, { escapeHtml, formatAiUsageCost }) : ""}
       ${lastResult ? renderBatchResult(lastResult, escapeHtml) : ""}
 
       <label class="admin-inline-control admin-company-ai-filter">
@@ -60,6 +63,17 @@ export function renderAdminCompanyAiReviewPanel(company, options) {
         </ul>
       ` : `<p class="muted-text">No matches for this AI review filter.</p>`}
     </section>
+  `;
+}
+
+function renderUsageSummary(summary, { escapeHtml, formatAiUsageCost }) {
+  return `
+    <div class="admin-ai-usage-summary">
+      <span><strong>AI usage today</strong></span>
+      <span>${Number(summary.reviewsToday || 0)} reviews today</span>
+      <span>${escapeHtml(formatAiUsageCost(summary.estimatedCostToday || 0))} estimated cost</span>
+      <span>${Number(summary.remainingReviewsToday || 0)} reviews remaining</span>
+    </div>
   `;
 }
 
