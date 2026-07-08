@@ -6693,15 +6693,16 @@ function renderMissingDeadlineRow(opp) {
   const rawAlertEligible = opp.rawPayload?.alert_eligible;
   const alertEligible = rawAlertEligible === true ? "true" : "false";
   const alertWarning = String(rawAlertEligible ?? "").toLowerCase() !== "false" ? `<br><span class="status-pill is-warning">Missing deadline alert flag needs fix</span>` : "";
+  const reason = getMissingDeadlineReason(opp);
   return `
     <tr>
       <td><code>${escapeHtml(String(opp.id || ""))}</code><br><span>${escapeHtml(opp.externalId || "No external ID")}</span></td>
       <td><strong>${escapeHtml(opp.title || "Untitled")}</strong><br><span>${escapeHtml(opp.source || "Unknown source")}</span></td>
-      <td>${safeUrl ? `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noreferrer">${escapeHtml(safeUrl)}</a>` : "No source URL"}</td>
+      <td>${safeUrl ? `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noreferrer" title="${escapeHtml(safeUrl)}">${escapeHtml(safeUrl)}</a>` : "No source URL"}</td>
       <td>${opp.publishedDate ? escapeHtml(formatDateTime(opp.publishedDate)) : "Not listed"}</td>
       <td>${escapeHtml(safetyStatus || "unknown")}<br><span>alert_eligible=${escapeHtml(alertEligible)}</span>${alertWarning}</td>
       <td><span class="status-pill ${fetchable.isSafe ? "is-success" : "is-running"}">${escapeHtml(fetchable.label)}</span></td>
-      <td>${escapeHtml(getMissingDeadlineReason(opp))}</td>
+      <td title="${escapeHtml(reason)}">${escapeHtml(reason)}</td>
     </tr>
   `;
 }

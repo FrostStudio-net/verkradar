@@ -1800,6 +1800,12 @@ select option:checked {
   color: #ffd54f;
 }
 
+.status-pill.is-warning {
+  border-color: rgba(255,213,79,0.44);
+  background: rgba(255,213,79,0.12);
+  color: #ffd54f;
+}
+
 .status-pill.is-error {
   border-color: rgba(255,107,107,0.44);
   background: rgba(255,107,107,0.10);
@@ -1867,6 +1873,97 @@ select option:checked {
 
 .ops-table tr.source-row-connected td {
   background: rgba(215,255,63,0.012);
+}
+
+.missing-deadline-source-group {
+  min-width: 0;
+  margin-top: 16px;
+}
+
+.missing-deadline-source-group .ops-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+}
+
+.missing-deadline-table {
+  min-width: 1320px;
+  table-layout: fixed;
+  font-size: 0.82rem;
+}
+
+.missing-deadline-table th,
+.missing-deadline-table td {
+  padding: 10px;
+  line-height: 1.35;
+}
+
+.missing-deadline-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.missing-deadline-table th:first-child,
+.missing-deadline-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  width: 190px;
+  max-width: 190px;
+  background: rgba(18,18,18,0.98);
+  box-shadow: 1px 0 0 rgba(255,255,255,0.08);
+}
+
+.missing-deadline-table th:nth-child(2),
+.missing-deadline-table td:nth-child(2) {
+  width: 280px;
+  max-width: 280px;
+}
+
+.missing-deadline-table th:nth-child(3),
+.missing-deadline-table td:nth-child(3) {
+  width: 300px;
+  max-width: 300px;
+}
+
+.missing-deadline-table th:nth-child(4),
+.missing-deadline-table td:nth-child(4) {
+  width: 140px;
+}
+
+.missing-deadline-table th:nth-child(5),
+.missing-deadline-table td:nth-child(5),
+.missing-deadline-table th:nth-child(6),
+.missing-deadline-table td:nth-child(6) {
+  width: 170px;
+}
+
+.missing-deadline-table th:nth-child(7),
+.missing-deadline-table td:nth-child(7) {
+  width: 320px;
+  max-width: 320px;
+}
+
+.missing-deadline-table code,
+.missing-deadline-table td:first-child span,
+.missing-deadline-table td:nth-child(3) a {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.missing-deadline-table td:nth-child(2) strong {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.missing-deadline-table td:nth-child(7) {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .admin-review-list {

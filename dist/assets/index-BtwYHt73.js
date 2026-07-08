@@ -1546,15 +1546,15 @@
         </table>
       </div>
     </div>
-  `}function za(e){let t=Pa(e),n=Te(e.url||e.rawPayload?.source_url||``),r=e.rawPayload?.safety_status||e.rawPayload?.quality_status||Q(e),i=e.rawPayload?.alert_eligible,a=i===!0?`true`:`false`,o=String(i??``).toLowerCase()===`false`?``:`<br><span class="status-pill is-warning">Missing deadline alert flag needs fix</span>`;return`
+  `}function za(e){let t=Pa(e),n=Te(e.url||e.rawPayload?.source_url||``),r=e.rawPayload?.safety_status||e.rawPayload?.quality_status||Q(e),i=e.rawPayload?.alert_eligible,a=i===!0?`true`:`false`,o=String(i??``).toLowerCase()===`false`?``:`<br><span class="status-pill is-warning">Missing deadline alert flag needs fix</span>`,s=Fa(e);return`
     <tr>
       <td><code>${D(String(e.id||``))}</code><br><span>${D(e.externalId||`No external ID`)}</span></td>
       <td><strong>${D(e.title||`Untitled`)}</strong><br><span>${D(e.source||`Unknown source`)}</span></td>
-      <td>${n?`<a href="${D(n)}" target="_blank" rel="noreferrer">${D(n)}</a>`:`No source URL`}</td>
+      <td>${n?`<a href="${D(n)}" target="_blank" rel="noreferrer" title="${D(n)}">${D(n)}</a>`:`No source URL`}</td>
       <td>${e.publishedDate?D(C(e.publishedDate)):`Not listed`}</td>
       <td>${D(r||`unknown`)}<br><span>alert_eligible=${D(a)}</span>${o}</td>
       <td><span class="status-pill ${t.isSafe?`is-success`:`is-running`}">${D(t.label)}</span></td>
-      <td>${D(Fa(e))}</td>
+      <td title="${D(s)}">${D(s)}</td>
     </tr>
   `}function Ba(){return Z(g({t:O,escapeHtml:D,language:k.language,trialHref:ft()}))}function Va(){return k.user?(H(),Z(`
     <section class="page-head pricing-head">
