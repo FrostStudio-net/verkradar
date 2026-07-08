@@ -43,15 +43,15 @@ Deno.serve(async (req) => {
     const companyId = String(body.companyId || body.company_id || "").trim();
     const batch = body.batch === true || body.mode === "batch";
     const limit = Math.max(1, Math.min(20, Number(body.limit || 10)));
+    const force = body.force === true || body.revalidate === true;
     if (batch) {
       if (!isUuid(companyId)) return json({ error: "A valid companyId is required for batch review." }, 400);
-      const result = await runBatchReview(adminClient, openAiKey, model, companyId, limit);
+      const result = await runBatchReview(adminClient, openAiKey, model, companyId, limit, force);
       return json({ ok: true, ...result });
     }
 
     const matchId = String(body.matchId || body.match_id || "").trim();
     if (!isUuid(matchId)) return json({ error: "A valid matchId is required." }, 400);
-    const force = body.force === true;
 
     const context = await loadReviewContext(adminClient, matchId);
     if (!force) {
@@ -125,6 +125,7 @@ async function loadReviewContext(supabase: ReturnType<typeof createClient>, matc
     willingToTravel: Boolean(match.companies.willing_to_travel),
     nationalProjects: Boolean(match.companies.national_projects),
     remoteProjects: Boolean(match.companies.remote_projects),
+    updatedAt: String(match.companies.updated_at || ""),
   };
   const opportunityContext = {
     id: String(match.opportunities.id),
@@ -155,11 +156,13 @@ async function runBatchReview(
   model: string,
   companyId: string,
   limit: number,
+  force: boolean,
 ) {
-  const candidateResult = await loadBatchCandidates(supabase, companyId, limit);
+  const candidateResult = await loadBatchCandidates(supabase, companyId, limit, force);
   const candidates = candidateResult.candidates;
   const summary = {
     company_id: companyId,
+    force,
     reviewed: 0,
     strong: 0,
     possible: 0,
@@ -213,7 +216,7 @@ async function runBatchReview(
   return summary;
 }
 
-async function loadBatchCandidates(supabase: ReturnType<typeof createClient>, companyId: string, limit: number) {
+async function loadBatchCandidates(supabase: ReturnType<typeof createClient>, companyId: string, limit: number, force: boolean) {
   const company = await loadCompanyForLocationFilter(supabase, companyId);
   const { data: matches, error } = await supabase
     .from("opportunity_matches")
@@ -255,10 +258,14 @@ async function loadBatchCandidates(supabase: ReturnType<typeof createClient>, co
     const title = String((match.opportunities as Record<string, unknown> | null)?.title || match.opportunity_id || "match");
     if (reviews.has(String(match.opportunity_id || ""))) {
       skipped.alreadyReviewed += 1;
-      await markMatchAiSkipped(supabase, String(match.id || ""), "already_reviewed", false);
+      if (!force) {
+        await markMatchAiSkipped(supabase, String(match.id || ""), "already_reviewed", false);
+        continue;
+      }
+    }
+    if (!force && String(match.ai_review_status || "not_reviewed") !== "not_reviewed" && !match.ai_review_skipped_reason) {
       continue;
     }
-    if (String(match.ai_review_status || "not_reviewed") !== "not_reviewed" && !match.ai_review_skipped_reason) continue;
     if (String(match.safety_status || "") === "hidden" || (match.reviewed_at && /reject|hafna|hidden/i.test(String(match.review_note || "")))) {
       skipped.manuallyRejected += 1;
       await markMatchAiSkipped(supabase, String(match.id || ""), "manually_rejected", true);
@@ -273,6 +280,7 @@ async function loadBatchCandidates(supabase: ReturnType<typeof createClient>, co
     if (!opportunity || !isBatchEligibleOpportunity(opportunity)) {
       skipped.expiredOrMissingDeadline += 1;
       await markMatchAiSkipped(supabase, String(match.id || ""), "expired_or_missing_deadline", true);
+      await markExistingReviewNotSendable(supabase, companyId, String(match.opportunity_id || ""), "Expired or missing deadline under current review rules.");
       if (skipped.samples.length < 5) skipped.samples.push(`${title}: expired or missing deadline`);
       continue;
     }
@@ -280,6 +288,7 @@ async function loadBatchCandidates(supabase: ReturnType<typeof createClient>, co
     if (locationAssessment.outsideServiceArea) {
       skipped.outsideServiceArea += 1;
       await markMatchAiSkipped(supabase, String(match.id || ""), "outside_service_area", true);
+      await markExistingReviewNotSendable(supabase, companyId, String(match.opportunity_id || ""), "Outside service area under current company profile.");
       if (skipped.samples.length < 5) skipped.samples.push(`${title}: Outside service area`);
       continue;
     }
@@ -305,6 +314,21 @@ async function markMatchAiSkipped(supabase: ReturnType<typeof createClient>, mat
   if (error) throw error;
 }
 
+async function markExistingReviewNotSendable(supabase: ReturnType<typeof createClient>, companyId: string, opportunityId: string, reason: string) {
+  if (!isUuid(companyId) || !isUuid(opportunityId)) return;
+  const { error } = await supabase
+    .from("ai_match_reviews")
+    .update({
+      send_to_client: false,
+      fit: "no_fit",
+      reason,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("company_id", companyId)
+    .eq("opportunity_id", opportunityId);
+  if (error) throw error;
+}
+
 async function loadExistingReviewKeys(supabase: ReturnType<typeof createClient>, companyId: string, opportunityIds: string[]) {
   const ids = uniqueStrings(opportunityIds).filter(isUuid);
   if (!ids.length) return new Set<string>();
@@ -319,7 +343,7 @@ async function loadExistingReviewKeys(supabase: ReturnType<typeof createClient>,
 
 async function loadCompanyForLocationFilter(supabase: ReturnType<typeof createClient>, companyId: string) {
   const [{ data: company, error: companyError }, locationsResult] = await Promise.all([
-    supabase.from("companies").select("id, company_name, base_location, service_areas, willing_to_travel, national_projects").eq("id", companyId).single(),
+    supabase.from("companies").select("id, company_name, base_location, service_areas, willing_to_travel, national_projects, updated_at").eq("id", companyId).single(),
     supabase.from("company_locations").select("location").eq("company_id", companyId),
   ]);
   if (companyError) throw companyError;
@@ -332,6 +356,7 @@ async function loadCompanyForLocationFilter(supabase: ReturnType<typeof createCl
     locations: (locationsResult.data || []).map((row) => String(row.location || "")).filter(Boolean),
     willingToTravel: Boolean(company.willing_to_travel),
     nationalProjects: Boolean(company.national_projects),
+    updatedAt: String(company.updated_at || ""),
   };
 }
 
@@ -420,6 +445,10 @@ async function createAndSaveReview(
     risks_or_questions: review.risks_or_questions,
     suggested_client_summary: review.suggested_client_summary,
     model,
+    company_services_snapshot: createCompanyServicesSnapshot(company),
+    company_locations_snapshot: createCompanyLocationsSnapshot(company),
+    reviewed_profile_hash: createCompanyProfileHash(company),
+    profile_updated_at: String(company.updatedAt || "") || null,
     updated_at: new Date().toISOString(),
   };
 
@@ -455,6 +484,41 @@ function getAiReviewStatus(review: ReturnType<typeof normalizeAiReview>) {
   if (review.fit === "possible" && review.send_to_client) return "possible";
   if (review.fit === "weak" || review.fit === "no_fit") return "low_priority";
   return "needs_review";
+}
+
+function createCompanyServicesSnapshot(company: Record<string, unknown>) {
+  return uniqueStrings([
+    ...(Array.isArray(company.services) ? company.services as string[] : []),
+    ...(Array.isArray(company.includeKeywords) ? company.includeKeywords as string[] : []),
+    ...(Array.isArray(company.excludeKeywords) ? (company.excludeKeywords as string[]).map((value) => `exclude:${value}`) : []),
+  ].map((value) => normalizeSnapshotValue(value)));
+}
+
+function createCompanyLocationsSnapshot(company: Record<string, unknown>) {
+  return uniqueStrings([
+    company.baseLocation,
+    ...(Array.isArray(company.locations) ? company.locations as string[] : []),
+    ...(Array.isArray(company.serviceAreas) ? company.serviceAreas as string[] : []),
+    company.willingToTravel === true ? "willing_to_travel:true" : "willing_to_travel:false",
+    company.nationalProjects === true ? "national_projects:true" : "national_projects:false",
+  ].map((value) => normalizeSnapshotValue(value)));
+}
+
+function createCompanyProfileHash(company: Record<string, unknown>) {
+  const payload = JSON.stringify({
+    services: createCompanyServicesSnapshot(company),
+    locations: createCompanyLocationsSnapshot(company),
+  });
+  let hash = 5381;
+  for (let index = 0; index < payload.length; index += 1) {
+    hash = ((hash << 5) + hash) + payload.charCodeAt(index);
+    hash |= 0;
+  }
+  return `profile_${Math.abs(hash)}`;
+}
+
+function normalizeSnapshotValue(value: unknown) {
+  return normalizeText(value).replace(/\s+/g, " ").trim();
 }
 
 async function callOpenAiForReview(openAiKey: string, model: string, context: Record<string, unknown>) {

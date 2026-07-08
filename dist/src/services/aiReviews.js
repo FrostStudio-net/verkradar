@@ -41,6 +41,8 @@ export async function requestCompanyAiReviewBatch(companyId, options = {}) {
       batch: true,
       companyId,
       limit: Math.max(1, Math.min(20, Number(options.limit || 10))),
+      force: options.force === true,
+      revalidate: options.revalidate === true,
     }),
   });
   const payload = await readJsonResponse(response);

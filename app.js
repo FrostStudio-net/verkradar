@@ -597,11 +597,11 @@ document.addEventListener("click", (event) => {
     return;
   }
   if (name === "admin-ai-review-match") {
-    runAdminAiReview(id);
+    runAdminAiReview(id, { force: action.dataset.force === "true" });
     return;
   }
   if (name === "admin-ai-review-company") {
-    runAdminCompanyAiReviewBatch(id);
+    runAdminCompanyAiReviewBatch(id, { force: action.dataset.force === "true" });
     return;
   }
   if (name === "import-ted") importTedNotices();
@@ -1456,10 +1456,10 @@ async function loadAdminCompanies() {
         supabaseClient.from("company_keywords").select("company_id, keyword, type").in("company_id", companyIds),
         supabaseClient
           .from("opportunity_matches")
-          .select("id, company_id, opportunity_id, match_score, match_label, safety_status, ai_review_status, ai_review_fit, ai_review_confidence, ai_reviewed_at, ai_review_skipped_reason, opportunities(title, buyer, source_id, sources(name))")
+          .select("id, company_id, opportunity_id, match_score, match_label, safety_status, ai_review_status, ai_review_fit, ai_review_confidence, ai_reviewed_at, ai_review_skipped_reason, opportunities(title, buyer, location, raw_payload, source_id, sources(name))")
           .in("company_id", companyIds),
         supabaseClient.from("reports").select("id, company_id, title, created_at, period_start, period_end, status").in("company_id", companyIds).order("created_at", { ascending: false }),
-        supabaseClient.from("ai_match_reviews").select("id, company_id, opportunity_id, match_id, fit, confidence, send_to_client, reason, created_at, updated_at").in("company_id", companyIds)
+        supabaseClient.from("ai_match_reviews").select("id, company_id, opportunity_id, match_id, fit, confidence, send_to_client, reason, reviewed_profile_hash, profile_updated_at, company_services_snapshot, company_locations_snapshot, created_at, updated_at").in("company_id", companyIds)
       ]);
 
       services = servicesResult.error ? [] : servicesResult.data || [];
@@ -1470,16 +1470,32 @@ async function loadAdminCompanies() {
       aiReviews = aiReviewsResult.error ? [] : aiReviewsResult.data || [];
     }
 
-    state.adminCompanies = companyRows.map((company) => mapAdminCompany(company, {
-      services: services.filter((row) => row.company_id === company.id),
-      locations: locations.filter((row) => row.company_id === company.id),
-      keywords: keywords.filter((row) => row.company_id === company.id),
-      matches: mergeAiReviewsIntoAdminMatches(
-        matches.filter((row) => row.company_id === company.id),
-        aiReviews.filter((row) => row.company_id === company.id)
-      ),
-      reports: reports.filter((row) => row.company_id === company.id)
-    }));
+    state.adminCompanies = companyRows.map((company) => {
+      const companyServices = services.filter((row) => row.company_id === company.id);
+      const companyLocations = locations.filter((row) => row.company_id === company.id);
+      const companyKeywords = keywords.filter((row) => row.company_id === company.id);
+      const companyProfileForAi = {
+        services: cleanStringArray(companyServices.map((row) => row.service)),
+        locations: cleanStringArray(companyLocations.map((row) => row.location)),
+        includeKeywords: cleanStringArray(companyKeywords.filter((row) => row.type === "include").map((row) => row.keyword)),
+        excludeKeywords: cleanStringArray(companyKeywords.filter((row) => row.type === "exclude").map((row) => row.keyword)),
+        baseLocation: company.base_location || "",
+        serviceAreas: cleanStringArray(company.service_areas),
+        willingToTravel: Boolean(company.willing_to_travel),
+        nationalProjects: Boolean(company.national_projects),
+      };
+      return mapAdminCompany(company, {
+        services: companyServices,
+        locations: companyLocations,
+        keywords: companyKeywords,
+        matches: mergeAiReviewsIntoAdminMatches(
+          matches.filter((row) => row.company_id === company.id),
+          aiReviews.filter((row) => row.company_id === company.id),
+          companyProfileForAi
+        ),
+        reports: reports.filter((row) => row.company_id === company.id)
+      });
+    });
     state.adminCompaniesLoaded = true;
   } catch (error) {
     console.error("Failed to load admin companies:", error);
@@ -1814,7 +1830,7 @@ async function reviewAdminMatch(matchId, companyId, reviewAction) {
   }
 }
 
-async function runAdminAiReview(matchId) {
+async function runAdminAiReview(matchId, options = {}) {
   if (!state.isAdmin) {
     state.adminMessage = { type: "error", text: "You do not have access to this action." };
     render();
@@ -1835,13 +1851,14 @@ async function runAdminAiReview(matchId) {
   render();
 
   try {
-    const payload = await requestAiMatchReview(matchId);
+    const payload = await requestAiMatchReview(matchId, { force: options.force === true });
     await loadAdminReviewQueue();
+    await loadAdminCompanies();
     state.adminMessage = {
       type: "success",
-      text: payload.cached ? "Loaded cached AI review." : "AI review completed."
+      text: payload.cached ? "Loaded cached AI review." : options.force ? "AI review re-run completed." : "AI review completed."
     };
-    showToast(payload.cached ? "AI review loaded" : "AI review completed", "success");
+    showToast(payload.cached ? "AI review loaded" : options.force ? "AI review re-run completed" : "AI review completed", "success");
   } catch (error) {
     console.error("Failed to run AI match review:", error);
     state.adminAiReviewError = formatSupabaseError(error);
@@ -1857,7 +1874,7 @@ async function runAdminAiReview(matchId) {
   }
 }
 
-async function runAdminCompanyAiReviewBatch(companyId) {
+async function runAdminCompanyAiReviewBatch(companyId, options = {}) {
   if (!state.isAdmin) {
     state.adminMessage = { type: "error", text: "You do not have access to this action." };
     render();
@@ -1877,7 +1894,7 @@ async function runAdminCompanyAiReviewBatch(companyId) {
   render();
 
   try {
-    const payload = await requestCompanyAiReviewBatch(companyId, { limit: 10 });
+    const payload = await requestCompanyAiReviewBatch(companyId, { limit: 10, force: options.force === true, revalidate: options.force === true });
     state.adminCompanyAiReviewResults = {
       ...(state.adminCompanyAiReviewResults || {}),
       [companyId]: payload
@@ -1886,9 +1903,9 @@ async function runAdminCompanyAiReviewBatch(companyId) {
     if (state.companyId === companyId) await loadStoredMatchesForCurrentCompany();
     state.adminMessage = {
       type: "success",
-      text: `AI batch reviewed ${Number(payload.reviewed || 0)} matches. ${Number(payload.skipped || 0)} skipped.`
+      text: `${options.force ? "AI revalidation" : "AI batch"} reviewed ${Number(payload.reviewed || 0)} matches. ${Number(payload.skipped || 0)} skipped.`
     };
-    showToast("AI company review completed", "success");
+    showToast(options.force ? "AI company revalidation completed" : "AI company review completed", "success");
   } catch (error) {
     console.error("Failed to run company AI review batch:", error);
     state.adminMessage = {
@@ -7776,7 +7793,7 @@ function renderAdminReviewCard(item) {
       <div class="admin-review-actions">
         <span class="admin-review-hidden-state">${escapeHtml(opp.rawPayload?.hidden_from_reports === true ? labels.hidden : labels.notHidden)}</span>
         <div class="admin-row-actions">
-          <button class="btn btn-secondary btn-small" data-action="admin-ai-review-match" data-id="${escapeHtml(item.id)}" ${busy || aiBusy ? "disabled" : ""}>${aiBusy ? escapeHtml(labels.aiReviewing) : escapeHtml(labels.aiReviewButton)}</button>
+          <button class="btn btn-secondary btn-small" data-action="admin-ai-review-match" data-id="${escapeHtml(item.id)}" data-force="${item.aiReview ? "true" : "false"}" ${busy || aiBusy ? "disabled" : ""}>${aiBusy ? escapeHtml(labels.aiReviewing) : escapeHtml(item.aiReview ? "Re-run AI review" : labels.aiReviewButton)}</button>
           <button class="btn btn-ghost btn-small" data-action="admin-review-match" data-review-action="approve" data-id="${escapeHtml(item.id)}" data-company-id="${escapeHtml(item.companyId)}" ${busy || aiBusy ? "disabled" : ""}>${busy === "approve" ? escapeHtml(labels.approving) : escapeHtml(labels.approve)}</button>
           <button class="btn btn-ghost btn-small" data-action="admin-review-match" data-review-action="reject" data-id="${escapeHtml(item.id)}" data-company-id="${escapeHtml(item.companyId)}" ${busy || aiBusy ? "disabled" : ""}>${busy === "reject" ? escapeHtml(labels.rejecting) : escapeHtml(labels.reject)}</button>
         </div>

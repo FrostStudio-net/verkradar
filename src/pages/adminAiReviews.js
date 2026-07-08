@@ -10,7 +10,7 @@ export function renderAdminCompanyMatchList(company, options) {
   if (!matches.length) return `<p>No stored matches yet.</p>`;
   return `
     <ul class="admin-detail-list admin-ai-aware-match-list">
-      ${matches.map((match) => renderCompactMatchRow(match, { escapeHtml })).join("")}
+      ${matches.map((match) => renderCompactMatchRow(match, { escapeHtml, company })).join("")}
     </ul>
   `;
 }
@@ -23,7 +23,7 @@ export function renderAdminCompanyAiReviewPanel(company, options) {
     filter = "not_reviewed",
     lastResult = null,
   } = options;
-  const matches = filterAdminMatchesByAiStatus(company.latestMatches || [], filter);
+  const matches = filterAdminMatchesByAiStatus(company.latestMatches || [], filter, company);
   return `
     <section class="side-panel admin-company-ai-panel">
       <div class="admin-company-ai-header">
@@ -33,6 +33,9 @@ export function renderAdminCompanyAiReviewPanel(company, options) {
         </div>
         <button class="btn btn-secondary btn-small" type="button" data-action="admin-ai-review-company" data-id="${escapeHtml(company.id)}" ${actionState ? "disabled" : ""}>
           ${actionState ? "Running AI review..." : "Run AI review for this company"}
+        </button>
+        <button class="btn btn-ghost btn-small" type="button" data-action="admin-ai-review-company" data-id="${escapeHtml(company.id)}" data-force="true" ${actionState ? "disabled" : ""}>
+          ${actionState ? "Revalidating..." : "Re-run AI review for this company"}
         </button>
       </div>
 
@@ -53,7 +56,7 @@ export function renderAdminCompanyAiReviewPanel(company, options) {
 
       ${matches.length ? `
         <ul class="admin-detail-list admin-ai-match-list">
-          ${matches.map((match) => renderAiMatchRow(match, { escapeHtml, formatDateTime })).join("")}
+          ${matches.map((match) => renderAiMatchRow(match, { escapeHtml, formatDateTime, company })).join("")}
         </ul>
       ` : `<p class="muted-text">No matches for this AI review filter.</p>`}
     </section>
@@ -79,9 +82,9 @@ function renderBatchResult(result, escapeHtml) {
   `;
 }
 
-function renderCompactMatchRow(match, { escapeHtml }) {
+function renderCompactMatchRow(match, { escapeHtml, company }) {
   const opportunity = match.opportunities || {};
-  const display = getAdminMatchAiDisplay(match);
+  const display = getAdminMatchAiDisplay(match, company);
   const score = Number(match.match_score || 0);
   return `
     <li class="admin-ai-aware-match ${escapeHtml(display.tone || "muted")}">
@@ -93,13 +96,14 @@ function renderCompactMatchRow(match, { escapeHtml }) {
         ${display.bucket === "outside_service_area" ? " · Rule label suppressed" : ` · ${escapeHtml(match.match_label || "Match")}`}
       </span>
       ${match.ai_review_skipped_reason ? `<small>Skipped: ${escapeHtml(formatSkippedReason(match.ai_review_skipped_reason))}</small>` : ""}
+      ${match.ai_review_profile_stale ? `<small>AI review may be stale because the company profile changed.</small>` : ""}
     </li>
   `;
 }
 
-function renderAiMatchRow(match, { escapeHtml, formatDateTime }) {
+function renderAiMatchRow(match, { escapeHtml, formatDateTime, company }) {
   const opportunity = match.opportunities || {};
-  const display = getAdminMatchAiDisplay(match);
+  const display = getAdminMatchAiDisplay(match, company);
   const confidence = display.confidence ? ` · ${Math.round(display.confidence * 100)}%` : "";
   const reviewedAt = match.ai_reviewed_at ? ` · ${formatDateTime(match.ai_reviewed_at)}` : "";
   const skipped = match.ai_review_skipped_reason ? ` · Skipped: ${formatSkippedReason(match.ai_review_skipped_reason)}` : "";
@@ -107,6 +111,7 @@ function renderAiMatchRow(match, { escapeHtml, formatDateTime }) {
     <li class="admin-ai-match-row ${escapeHtml(display.tone || "muted")}">
       <strong>${escapeHtml(opportunity.title || "Opportunity")}</strong>
       <span>${escapeHtml(display.label)}${escapeHtml(confidence)}${escapeHtml(reviewedAt)}${escapeHtml(skipped)}</span>
+      ${match.ai_review_profile_stale ? `<span>AI review may be stale because the company profile changed.</span>` : ""}
       <span>Rule score ${Number(match.match_score || 0)} · ${escapeHtml(match.match_label || "Match")}</span>
       <span class="admin-ai-debug">company_id=${escapeHtml(match.company_id || "")} · opportunity_id=${escapeHtml(match.opportunity_id || "")} · ai_review_found=${match.ai_review_found === true ? "true" : "false"}</span>
     </li>

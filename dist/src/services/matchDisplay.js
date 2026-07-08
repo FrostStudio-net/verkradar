@@ -9,7 +9,7 @@ export function getAiReviewStatusFromReview(review) {
   return "needs_review";
 }
 
-export function mergeAiReviewsIntoAdminMatches(matches, aiReviews) {
+export function mergeAiReviewsIntoAdminMatches(matches, aiReviews, company = null) {
   const byCompanyOpportunity = new Map();
   const byMatchId = new Map();
   for (const review of aiReviews || []) {
@@ -32,13 +32,26 @@ export function mergeAiReviewsIntoAdminMatches(matches, aiReviews) {
       ai_reviewed_at: review.updated_at || review.created_at || match.ai_reviewed_at,
       ai_review_send_to_client: review.send_to_client === true,
       ai_review_reason: review.reason || "",
+      ai_review_profile_hash: review.reviewed_profile_hash || "",
+      ai_review_profile_stale: isAiReviewProfileStale(review, company),
       ai_review_found: true,
       ai_review_saved: true,
     };
   });
 }
 
-export function getAdminMatchAiDisplay(match) {
+export function getAdminMatchAiDisplay(match, company = null) {
+  const locationAssessment = assessAdminMatchLocation(company, match);
+  if (locationAssessment.outsideServiceArea) {
+    return {
+      bucket: "outside_service_area",
+      label: "Outside service area",
+      tone: "warning",
+      clientReady: false,
+      reason: locationAssessment.reason || "Outside current service area.",
+    };
+  }
+
   const skippedReason = normalizeSkippedReason(match?.ai_review_skipped_reason);
   const fit = String(match?.ai_review_fit || "");
   const confidence = Number(match?.ai_review_confidence || 0);
@@ -56,6 +69,9 @@ export function getAdminMatchAiDisplay(match) {
   }
 
   if (hasSavedReview) {
+    if (match?.ai_review_profile_stale === true) {
+      return { bucket: "needs_review", label: "AI review may be stale", tone: "warning", clientReady: false, confidence };
+    }
     if (fit === "strong" && match?.ai_review_send_to_client === true) {
       return { bucket: "ai_recommended", label: "AI recommended", tone: "success", clientReady: true, confidence };
     }
@@ -85,9 +101,9 @@ export function getAdminMatchAiDisplay(match) {
   return { bucket: "not_reviewed", label: "Not AI reviewed", tone: "muted", clientReady: false };
 }
 
-export function filterAdminMatchesByAiStatus(matches, filter) {
+export function filterAdminMatchesByAiStatus(matches, filter, company = null) {
   return (matches || []).filter((match) => {
-    const display = getAdminMatchAiDisplay(match);
+    const display = getAdminMatchAiDisplay(match, company);
     if (filter === "ai_recommended") return display.bucket === "ai_recommended";
     if (filter === "ai_possible") return display.bucket === "ai_possible";
     if (filter === "needs_review") return display.bucket === "needs_review";
@@ -95,6 +111,29 @@ export function filterAdminMatchesByAiStatus(matches, filter) {
     if (filter === "not_reviewed") return display.bucket === "not_reviewed";
     return true;
   });
+}
+
+export function createAdminCompanyProfileHash(company) {
+  const payload = JSON.stringify({
+    services: uniqueSorted([
+      ...(company?.services || []),
+      ...(company?.includeKeywords || []),
+      ...(company?.excludeKeywords || []).map((value) => `exclude:${value}`),
+    ]),
+    locations: uniqueSorted([
+      company?.baseLocation,
+      ...(company?.locations || []),
+      ...(company?.serviceAreas || []),
+      company?.willingToTravel ? "willing_to_travel:true" : "willing_to_travel:false",
+      company?.nationalProjects ? "national_projects:true" : "national_projects:false",
+    ]),
+  });
+  let hash = 5381;
+  for (let index = 0; index < payload.length; index += 1) {
+    hash = ((hash << 5) + hash) + payload.charCodeAt(index);
+    hash |= 0;
+  }
+  return `profile_${Math.abs(hash)}`;
 }
 
 export function formatSkippedReason(value) {
@@ -115,4 +154,75 @@ function normalizeSkippedReason(value) {
     .trim()
     .toLowerCase()
     .replace(/[\s-]+/g, "_");
+}
+
+function isAiReviewProfileStale(review, company) {
+  if (!review || !company) return false;
+  const reviewedHash = String(review.reviewed_profile_hash || "");
+  return Boolean(reviewedHash && reviewedHash !== createAdminCompanyProfileHash(company));
+}
+
+function assessAdminMatchLocation(company, match) {
+  if (!company || company.nationalProjects === true || company.willingToTravel === true) {
+    return { outsideServiceArea: false, reason: "" };
+  }
+  const serviceText = normalizeText([
+    company.baseLocation,
+    ...(company.serviceAreas || []),
+    ...(company.locations || []),
+  ].join(" "));
+  if (!serviceText || /all iceland|allt land|national|landsdekkandi/.test(serviceText)) {
+    return { outsideServiceArea: false, reason: "" };
+  }
+  const opportunity = match?.opportunities || {};
+  const payload = opportunity.raw_payload && typeof opportunity.raw_payload === "object" ? opportunity.raw_payload : {};
+  const opportunityText = normalizeText([
+    opportunity.title,
+    opportunity.location,
+    payload.region,
+    payload.extracted_location,
+  ].join(" "));
+  if (!opportunityText) return { outsideServiceArea: false, reason: "Opportunity location unclear" };
+  const outsideNorth = /(dalvik|akureyri|boggvisbraut|birkiholar|north iceland|nordurland)/.test(opportunityText) &&
+    !/(dalvik|akureyri|north iceland|nordurland)/.test(serviceText);
+  if (outsideNorth) return { outsideServiceArea: true, reason: "Outside current service area" };
+  const outsideSnaefellsnes = /(olafsvik|snaefellsnes|stykkisholmur|grundarfjordur)/.test(opportunityText) &&
+    !/(olafsvik|snaefellsnes|stykkisholmur|grundarfjordur)/.test(serviceText);
+  if (outsideSnaefellsnes) return { outsideServiceArea: true, reason: "Outside current service area" };
+  const serviceRegions = getKnownLocationTokens(serviceText);
+  const opportunityRegions = getKnownLocationTokens(opportunityText);
+  if (!serviceRegions.length || !opportunityRegions.length) return { outsideServiceArea: false, reason: "" };
+  return {
+    outsideServiceArea: !opportunityRegions.some((token) => serviceRegions.includes(token)),
+    reason: "Outside current service area",
+  };
+}
+
+function getKnownLocationTokens(text) {
+  const checks = [
+    ["capital_area", /reykjavik|capital area|hofudborg|gardabaer|kopavogur|seltjarnarnes|mosfellsbaer/],
+    ["south", /selfoss|arborg|sudurland|hveragerdi|olfus|rangarthing/],
+    ["west_corridor", /akranes|borgarnes|borgarbyggd|hvalfjordur/],
+    ["north", /dalvik|akureyri|nordurland|birkiholar|boggvisbraut/],
+    ["snaefellsnes", /olafsvik|snaefellsnes|stykkisholmur|grundarfjordur/],
+  ];
+  return checks.filter(([, pattern]) => pattern.test(text)).map(([token]) => token);
+}
+
+function uniqueSorted(values) {
+  return Array.from(new Set((values || []).map((value) => normalizeText(value)).filter(Boolean))).sort();
+}
+
+function normalizeText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/þ/g, "th")
+    .replace(/ð/g, "d")
+    .replace(/æ/g, "ae")
+    .replace(/ö/g, "o")
+    .replace(/[^a-z0-9\s/-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
