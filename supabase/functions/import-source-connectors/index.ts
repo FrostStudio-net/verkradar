@@ -392,6 +392,16 @@ Deno.serve(async (req) => {
     const runMatching = body.refreshMatches === true || body.refresh_matches === true || body.runMatching === true || body.run_matching === true || isSingleSourceRun;
     const runReports = body.generateReports === true || body.generate_reports === true;
     const reenrichMissingDeadlines = body.reenrichMissingDeadlines === true || body.reenrich_missing_deadlines === true;
+    const fixMissingDeadlineSafety = body.fixMissingDeadlineSafety === true || body.fix_missing_deadline_safety === true;
+    if (fixMissingDeadlineSafety) {
+      const result = await fixMissingDeadlineSafetyFlags(adminClient);
+      return json({
+        ...summary,
+        ok: true,
+        message: `Fixed missing-deadline safety flags for ${result.opportunitiesUpdated} opportunities and ${result.matchesUpdated} matches.`,
+        ...result,
+      });
+    }
     if (reenrichMissingDeadlines) {
       const coverageBefore = await getDeadlineCoverageSummary(adminClient);
       const result = await reenrichMissingOpportunityDeadlines(adminClient, limit);
@@ -571,9 +581,10 @@ Deno.serve(async (req) => {
             normalized.map((opportunity) => opportunity.external_id),
           );
 
+          const preparedOpportunities = normalized.map(applyMissingDeadlineSafety);
           const { data: savedRows, error: upsertError } = await adminClient
             .from("opportunities")
-            .upsert(normalized.map(toOpportunityUpsertRow), { onConflict: "source_id,external_id" })
+            .upsert(preparedOpportunities.map(toOpportunityUpsertRow), { onConflict: "source_id,external_id" })
             .select("id, external_id");
 
           if (upsertError) throw upsertError;
@@ -583,7 +594,7 @@ Deno.serve(async (req) => {
           sourceSummary.skipped += unsavedCount;
           if (unsavedCount > 0) {
             const savedIds = new Set((savedRows || []).map((row) => row.external_id));
-            for (const opportunity of normalized) {
+            for (const opportunity of preparedOpportunities) {
               if (savedIds.has(opportunity.external_id)) continue;
               recordImportSkip(runDetails, {
                 source_name: source.name,
@@ -596,7 +607,7 @@ Deno.serve(async (req) => {
             if (existing.has(row.external_id)) sourceSummary.updated += 1;
             else sourceSummary.inserted += 1;
           }
-          for (const opportunity of normalized) {
+          for (const opportunity of preparedOpportunities) {
             if (!opportunity.deadline_debug) continue;
             const debugSample: DeadlineDebugSample = {
               ...opportunity.deadline_debug,
@@ -1288,6 +1299,29 @@ function getConnectorItemTitle(item: Record<string, unknown>, connectorType: Con
 function toOpportunityUpsertRow(opportunity: NormalizedOpportunity) {
   const { deadline_debug: _deadlineDebug, ...row } = opportunity;
   return row;
+}
+
+function applyMissingDeadlineSafety(opportunity: NormalizedOpportunity): NormalizedOpportunity {
+  if (opportunity.deadline) return opportunity;
+  const payload = opportunity.raw_payload && typeof opportunity.raw_payload === "object" ? opportunity.raw_payload : {};
+  const adminStatus = String(payload.admin_report_status || "").toLowerCase();
+  const manuallyApproved = adminStatus === "include" || String(payload.manual_approved || "").toLowerCase() === "true";
+  const currentQuality = String(payload.quality_status || "").toLowerCase();
+  const nextQuality = !manuallyApproved && ["confirmed_tender", "likely_tender"].includes(currentQuality)
+    ? "needs_review"
+    : (payload.quality_status || "needs_review");
+  return {
+    ...opportunity,
+    raw_payload: {
+      ...payload,
+      alert_eligible: manuallyApproved ? payload.alert_eligible === true : false,
+      review_required: manuallyApproved ? false : true,
+      safety_status: manuallyApproved ? (payload.safety_status || "needs_review") : "needs_review",
+      quality_status: nextQuality,
+      deadline_warning: MISSING_DEADLINE_RISK,
+      deadline_debug_reason: "Missing bid deadline after enrichment; requires manual review.",
+    },
+  };
 }
 
 function shouldDebugDeadlineOpportunity(title: string, url = "") {
@@ -2096,13 +2130,11 @@ async function reenrichMissingOpportunityDeadlines(
           },
         };
       }
+      const safeOpportunity = applyMissingDeadlineSafety(opportunity);
       await supabase
         .from("opportunities")
         .update({
-          raw_payload: {
-            ...opportunity.raw_payload,
-            deadline_warning: MISSING_DEADLINE_RISK,
-          },
+          raw_payload: safeOpportunity.raw_payload,
         })
         .eq("id", row.id);
       await supabase
@@ -2116,6 +2148,103 @@ async function reenrichMissingOpportunityDeadlines(
         .eq("opportunity_id", row.id);
     }
     if (opportunity.deadline_debug) result.samples.push(opportunity.deadline_debug);
+  }
+  return result;
+}
+
+async function fixMissingDeadlineSafetyFlags(supabase: ReturnType<typeof createClient>) {
+  const reason = "Missing bid deadline after enrichment; requires manual review.";
+  const result = {
+    checked: 0,
+    opportunitiesUpdated: 0,
+    matchesUpdated: 0,
+    missingDeadlineAlertFalse: 0,
+    missingDeadlineAlertNotFalse: 0,
+    missingDeadlineConfirmedTender: 0,
+    missingDeadlineNeedsReview: 0,
+    errors: [] as string[],
+  };
+
+  const { data, error } = await supabase
+    .from("opportunities")
+    .select("id, title, raw_payload")
+    .is("deadline", null);
+  if (error) throw error;
+
+  const rows = data || [];
+  result.checked = rows.length;
+  for (const row of rows) {
+    const payload = row.raw_payload && typeof row.raw_payload === "object" ? row.raw_payload as Record<string, unknown> : {};
+    const adminStatus = String(payload.admin_report_status || "").toLowerCase();
+    const manuallyApproved = adminStatus === "include" || String(payload.manual_approved || "").toLowerCase() === "true";
+    const currentQuality = String(payload.quality_status || "").toLowerCase();
+    const nextPayload = {
+      ...payload,
+      alert_eligible: manuallyApproved ? payload.alert_eligible === true : false,
+      review_required: manuallyApproved ? false : true,
+      safety_status: manuallyApproved ? (payload.safety_status || "needs_review") : "needs_review",
+      quality_status: !manuallyApproved && ["confirmed_tender", "likely_tender"].includes(currentQuality)
+        ? "needs_review"
+        : (payload.quality_status || "needs_review"),
+      deadline_warning: MISSING_DEADLINE_RISK,
+      deadline_debug_reason: reason,
+      missing_deadline_safety_checked_at: new Date().toISOString(),
+    };
+    const { error: updateError } = await supabase
+      .from("opportunities")
+      .update({ raw_payload: nextPayload })
+      .eq("id", row.id);
+    if (updateError) {
+      result.errors.push(`${String(row.title || row.id)}: ${updateError.message}`);
+    } else {
+      result.opportunitiesUpdated += 1;
+    }
+  }
+
+  const opportunityIds = rows.map((row) => String(row.id || "")).filter(Boolean);
+  for (let index = 0; index < opportunityIds.length; index += 100) {
+    const ids = opportunityIds.slice(index, index + 100);
+    const { data: matchRows, error: matchSelectError } = await supabase
+      .from("opportunity_matches")
+      .select("id")
+      .in("opportunity_id", ids)
+      .is("reviewed_at", null);
+    if (matchSelectError) {
+      result.errors.push(matchSelectError.message);
+      continue;
+    }
+    const matchIds = (matchRows || []).map((row) => String(row.id || "")).filter(Boolean);
+    if (!matchIds.length) continue;
+    const { error: matchUpdateError } = await supabase
+      .from("opportunity_matches")
+      .update({
+        safety_status: "needs_review",
+        safety_reasons: [reason],
+        alert_eligible: false,
+        review_required: true,
+      })
+      .in("id", matchIds);
+    if (matchUpdateError) {
+      result.errors.push(matchUpdateError.message);
+    } else {
+      result.matchesUpdated += matchIds.length;
+    }
+  }
+
+  const { data: countRows, error: countError } = await supabase
+    .from("opportunities")
+    .select("raw_payload")
+    .is("deadline", null);
+  if (countError) {
+    result.errors.push(countError.message);
+    return result;
+  }
+  for (const row of countRows || []) {
+    const payload = row.raw_payload && typeof row.raw_payload === "object" ? row.raw_payload as Record<string, unknown> : {};
+    if (String(payload.alert_eligible).toLowerCase() === "false") result.missingDeadlineAlertFalse += 1;
+    else result.missingDeadlineAlertNotFalse += 1;
+    if (String(payload.quality_status || "").toLowerCase() === "confirmed_tender") result.missingDeadlineConfirmedTender += 1;
+    if (String(payload.quality_status || "").toLowerCase() === "needs_review") result.missingDeadlineNeedsReview += 1;
   }
   return result;
 }

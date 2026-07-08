@@ -6607,6 +6607,7 @@ function getMissingDeadlineReason(opp) {
 
 function renderMissingDeadlineDebugSection() {
   const missing = getMissingDeadlineOpportunities();
+  const counts = getMissingDeadlineDebugCounts(missing);
   const grouped = missing.reduce((acc, opp) => {
     const source = opp.source || "Unknown";
     if (!acc[source]) acc[source] = [];
@@ -6622,6 +6623,9 @@ function renderMissingDeadlineDebugSection() {
         <div>
           <h2>Missing deadline debug</h2>
           <p>${missing.length} opportunities missing deadlines${selectedSource !== "all" ? ` for ${escapeHtml(selectedSource)}` : ""}. Grouped by source.</p>
+          <p class="admin-filter-count">
+            total=${counts.total} · alert_eligible=false=${counts.alertFalse} · alert_eligible not false=${counts.alertNotFalse} · confirmed_tender=${counts.confirmedTender} · needs_review=${counts.needsReview}
+          </p>
         </div>
         <label class="admin-inline-control">
           <span>Source</span>
@@ -6634,6 +6638,26 @@ function renderMissingDeadlineDebugSection() {
       ${sources.length ? sources.map((source) => renderMissingDeadlineSourceGroup(source, grouped[source])).join("") : `<div class="empty-card">No missing-deadline opportunities for this filter.</div>`}
     </section>
   `;
+}
+
+function getMissingDeadlineDebugCounts(opportunities) {
+  return (opportunities || []).reduce((acc, opp) => {
+    const payload = opp?.rawPayload || {};
+    const alertValue = String(payload.alert_eligible ?? "").toLowerCase();
+    const quality = String(payload.quality_status || "").toLowerCase();
+    acc.total += 1;
+    if (alertValue === "false") acc.alertFalse += 1;
+    else acc.alertNotFalse += 1;
+    if (quality === "confirmed_tender") acc.confirmedTender += 1;
+    if (quality === "needs_review") acc.needsReview += 1;
+    return acc;
+  }, {
+    total: 0,
+    alertFalse: 0,
+    alertNotFalse: 0,
+    confirmedTender: 0,
+    needsReview: 0,
+  });
 }
 
 function renderMissingDeadlineSourceGroup(source, opportunities) {
@@ -6666,14 +6690,16 @@ function renderMissingDeadlineRow(opp) {
   const fetchable = getFetchableSourceUrlInfo(opp);
   const safeUrl = getSafeExternalUrl(opp.url || opp.rawPayload?.source_url || "");
   const safetyStatus = opp.rawPayload?.safety_status || opp.rawPayload?.quality_status || getOpportunityQualityLabel(opp);
-  const alertEligible = opp.rawPayload?.alert_eligible === true ? "true" : opp.rawPayload?.alert_eligible === false ? "false" : "unknown";
+  const rawAlertEligible = opp.rawPayload?.alert_eligible;
+  const alertEligible = rawAlertEligible === true ? "true" : "false";
+  const alertWarning = String(rawAlertEligible ?? "").toLowerCase() !== "false" ? `<br><span class="status-pill is-warning">Missing deadline alert flag needs fix</span>` : "";
   return `
     <tr>
       <td><code>${escapeHtml(String(opp.id || ""))}</code><br><span>${escapeHtml(opp.externalId || "No external ID")}</span></td>
       <td><strong>${escapeHtml(opp.title || "Untitled")}</strong><br><span>${escapeHtml(opp.source || "Unknown source")}</span></td>
       <td>${safeUrl ? `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noreferrer">${escapeHtml(safeUrl)}</a>` : "No source URL"}</td>
       <td>${opp.publishedDate ? escapeHtml(formatDateTime(opp.publishedDate)) : "Not listed"}</td>
-      <td>${escapeHtml(safetyStatus || "unknown")}<br><span>alert_eligible=${escapeHtml(alertEligible)}</span></td>
+      <td>${escapeHtml(safetyStatus || "unknown")}<br><span>alert_eligible=${escapeHtml(alertEligible)}</span>${alertWarning}</td>
       <td><span class="status-pill ${fetchable.isSafe ? "is-success" : "is-running"}">${escapeHtml(fetchable.label)}</span></td>
       <td>${escapeHtml(getMissingDeadlineReason(opp))}</td>
     </tr>
