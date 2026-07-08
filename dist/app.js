@@ -88,6 +88,7 @@ function getEmptyProfile() {
 let state = {
   route: location.hash.replace("#", "") || "/",
   language: getInitialLanguage(),
+  pendingSignupPlan: getPlanFromRoute(location.hash.replace("#", "") || "/") || getStoredSelectedPlan(),
   user: null,
   currentUser: null,
   isAdmin: false,
@@ -211,6 +212,55 @@ let state = {
   toast: null
 };
 
+function getRoutePath(route = state.route) {
+  return String(route || "/").split("?")[0] || "/";
+}
+
+function getRouteSearchParams(route = state.route) {
+  const query = String(route || "").split("?")[1] || "";
+  return new URLSearchParams(query);
+}
+
+function normalizeSelectedPlan(plan) {
+  const value = String(plan || "").trim().toLowerCase();
+  return ["basic", "pro", "priority"].includes(value) ? value : "";
+}
+
+function getStoredSelectedPlan() {
+  try {
+    return normalizeSelectedPlan(localStorage.getItem(STORAGE_KEYS.selectedPlan));
+  } catch {
+    return "";
+  }
+}
+
+function setStoredSelectedPlan(plan) {
+  const normalized = normalizeSelectedPlan(plan);
+  try {
+    if (normalized) localStorage.setItem(STORAGE_KEYS.selectedPlan, normalized);
+  } catch {
+    // Ignore storage failures; the plan is still preserved in memory for this session.
+  }
+  return normalized;
+}
+
+function clearStoredSelectedPlan() {
+  try {
+    localStorage.removeItem(STORAGE_KEYS.selectedPlan);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function getPlanFromRoute(route = state.route) {
+  return normalizeSelectedPlan(getRouteSearchParams(route).get("plan"));
+}
+
+function syncPendingSignupPlanFromRoute(route = state.route) {
+  const plan = getPlanFromRoute(route);
+  if (plan) state.pendingSignupPlan = setStoredSelectedPlan(plan);
+}
+
 if ("scrollRestoration" in history) {
   history.scrollRestoration = "manual";
 }
@@ -297,6 +347,7 @@ let suppressNextHashChange = false;
 
 window.addEventListener("hashchange", () => {
   const nextRoute = location.hash.replace("#", "") || "/";
+  const nextPath = getRoutePath(nextRoute);
   const routeChanged = nextRoute !== state.route;
 
   if (suppressNextHashChange && nextRoute === state.route) {
@@ -305,12 +356,13 @@ window.addEventListener("hashchange", () => {
   }
   suppressNextHashChange = false;
 
-  if (["/login", "/signup", "/forgot-password", "/reset-password"].includes(nextRoute) && nextRoute !== state.route) {
+  if (["/login", "/signup", "/forgot-password", "/reset-password"].includes(nextPath) && nextRoute !== state.route) {
     state.authMessage = null;
     state.authSubmitting = false;
   }
 
   state.route = nextRoute;
+  syncPendingSignupPlanFromRoute(nextRoute);
   state.isMobileMenuOpen = false;
   state.profileMenuOpen = false;
   if (routeChanged) clearOpportunityDetailsState();
@@ -821,8 +873,8 @@ document.addEventListener("submit", async (event) => {
     updateProfileDraftFromForm(event.target);
     const profile = normalizeProfileDraftForSave();
 
-    if (!profile.companyName || !profile.contactEmail || !profile.industry) {
-      showToast("Please fill in company name, email and industry.", "error");
+    if (!profile.companyName || !profile.kennitala || !profile.contactEmail || !profile.billingEmail || !profile.contactName || !profile.phone || !profile.address || !profile.industry) {
+      showToast(state.language === "is" ? "Fylltu út fyrirtækisnafn, kennitölu, reikningsupplýsingar, tengilið og atvinnugrein." : "Please fill in company name, kennitala, billing details, contact details and industry.", "error");
       return;
     }
 
@@ -952,8 +1004,9 @@ function updateMobileMenuOffset() {
 function navigate(route) {
   route = route || "/";
   const authRoutes = ["/login", "/signup", "/forgot-password", "/reset-password"];
+  const path = getRoutePath(route);
 
-  if (authRoutes.includes(route) && route !== state.route) {
+  if (authRoutes.includes(path) && route !== state.route) {
     state.authMessage = null;
     state.authSubmitting = false;
   }
@@ -971,6 +1024,7 @@ function navigate(route) {
 
   clearOpportunityDetailsState();
   state.route = route;
+  syncPendingSignupPlanFromRoute(route);
   suppressNextHashChange = true;
   location.hash = route;
   render();
@@ -991,7 +1045,8 @@ function getTrialAccessHref() {
 function isPublicAuthEntryRoute(route = state.route) {
   const normalized = String(route || "");
   if (isPasswordRecoveryRoute(normalized)) return false;
-  return ["/", "/login", "/signup", "/forgot-password"].includes(normalized) ||
+  const path = getRoutePath(normalized);
+  return ["/", "/login", "/signup", "/forgot-password"].includes(path) ||
     normalized.startsWith("access_token=") ||
     normalized.startsWith("code=") ||
     normalized.includes("type=signup") ||
@@ -1489,9 +1544,18 @@ function mapAdminCompany(company, related) {
     ownerId: company.owner_id || "",
     companyName: company.company_name || "Unnamed company",
     contactEmail: company.contact_email || "",
+    kennitala: company.kennitala || "",
+    billingEmail: company.billing_email || "",
+    contactName: company.contact_name || "",
+    phone: company.phone || "",
+    address: company.address || "",
     website: company.website || "",
     industry: company.industry || "",
-    plan: company.plan || company.subscription_plan || "Demo",
+    plan: company.selected_plan || company.plan || company.subscription_plan || "Demo",
+    selectedPlan: company.selected_plan || company.plan || "",
+    billingStatus: company.billing_status || "",
+    trialStartedAt: company.trial_started_at || "",
+    trialEndsAt: company.trial_ends_at || "",
     profileStatus: complete ? "Complete" : "Incomplete",
     createdAt: company.created_at,
     services,
@@ -2614,6 +2678,7 @@ function getExistingAccountAuthActions() {
 }
 
 async function signUp(email, password) {
+  syncPendingSignupPlanFromRoute();
   state.authSubmitting = true;
   state.authMessage = null;
   render();
@@ -3128,9 +3193,18 @@ async function saveCompanyProfile(profile) {
   const cleanProfile = {
     ...profile,
     companyName: String(profile.companyName || "").trim(),
+    kennitala: String(profile.kennitala || "").trim(),
     contactEmail: String(profile.contactEmail || "").trim(),
+    billingEmail: String(profile.billingEmail || "").trim(),
+    contactName: String(profile.contactName || "").trim(),
+    phone: String(profile.phone || "").trim(),
+    address: String(profile.address || "").trim(),
     website: String(profile.website || "").trim(),
     industry: String(profile.industry || "").trim(),
+    selectedPlan: normalizeSelectedPlan(profile.selectedPlan || state.pendingSignupPlan || state.profile?.selectedPlan || state.profile?.plan) || "basic",
+    billingStatus: profile.billingStatus || state.profile?.billingStatus || "trial",
+    trialStartedAt: profile.trialStartedAt || state.profile?.trialStartedAt || new Date().toISOString(),
+    trialEndsAt: profile.trialEndsAt || state.profile?.trialEndsAt || new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
     services: cleanStringArray(profile.services),
     locations: cleanStringArray(profile.locations),
     includeKeywords: cleanStringArray(profile.includeKeywords),
@@ -3163,8 +3237,18 @@ async function saveCompanyProfile(profile) {
       owner_id: user.id,
       company_name: cleanProfile.companyName,
       contact_email: cleanProfile.contactEmail || user.email,
+      kennitala: cleanProfile.kennitala || null,
+      billing_email: cleanProfile.billingEmail || cleanProfile.contactEmail || user.email,
+      contact_name: cleanProfile.contactName || null,
+      phone: cleanProfile.phone || null,
+      address: cleanProfile.address || null,
       website: cleanProfile.website || null,
       industry: cleanProfile.industry,
+      plan: cleanProfile.selectedPlan,
+      selected_plan: cleanProfile.selectedPlan,
+      billing_status: cleanProfile.billingStatus,
+      trial_started_at: cleanProfile.trialStartedAt,
+      trial_ends_at: cleanProfile.trialEndsAt,
       base_location: cleanProfile.baseLocation || null,
       service_areas: cleanProfile.serviceAreas,
       willing_to_travel: cleanProfile.willingToTravel,
@@ -3240,15 +3324,27 @@ async function saveCompanyProfile(profile) {
   }
 
   state.profile = cleanProfile;
+  state.pendingSignupPlan = "";
+  clearStoredSelectedPlan();
   saveProfile(cleanProfile);
 }
 
 function mapSupabaseCompanyProfile(company, services, locations, keywords) {
   return {
     companyName: company.company_name || "",
+    kennitala: company.kennitala || "",
     contactEmail: company.contact_email || "",
+    billingEmail: company.billing_email || company.contact_email || "",
+    contactName: company.contact_name || "",
+    phone: company.phone || "",
+    address: company.address || "",
     website: company.website || "",
     industry: company.industry || "",
+    plan: company.plan || company.selected_plan || "basic",
+    selectedPlan: company.selected_plan || company.plan || "basic",
+    billingStatus: company.billing_status || "trial",
+    trialStartedAt: company.trial_started_at || "",
+    trialEndsAt: company.trial_ends_at || "",
     services: cleanStringArray(services.map((row) => row.service)),
     includeKeywords: cleanStringArray(keywords.filter((row) => row.type === "include").map((row) => row.keyword)),
     excludeKeywords: cleanStringArray(keywords.filter((row) => row.type === "exclude").map((row) => row.keyword)),
@@ -3994,6 +4090,7 @@ function initializeProfileDraft() {
   }
 
   state.profileDraft = getEmptyProfile();
+  if (state.pendingSignupPlan) state.profileDraft.selectedPlan = state.pendingSignupPlan;
 }
 
 function cloneProfileForDraft(profile) {
@@ -4024,8 +4121,14 @@ function updateProfileDraftFromForm(formElement) {
   const form = new FormData(formElement);
   const nextDraft = { ...state.profileDraft };
   if (hasFormControl(formElement, "companyName")) nextDraft.companyName = String(form.get("companyName") || "").trim();
+  if (hasFormControl(formElement, "kennitala")) nextDraft.kennitala = String(form.get("kennitala") || "").trim();
   if (hasFormControl(formElement, "contactEmail")) nextDraft.contactEmail = String(form.get("contactEmail") || "").trim();
+  if (hasFormControl(formElement, "billingEmail")) nextDraft.billingEmail = String(form.get("billingEmail") || "").trim();
+  if (hasFormControl(formElement, "contactName")) nextDraft.contactName = String(form.get("contactName") || "").trim();
+  if (hasFormControl(formElement, "phone")) nextDraft.phone = String(form.get("phone") || "").trim();
+  if (hasFormControl(formElement, "address")) nextDraft.address = String(form.get("address") || "").trim();
   if (hasFormControl(formElement, "website")) nextDraft.website = String(form.get("website") || "").trim();
+  if (hasFormControl(formElement, "selectedPlan")) nextDraft.selectedPlan = normalizeSelectedPlan(form.get("selectedPlan")) || "basic";
   if (hasFormControl(formElement, "industry")) nextDraft.industry = String(form.get("industry") || "");
   if (hasFormControl(formElement, "services")) nextDraft.services = splitInput(form.get("services"));
   if (hasFormControl(formElement, "includeKeywords")) nextDraft.includeKeywords = splitInput(form.get("includeKeywords"));
@@ -4057,8 +4160,14 @@ function normalizeProfileDraftForSave() {
   return {
     ...state.profileDraft,
     companyName: String(state.profileDraft.companyName || "").trim(),
+    kennitala: String(state.profileDraft.kennitala || "").trim(),
     contactEmail: String(state.profileDraft.contactEmail || "").trim(),
+    billingEmail: String(state.profileDraft.billingEmail || "").trim(),
+    contactName: String(state.profileDraft.contactName || "").trim(),
+    phone: String(state.profileDraft.phone || "").trim(),
+    address: String(state.profileDraft.address || "").trim(),
     website: String(state.profileDraft.website || "").trim(),
+    selectedPlan: normalizeSelectedPlan(state.profileDraft.selectedPlan || state.pendingSignupPlan) || "basic",
     industry: String(state.profileDraft.industry || ""),
     services: cleanStringArray(state.profileDraft.services),
     includeKeywords: cleanStringArray(state.profileDraft.includeKeywords),
@@ -5123,7 +5232,7 @@ function badgeClass(label) {
 
 function render() {
   const app = document.getElementById("app");
-  const route = state.route;
+  const route = getRoutePath(state.route);
 
   let html = "";
   if (state.isBooting || !state.authLoaded || !state.profileLoaded || !state.adminLoaded) html = renderLoadingPage();
@@ -7524,10 +7633,20 @@ function renderAdminCompanyDetails(company) {
             <section class="side-panel">
               <h3>Company basics</h3>
               <p><strong>Email:</strong> ${escapeHtml(company.contactEmail || "Unknown")}</p>
+              <p><strong>Contact name:</strong> ${escapeHtml(company.contactName || "Not listed")}</p>
+              <p><strong>Phone:</strong> ${escapeHtml(company.phone || "Not listed")}</p>
+              <p><strong>Kennitala:</strong> ${escapeHtml(company.kennitala || "Not listed")}</p>
+              <p><strong>Address:</strong> ${escapeHtml(company.address || "Not listed")}</p>
               <p><strong>Website:</strong> ${safeWebsite ? `<a href="${escapeHtml(safeWebsite)}" target="_blank" rel="noreferrer">${escapeHtml(company.website)}</a>` : escapeHtml(company.website || "Not listed")}</p>
               <p><strong>Industry:</strong> ${escapeHtml(company.industry || "Unknown")}</p>
-              <p><strong>Plan:</strong> ${escapeHtml(company.plan || "Demo")}</p>
               <p><strong>Created:</strong> ${escapeHtml(formatDateTime(company.createdAt))}</p>
+
+              <h3>Billing</h3>
+              <p><strong>Selected plan:</strong> ${escapeHtml(company.selectedPlan || company.plan || "Not selected")}</p>
+              <p><strong>Billing status:</strong> ${escapeHtml(company.billingStatus || "Not set")}</p>
+              <p><strong>Billing email:</strong> ${escapeHtml(company.billingEmail || company.contactEmail || "Not listed")}</p>
+              <p><strong>Trial started:</strong> ${company.trialStartedAt ? escapeHtml(formatDateTime(company.trialStartedAt)) : "Not set"}</p>
+              <p><strong>Trial ends:</strong> ${company.trialEndsAt ? escapeHtml(formatDateTime(company.trialEndsAt)) : "Not set"}</p>
 
               <h3>Project preferences</h3>
               <p><strong>Project size:</strong> ${escapeHtml(projectRange)}</p>
@@ -8922,7 +9041,7 @@ function renderPricing() {
   return renderShell(renderPricingPage({
     t,
     escapeHtml,
-    trialHref: getTrialAccessHref()
+    trialHref: "/signup"
   }));
 }
 

@@ -19,8 +19,18 @@ function renderProfileBasicsSection(ctx) {
       <h2>${escapeHtml(t("companyBasics"))}</h2>
       <div class="form-grid">
         <label>${escapeHtml(t("companyName"))}<input name="companyName" data-profile-field="companyName" value="${escapeHtml(p.companyName || "")}" required /></label>
+        <label>${escapeHtml(t("kennitala"))}<input name="kennitala" data-profile-field="kennitala" value="${escapeHtml(p.kennitala || "")}" required /></label>
         <label>${escapeHtml(t("contactEmail"))}<input name="contactEmail" type="email" data-profile-field="contactEmail" value="${escapeHtml(p.contactEmail || "")}" required /></label>
+        <label>${escapeHtml(t("billingEmail"))}<input name="billingEmail" type="email" data-profile-field="billingEmail" value="${escapeHtml(p.billingEmail || "")}" required /></label>
+        <label>${escapeHtml(t("contactName"))}<input name="contactName" data-profile-field="contactName" value="${escapeHtml(p.contactName || "")}" required /></label>
+        <label>${escapeHtml(t("phone"))}<input name="phone" data-profile-field="phone" value="${escapeHtml(p.phone || "")}" required /></label>
+        <label>${escapeHtml(t("address"))}<input name="address" data-profile-field="address" value="${escapeHtml(p.address || "")}" required /></label>
         <label>${escapeHtml(t("website"))}<input name="website" data-profile-field="website" value="${escapeHtml(p.website || "")}" /></label>
+        <label>${escapeHtml(t("selectedPlan"))}
+          <select name="selectedPlan" data-profile-field="selectedPlan">
+            ${["basic", "pro", "priority"].map((plan) => `<option value="${plan}" ${String(p.selectedPlan || "basic") === plan ? "selected" : ""}>${escapeHtml(t(`plan_${plan}`))}</option>`).join("")}
+          </select>
+        </label>
         <label class="custom-select-field">${escapeHtml(t("industry"))}
           <input id="industry-input" type="hidden" name="industry" value="${escapeHtml(selectedIndustry)}" required />
           ${renderCustomDropdown({

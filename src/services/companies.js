@@ -95,9 +95,18 @@ export const DEFAULT_PROFILE = {
 export function createEmptyProfile(userEmail = "") {
   return {
     companyName: "",
+    kennitala: "",
     contactEmail: userEmail || "",
+    billingEmail: userEmail || "",
+    contactName: "",
+    phone: "",
+    address: "",
     website: "",
     industry: "",
+    selectedPlan: "basic",
+    billingStatus: "trial",
+    trialStartedAt: "",
+    trialEndsAt: "",
     services: [],
     includeKeywords: [],
     excludeKeywords: [],

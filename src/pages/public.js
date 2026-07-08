@@ -180,6 +180,7 @@ export function renderLandingPage({ t, escapeHtml, language, trialHref }) {
 export function renderPricingPage({ t, escapeHtml, trialHref }) {
   const plans = [
     {
+      key: "basic",
       name: t("pricingStarter"),
       price: "9.900 kr",
       items: [
@@ -191,6 +192,7 @@ export function renderPricingPage({ t, escapeHtml, trialHref }) {
       ]
     },
     {
+      key: "pro",
       name: t("pricingGrowth"),
       price: "19.900 kr",
       highlighted: true,
@@ -204,6 +206,7 @@ export function renderPricingPage({ t, escapeHtml, trialHref }) {
       ]
     },
     {
+      key: "priority",
       name: t("pricingPro"),
       price: "29.900 kr",
       items: [
@@ -231,6 +234,7 @@ export function renderPricingPage({ t, escapeHtml, trialHref }) {
 
 function pricingCard(plan, { t, escapeHtml, trialHref }) {
   const highlighted = Boolean(plan.highlighted);
+  const href = `${trialHref}${String(trialHref).includes("?") ? "&" : "?"}plan=${encodeURIComponent(plan.key || "basic")}`;
   return `
     <div class="pricing-card ${highlighted ? "highlighted" : ""}">
       ${highlighted ? `<span class="popular">${escapeHtml(t("pricingBadge"))}</span>` : ""}
@@ -239,7 +243,7 @@ function pricingCard(plan, { t, escapeHtml, trialHref }) {
       <ul class="check-list">
         ${plan.items.map((i) => `<li>${escapeHtml(i)}</li>`).join("")}
       </ul>
-      <button class="btn pricing-cta ${highlighted ? "btn-primary" : "btn-secondary"}" data-action="go" data-href="${escapeHtml(trialHref)}">${escapeHtml(t("pricingCta"))}</button>
+      <button class="btn pricing-cta ${highlighted ? "btn-primary" : "btn-secondary"}" data-action="go" data-href="${escapeHtml(href)}">${escapeHtml(t("pricingCta"))}</button>
       <p class="pricing-trial-note">${escapeHtml(t("pricingTrialNoCard"))}</p>
     </div>
   `;
