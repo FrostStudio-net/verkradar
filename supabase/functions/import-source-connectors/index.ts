@@ -68,6 +68,7 @@ type NormalizedOpportunity = {
   difficulty: string;
   status: string;
   raw_payload: Record<string, unknown>;
+  deadline_debug?: DeadlineDebugSample;
 };
 
 type MatchDebugSample = {
@@ -156,12 +157,27 @@ type ImportDebugDetails = {
   skip_reasons: Record<string, number>;
   skipped_samples: ImportSkipSample[];
   keyword_decision_samples: KeywordDecisionSample[];
+  deadline_debug_samples: DeadlineDebugSample[];
   match_skipped_samples: MatchDebugSample[];
   matching_by_source: SourceMatchDetails[];
   inserted: number;
   updated: number;
   skipped: number;
   errors: string[];
+};
+
+type DeadlineDebugSample = {
+  source_url: string;
+  title: string;
+  table_fields?: Record<string, string>;
+  extractedDeadlineText: string | null;
+  extractedDeadlineSource: string;
+  parsedDeadlineIso: string | null;
+  parsedDeadlineAt: string | null;
+  upsertAction?: "insert" | "update" | "unknown";
+  upsertConflictKey?: string;
+  databaseDeadlineField?: string | null;
+  rawPayloadDeadlineFields?: Record<string, unknown>;
 };
 
 type KeywordFilterResult = {
@@ -375,6 +391,20 @@ Deno.serve(async (req) => {
     const maxSources = isSingleSourceRun ? 1 : clamp(Number(body.maxSources || body.max_sources || DEFAULT_MAX_SOURCES_PER_RUN), 1, 25);
     const runMatching = body.refreshMatches === true || body.refresh_matches === true || body.runMatching === true || body.run_matching === true || isSingleSourceRun;
     const runReports = body.generateReports === true || body.generate_reports === true;
+    const reenrichMissingDeadlines = body.reenrichMissingDeadlines === true || body.reenrich_missing_deadlines === true;
+    if (reenrichMissingDeadlines) {
+      const result = await reenrichMissingUtbodsvefurDeadlines(adminClient, limit);
+      return json({
+        ...summary,
+        ok: true,
+        fetched: result.checked,
+        updated: result.updated,
+        skipped: result.skipped,
+        message: `Re-enriched ${result.updated} Útboðsvefur opportunit${result.updated === 1 ? "y" : "ies"} with missing deadlines.`,
+        deadlineDebugSamples: result.deadlineDebugSamples,
+        errors: result.errors,
+      });
+    }
     const allConnectors = await loadEnabledConnectors(adminClient, sourceId);
     const connectors = allConnectors.slice(0, maxSources);
     const remainingConnectors = Math.max(0, allConnectors.length - connectors.length);
@@ -535,7 +565,7 @@ Deno.serve(async (req) => {
 
           const { data: savedRows, error: upsertError } = await adminClient
             .from("opportunities")
-            .upsert(normalized, { onConflict: "source_id,external_id" })
+            .upsert(normalized.map(toOpportunityUpsertRow), { onConflict: "source_id,external_id" })
             .select("id, external_id");
 
           if (upsertError) throw upsertError;
@@ -557,6 +587,18 @@ Deno.serve(async (req) => {
           for (const row of savedRows || []) {
             if (existing.has(row.external_id)) sourceSummary.updated += 1;
             else sourceSummary.inserted += 1;
+          }
+          for (const opportunity of normalized) {
+            if (!opportunity.deadline_debug) continue;
+            const debugSample: DeadlineDebugSample = {
+              ...opportunity.deadline_debug,
+              upsertAction: existing.has(opportunity.external_id) ? "update" : "insert",
+              upsertConflictKey: "source_id,external_id",
+              databaseDeadlineField: opportunity.deadline,
+              rawPayloadDeadlineFields: getDeadlineRawPayloadFields(opportunity.raw_payload),
+            };
+            runDetails.deadline_debug_samples.push(debugSample);
+            console.info("VerkRadar deadline debug", JSON.stringify(debugSample));
           }
 
           await resolveCrossSourceDuplicates(
@@ -1158,6 +1200,7 @@ function createImportDebugDetails(options: {
     skip_reasons: {},
     skipped_samples: [],
     keyword_decision_samples: [],
+    deadline_debug_samples: [],
     match_skipped_samples: [],
     matching_by_source: [],
     inserted: 0,
@@ -1197,6 +1240,8 @@ function mergeImportDetails(
   target.match_skipped_samples.push(...sourceDetails.match_skipped_samples);
   target.keyword_decision_samples.push(...sourceDetails.keyword_decision_samples);
   target.keyword_decision_samples = target.keyword_decision_samples.slice(0, MAX_KEYWORD_DECISION_SAMPLES);
+  target.deadline_debug_samples.push(...sourceDetails.deadline_debug_samples);
+  target.deadline_debug_samples = target.deadline_debug_samples.slice(0, 20);
   target.matching_by_source.push(...sourceDetails.matching_by_source);
   target.errors.push(...sourceDetails.errors);
 
@@ -1230,6 +1275,31 @@ function getConnectorItemTitle(item: Record<string, unknown>, connectorType: Con
       ? stringFromPath(item, ["title", "rendered"])
       : String(item.title || ""),
   ) || String(item.link || item.externalId || item.id || "Untitled item");
+}
+
+function toOpportunityUpsertRow(opportunity: NormalizedOpportunity) {
+  const { deadline_debug: _deadlineDebug, ...row } = opportunity;
+  return row;
+}
+
+function shouldDebugDeadlineOpportunity(title: string, url = "") {
+  const normalized = normalizeSearchText(`${title} ${url}`);
+  return normalized.includes("vogabyggd") ||
+    normalized.includes("16328") ||
+    (normalized.includes("vetrarthjonusta") && normalized.includes("gongu")) ||
+    normalized.includes("16317");
+}
+
+function getDeadlineRawPayloadFields(payload: Record<string, unknown>) {
+  return {
+    bid_deadline: payload.bid_deadline || null,
+    deadline_at: payload.deadline_at || null,
+    bid_deadline_at: payload.bid_deadline_at || null,
+    extracted_deadline_text: payload.extracted_deadline_text || null,
+    extracted_deadline_source: payload.extracted_deadline_source || null,
+    deadline_warning: payload.deadline_warning || null,
+    deadline_debug_reason: payload.deadline_debug_reason || null,
+  };
 }
 
 function getNormalizeSkipReason(item: Record<string, unknown>, connector: ConnectorRow): ImportSkipReason {
@@ -1851,6 +1921,17 @@ async function enrichRikiskaupOpportunityFromDetailPage(opportunity: NormalizedO
     if (detail.category) opportunity.category = detail.category;
     if (detail.description) opportunity.description = detail.description;
     if (detail.location) opportunity.location = detail.location;
+    if (shouldDebugDeadlineOpportunity(opportunity.title, url)) {
+      opportunity.deadline_debug = {
+        source_url: url,
+        title: opportunity.title,
+        table_fields: detail.debug?.tableFields || {},
+        extractedDeadlineText: detail.debug?.extractedDeadlineText || null,
+        extractedDeadlineSource: detail.debug?.extractedDeadlineSource || "none",
+        parsedDeadlineIso: detail.debug?.parsedDeadlineIso || null,
+        parsedDeadlineAt: detail.debug?.parsedDeadlineAt || null,
+      };
+    }
 
     const isExpired = opportunity.deadline ? daysUntil(opportunity.deadline) < 0 : false;
     opportunity.raw_payload = {
@@ -1883,6 +1964,85 @@ async function enrichRikiskaupOpportunityFromDetailPage(opportunity: NormalizedO
       detail_page_enrichment_error: errorMessage(error),
     };
   }
+}
+
+async function reenrichMissingUtbodsvefurDeadlines(
+  supabase: ReturnType<typeof createClient>,
+  limit: number,
+) {
+  const result: {
+    checked: number;
+    updated: number;
+    skipped: number;
+    errors: string[];
+    deadlineDebugSamples: DeadlineDebugSample[];
+  } = {
+    checked: 0,
+    updated: 0,
+    skipped: 0,
+    errors: [],
+    deadlineDebugSamples: [],
+  };
+  const { data, error } = await supabase
+    .from("opportunities")
+    .select("id, source_id, external_id, country_code, title, buyer, category, type, description, deadline, published_date, location, estimated_value, currency, url, cpv_code, requirements, keywords, difficulty, status, raw_payload")
+    .ilike("url", "%utbodsvefur.is%")
+    .is("deadline", null)
+    .order("published_date", { ascending: false, nullsFirst: false })
+    .limit(clamp(limit || 25, 1, 50));
+  if (error) throw error;
+
+  for (const row of data || []) {
+    result.checked += 1;
+    const opportunity: NormalizedOpportunity = {
+      source_id: String(row.source_id || ""),
+      external_id: String(row.external_id || row.id || ""),
+      country_code: String(row.country_code || "IS"),
+      title: String(row.title || ""),
+      buyer: String(row.buyer || "Unknown buyer"),
+      category: String(row.category || "Public procurement"),
+      type: String(row.type || "tender"),
+      description: String(row.description || ""),
+      deadline: row.deadline ? String(row.deadline) : null,
+      published_date: row.published_date ? String(row.published_date) : null,
+      location: String(row.location || "All Iceland"),
+      estimated_value: row.estimated_value === null || row.estimated_value === undefined ? null : Number(row.estimated_value),
+      currency: String(row.currency || "ISK"),
+      url: String(row.url || ""),
+      cpv_code: row.cpv_code ? String(row.cpv_code) : null,
+      requirements: Array.isArray(row.requirements) ? row.requirements.map(String) : [],
+      keywords: Array.isArray(row.keywords) ? row.keywords.map(String) : [],
+      difficulty: String(row.difficulty || "medium"),
+      status: String(row.status || "open"),
+      raw_payload: row.raw_payload && typeof row.raw_payload === "object" ? row.raw_payload as Record<string, unknown> : {},
+    };
+    await enrichRikiskaupOpportunityFromDetailPage(opportunity);
+    if (opportunity.deadline) {
+      const { error: updateError } = await supabase
+        .from("opportunities")
+        .update({
+          buyer: opportunity.buyer,
+          category: opportunity.category,
+          type: opportunity.type,
+          description: opportunity.description,
+          deadline: opportunity.deadline,
+          location: opportunity.location,
+          status: opportunity.status,
+          raw_payload: opportunity.raw_payload,
+        })
+        .eq("id", row.id);
+      if (updateError) {
+        result.errors.push(`${opportunity.title}: ${updateError.message}`);
+        result.skipped += 1;
+      } else {
+        result.updated += 1;
+      }
+    } else {
+      result.skipped += 1;
+    }
+    if (opportunity.deadline_debug) result.deadlineDebugSamples.push(opportunity.deadline_debug);
+  }
+  return result;
 }
 
 function applyRikiskaupMetadataFallback(opportunity: NormalizedOpportunity) {
@@ -1990,6 +2150,14 @@ function parseRikiskaupTenderDetailPage(html: string) {
     completionDate,
     location,
     description,
+    debug: {
+      tableFields,
+      extractedDeadlineText: deadlineRaw || null,
+      extractedDeadlineSource: tableDeadlineText ? "table" : tenderDeadline.source || (deadline ? "text" : "none"),
+      parsedDeadlineIso: deadline,
+      parsedDeadlineAt: deadline ? buildDeadlineAt(deadline, deadlineRaw) : null,
+      extractedPublishedText: documentsDateRaw || null,
+    },
     hasUsefulDetail: Boolean(buyer || deadline || description),
   };
 }

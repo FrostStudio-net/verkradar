@@ -25,3 +25,26 @@ set
 where external_id = '9548'
   or url ilike '%/vogabyggd-1-strandstigur-gatna-og-stigagerd-utbod-nr-16328/%'
   or title ilike 'Vogabyggð 1. Strandstígur%';
+
+update public.opportunities
+set
+  deadline = date '2026-07-14',
+  status = 'open',
+  raw_payload = coalesce(raw_payload, '{}'::jsonb) || jsonb_build_object(
+    'bid_deadline', '2026-07-14',
+    'deadline_at', '2026-07-14T10:00:00',
+    'bid_deadline_at', '2026-07-14T10:00:00',
+    'extracted_deadline_text', '14.07.2026 kl. 10:00',
+    'extractedDeadlineText', '14.07.2026 kl. 10:00',
+    'extracted_deadline_source', 'table',
+    'extractedDeadlineSource', 'table',
+    'deadline_warning', null,
+    'deadline_debug_reason', null,
+    'quality_status', 'confirmed_tender',
+    'opportunity_intent', 'confirmed_tender',
+    'hidden_from_reports', false
+  )
+where external_id = '16317'
+  or url ilike '%16317%'
+  or title ilike '%Vetrarþjónusta göngu%'
+  or title ilike '%Vetrarþjónusta%hjólaleiða%';
