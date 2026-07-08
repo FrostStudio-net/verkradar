@@ -393,15 +393,23 @@ Deno.serve(async (req) => {
     const runReports = body.generateReports === true || body.generate_reports === true;
     const reenrichMissingDeadlines = body.reenrichMissingDeadlines === true || body.reenrich_missing_deadlines === true;
     if (reenrichMissingDeadlines) {
-      const result = await reenrichMissingUtbodsvefurDeadlines(adminClient, limit);
+      const coverageBefore = await getDeadlineCoverageSummary(adminClient);
+      const result = await reenrichMissingOpportunityDeadlines(adminClient, limit);
+      const coverageAfter = await getDeadlineCoverageSummary(adminClient);
+      console.info("VerkRadar deadline coverage", JSON.stringify({ before: coverageBefore, after: coverageAfter }));
       return json({
         ...summary,
         ok: true,
         fetched: result.checked,
         updated: result.updated,
-        skipped: result.skipped,
-        message: `Re-enriched ${result.updated} Útboðsvefur opportunit${result.updated === 1 ? "y" : "ies"} with missing deadlines.`,
-        deadlineDebugSamples: result.deadlineDebugSamples,
+        skipped: result.stillMissing,
+        message: `Re-enriched ${result.updated} opportunit${result.updated === 1 ? "y" : "ies"} with missing deadlines.`,
+        checked: result.checked,
+        stillMissing: result.stillMissing,
+        expired: result.expired,
+        samples: result.samples,
+        deadlineCoverageBefore: coverageBefore,
+        deadlineCoverageAfter: coverageAfter,
         errors: result.errors,
       });
     }
@@ -1424,7 +1432,9 @@ function normalizeConnectorItem(
   const deadline = String(item.deadline || "") || extractedDeadline.date;
   const deadlineAt = deadline ? buildDeadlineAt(deadline, extractedDeadline.rawText) : null;
   const completionDateText = extractCompletionDateText(searchText);
-  const isExpired = deadline ? daysUntil(deadline) < 0 : false;
+  const tenderStatusText = String(item.tenderStatus || (item.raw && typeof item.raw === "object" ? (item.raw as Record<string, unknown>).status || "" : ""));
+  const isClosedTenderStatus = /lokið|lokid|closed|expired/i.test(tenderStatusText);
+  const isExpired = Boolean(deadline && daysUntil(deadline) < 0) || isClosedTenderStatus;
   const staleInfo = getStaleOpportunityInfo({
     title,
     description,
@@ -1478,7 +1488,13 @@ function normalizeConnectorItem(
       buyer,
       quality_status: qualityStatus,
       opportunity_intent: opportunityIntent,
-      hidden_from_reports: staleInfo.isStale || opportunityIntent === "news_context" || opportunityIntent === "not_opportunity",
+      hidden_from_reports: isExpired || staleInfo.isStale || opportunityIntent === "news_context" || opportunityIntent === "not_opportunity",
+      ...(isExpired ? {
+        admin_report_status: "hidden",
+        stale_status: "expired",
+        deadline_state: "passed",
+        stale_reason: isClosedTenderStatus ? "Tender status indicates closed/expired." : "Bid deadline has passed.",
+      } : {}),
       ...(staleInfo.isStale ? {
         admin_report_status: "hidden",
         stale_status: "stale_or_expired",
@@ -1493,6 +1509,12 @@ function normalizeConnectorItem(
         bid_deadline: deadline,
         deadline_at: deadlineAt,
         bid_deadline_at: deadlineAt,
+        deadline_debug: {
+          source: extractedDeadline.rawText ? "text" : String(item.deadline || "") ? "source_item" : "none",
+          extractedText: extractedDeadline.rawText || String(item.deadline || ""),
+          parsedIso: deadline,
+          parserVersion: "deadline-reliability-v1",
+        },
       } : {}),
       ...(completionDateText ? { completion_date_text: completionDateText } : {}),
       ...(!deadline && completionDateText ? { deadline_debug_reason: "completion_date_found_but_no_bid_deadline" } : {}),
@@ -1966,28 +1988,30 @@ async function enrichRikiskaupOpportunityFromDetailPage(opportunity: NormalizedO
   }
 }
 
-async function reenrichMissingUtbodsvefurDeadlines(
+async function reenrichMissingOpportunityDeadlines(
   supabase: ReturnType<typeof createClient>,
   limit: number,
 ) {
   const result: {
     checked: number;
     updated: number;
-    skipped: number;
+    stillMissing: number;
+    expired: number;
     errors: string[];
-    deadlineDebugSamples: DeadlineDebugSample[];
+    samples: DeadlineDebugSample[];
   } = {
     checked: 0,
     updated: 0,
-    skipped: 0,
+    stillMissing: 0,
+    expired: 0,
     errors: [],
-    deadlineDebugSamples: [],
+    samples: [],
   };
   const { data, error } = await supabase
     .from("opportunities")
-    .select("id, source_id, external_id, country_code, title, buyer, category, type, description, deadline, published_date, location, estimated_value, currency, url, cpv_code, requirements, keywords, difficulty, status, raw_payload")
-    .ilike("url", "%utbodsvefur.is%")
+    .select("id, source_id, external_id, country_code, title, buyer, category, type, description, deadline, published_date, location, estimated_value, currency, url, cpv_code, requirements, keywords, difficulty, status, raw_payload, sources(name, source_type)")
     .is("deadline", null)
+    .not("url", "is", null)
     .order("published_date", { ascending: false, nullsFirst: false })
     .limit(clamp(limit || 25, 1, 50));
   if (error) throw error;
@@ -2016,8 +2040,11 @@ async function reenrichMissingUtbodsvefurDeadlines(
       status: String(row.status || "open"),
       raw_payload: row.raw_payload && typeof row.raw_payload === "object" ? row.raw_payload as Record<string, unknown> : {},
     };
-    await enrichRikiskaupOpportunityFromDetailPage(opportunity);
+    const source = row.sources && typeof row.sources === "object" ? row.sources as Record<string, unknown> : {};
+    await enrichOpportunityDeadlineFromSourcePage(opportunity, String(source.name || opportunity.raw_payload.source_name || ""));
     if (opportunity.deadline) {
+      const expired = daysUntil(opportunity.deadline) < 0;
+      if (expired) result.expired += 1;
       const { error: updateError } = await supabase
         .from("opportunities")
         .update({
@@ -2027,22 +2054,276 @@ async function reenrichMissingUtbodsvefurDeadlines(
           description: opportunity.description,
           deadline: opportunity.deadline,
           location: opportunity.location,
-          status: opportunity.status,
-          raw_payload: opportunity.raw_payload,
+          status: expired ? "hidden" : opportunity.status,
+          raw_payload: {
+            ...opportunity.raw_payload,
+            ...(expired ? {
+              hidden_from_reports: true,
+              stale_status: "expired",
+              deadline_state: "passed",
+              admin_report_status: "hidden",
+            } : {}),
+          },
         })
         .eq("id", row.id);
       if (updateError) {
         result.errors.push(`${opportunity.title}: ${updateError.message}`);
-        result.skipped += 1;
+        result.stillMissing += 1;
       } else {
+        if (expired) {
+          await supabase
+            .from("opportunity_matches")
+            .update({
+              safety_status: "hidden",
+              safety_reasons: ["Deadline has passed or tender status is closed"],
+              alert_eligible: false,
+              review_required: false,
+            })
+            .eq("opportunity_id", row.id);
+        }
         result.updated += 1;
       }
     } else {
-      result.skipped += 1;
+      result.stillMissing += 1;
+      if (!opportunity.raw_payload.deadline_debug) {
+        opportunity.raw_payload = {
+          ...opportunity.raw_payload,
+          deadline_debug: {
+            source: "none",
+            extractedText: null,
+            parsedIso: null,
+            parserVersion: "deadline-reliability-v1",
+          },
+        };
+      }
+      await supabase
+        .from("opportunities")
+        .update({
+          raw_payload: {
+            ...opportunity.raw_payload,
+            deadline_warning: MISSING_DEADLINE_RISK,
+          },
+        })
+        .eq("id", row.id);
+      await supabase
+        .from("opportunity_matches")
+        .update({
+          safety_status: "needs_review",
+          safety_reasons: ["No reliable deadline was found"],
+          alert_eligible: false,
+          review_required: true,
+        })
+        .eq("opportunity_id", row.id);
     }
-    if (opportunity.deadline_debug) result.deadlineDebugSamples.push(opportunity.deadline_debug);
+    if (opportunity.deadline_debug) result.samples.push(opportunity.deadline_debug);
   }
   return result;
+}
+
+async function enrichOpportunityDeadlineFromSourcePage(opportunity: NormalizedOpportunity, sourceName = "") {
+  const url = String(opportunity.url || "");
+  if (!url) return;
+  let pageUrl: URL;
+  try {
+    pageUrl = new URL(url);
+  } catch {
+    return;
+  }
+  const host = pageUrl.hostname.replace(/^www\./i, "");
+  if (!isSafeDeadlineReenrichmentHost(host)) return;
+  try {
+    if (host === "utbodsvefur.is") {
+      await enrichRikiskaupOpportunityFromDetailPage(opportunity);
+      return;
+    }
+    const html = await fetchTextWithTimeout(pageUrl.toString(), 7000);
+    const detail = parseGenericDeadlineDetailPage(html, pageUrl.toString(), sourceName);
+    applyDeadlineDetailToOpportunity(opportunity, detail, pageUrl.toString());
+  } catch (error) {
+    opportunity.raw_payload = {
+      ...opportunity.raw_payload,
+      deadline_reenrichment_error: errorMessage(error),
+    };
+  }
+}
+
+function isSafeDeadlineReenrichmentHost(host: string) {
+  return [
+    "utbodsvefur.is",
+    "gardabaer.is",
+    "reykjavik.is",
+    "innkaup.reykjavik.is",
+    "akranes.is",
+    "borgarbyggd.is",
+    "dev.borgarbyggd.is",
+    "arborg.is",
+  ].includes(host);
+}
+
+async function getDeadlineCoverageSummary(supabase: ReturnType<typeof createClient>) {
+  const { data, error } = await supabase
+    .from("opportunities")
+    .select("id, deadline, status, raw_payload, sources(name)")
+    .limit(5000);
+  if (error) throw error;
+  const rows = data || [];
+  const missingBySource: Record<string, number> = {};
+  let withDeadline = 0;
+  let withDeadlineAt = 0;
+  let missingDeadline = 0;
+  let expiredDeadline = 0;
+  for (const row of rows) {
+    const payload = row.raw_payload && typeof row.raw_payload === "object" ? row.raw_payload as Record<string, unknown> : {};
+    const source = row.sources && typeof row.sources === "object" ? row.sources as Record<string, unknown> : {};
+    const sourceName = String(source.name || payload.source_name || "Unknown source");
+    const deadline = String(row.deadline || "");
+    if (deadline) {
+      withDeadline += 1;
+      if (daysUntil(deadline) < 0) expiredDeadline += 1;
+    } else {
+      missingDeadline += 1;
+      missingBySource[sourceName] = (missingBySource[sourceName] || 0) + 1;
+    }
+    if (payload.deadline_at || payload.bid_deadline_at) withDeadlineAt += 1;
+  }
+  return {
+    total: rows.length,
+    withDeadline,
+    withDeadlineAt,
+    missingDeadline,
+    expiredDeadline,
+    missingDeadlineBySource: Object.fromEntries(
+      Object.entries(missingBySource).sort((a, b) => b[1] - a[1]),
+    ),
+    limitedTo: rows.length >= 5000 ? 5000 : null,
+  };
+}
+
+function parseGenericDeadlineDetailPage(html: string, sourceUrl: string, sourceName = "") {
+  const mainHtml = extractGenericMainHtml(html);
+  const tableFields = extractRikiskaupDetailTableFields(mainHtml);
+  const sidebarFields = extractGenericLabelValueFields(mainHtml);
+  const fields = { ...sidebarFields, ...tableFields };
+  const text = cleanConnectorText(mainHtml, "");
+  const closingText =
+    getRikiskaupTableField(fields, ["Skilafrestur", "Tímafrestur útboðs", "Timafrestur utbods", "Útboð lýkur", "Utbod lykur"]) ||
+    "";
+  const openingText = getRikiskaupTableField(fields, ["Opnun tilboða", "Opnun tilboda", "Útboð opnar", "Utbod opnar"]);
+  const documentsText = getRikiskaupTableField(fields, ["Útboðsgögn afhent", "Utbodsgogn afhent"]);
+  const statusText = getRikiskaupTableField(fields, ["Staða útboðs", "Stada utbods"]);
+  const textDeadline = closingText ? { date: parseDeadlineDate(closingText), rawText: closingText, source: "table" } : extractDeadline(text);
+  const deadline = textDeadline.date;
+  const deadlineRaw = textDeadline.rawText || closingText || "";
+  const isClosed = /lokið|lokid|closed|expired/i.test(statusText);
+  return {
+    deadline,
+    deadlineRaw: deadlineRaw || null,
+    deadlineSource: closingText ? "table" : textDeadline.date ? "text" : "none",
+    deadlineAt: deadline ? buildDeadlineAt(deadline, deadlineRaw) : null,
+    openingDate: parseDeadlineDate(openingText || ""),
+    openingDateRaw: openingText || null,
+    documentsDate: parseDeadlineDate(documentsText || ""),
+    documentsDateRaw: documentsText || null,
+    statusText,
+    isClosed,
+    debug: {
+      tableFields: fields,
+      extractedDeadlineText: deadlineRaw || null,
+      extractedDeadlineSource: closingText ? "table" : textDeadline.date ? "text" : "none",
+      parsedDeadlineIso: deadline,
+      parsedDeadlineAt: deadline ? buildDeadlineAt(deadline, deadlineRaw) : null,
+      extractedPublishedText: documentsText || null,
+    },
+    sourceUrl,
+    sourceName,
+  };
+}
+
+function applyDeadlineDetailToOpportunity(
+  opportunity: NormalizedOpportunity,
+  detail: ReturnType<typeof parseGenericDeadlineDetailPage>,
+  sourceUrl: string,
+) {
+  const expired = Boolean(detail.deadline && daysUntil(detail.deadline) < 0) || detail.isClosed;
+  if (detail.deadline) {
+    opportunity.deadline = detail.deadline;
+    opportunity.status = expired ? "hidden" : "open";
+  }
+  opportunity.raw_payload = {
+    ...opportunity.raw_payload,
+    detail_page_enriched: true,
+    detail_page_url: sourceUrl,
+    ...(detail.deadline ? {
+      bid_deadline: detail.deadline,
+      deadline_at: detail.deadlineAt || null,
+      bid_deadline_at: detail.deadlineAt || null,
+      extracted_deadline_text: detail.deadlineRaw,
+      extracted_deadline_source: detail.deadlineSource,
+      deadline_warning: null,
+      deadline_debug: {
+        source: detail.deadlineSource,
+        extractedText: detail.deadlineRaw,
+        parsedIso: detail.deadline,
+        parserVersion: "deadline-reliability-v1",
+      },
+    } : {
+      deadline_debug: {
+        source: "none",
+        extractedText: null,
+        parsedIso: null,
+        parserVersion: "deadline-reliability-v1",
+      },
+    }),
+    ...(detail.openingDate ? { opening_date: detail.openingDate, extracted_opening_text: detail.openingDateRaw || null } : {}),
+    ...(detail.documentsDate ? { tender_documents_date: detail.documentsDate, extracted_published_text: detail.documentsDateRaw || null } : {}),
+    ...(detail.statusText ? { tender_status: detail.statusText } : {}),
+    ...(expired ? {
+      hidden_from_reports: true,
+      stale_status: "expired",
+      deadline_state: "passed",
+      admin_report_status: "hidden",
+    } : {}),
+  };
+  if (shouldDebugDeadlineOpportunity(opportunity.title, sourceUrl)) {
+    opportunity.deadline_debug = {
+      source_url: sourceUrl,
+      title: opportunity.title,
+      table_fields: detail.debug.tableFields,
+      extractedDeadlineText: detail.debug.extractedDeadlineText,
+      extractedDeadlineSource: detail.debug.extractedDeadlineSource,
+      parsedDeadlineIso: detail.debug.parsedDeadlineIso,
+      parsedDeadlineAt: detail.debug.parsedDeadlineAt,
+    };
+  }
+}
+
+function extractGenericMainHtml(html: string) {
+  const body = String(html || "")
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<nav\b[^>]*>[\s\S]*?<\/nav>/gi, " ")
+    .replace(/<header\b[^>]*>[\s\S]*?<\/header>/gi, " ")
+    .replace(/<footer\b[^>]*>[\s\S]*?<\/footer>/gi, " ");
+  const mainMatch = body.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i);
+  const articleMatch = body.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i);
+  return articleMatch?.[1] || mainMatch?.[1] || body;
+}
+
+function extractGenericLabelValueFields(html: string) {
+  const fields: Record<string, string> = {};
+  const details = extractGardabaerTenderDetails(html);
+  for (const [key, value] of Object.entries(details)) {
+    const normalized = normalizeRikiskaupDetailLabel(key);
+    if (normalized && value) fields[normalized] = value;
+  }
+  const definitionPattern = /<dt\b[^>]*>([\s\S]*?)<\/dt>\s*<dd\b[^>]*>([\s\S]*?)<\/dd>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = definitionPattern.exec(html))) {
+    const key = normalizeRikiskaupDetailLabel(cleanConnectorText(match[1], ""));
+    const value = cleanConnectorText(match[2], "");
+    if (key && value) fields[key] = value;
+  }
+  return fields;
 }
 
 function applyRikiskaupMetadataFallback(opportunity: NormalizedOpportunity) {
@@ -2351,7 +2632,9 @@ function inferRikiskaupLocation(text: string) {
 }
 
 function buildDeadlineAt(deadline: string, rawText: string | null) {
-  const timeMatch = String(rawText || "").match(/\bkl\.?\s*(\d{1,2})[:.](\d{2})\b/i);
+  const value = String(rawText || "");
+  const timeMatch = value.match(/\bkl\.?\s*(\d{1,2})[:.](\d{2})\b/i) ||
+    value.match(/(?:^|\s)(\d{1,2}):(\d{2})(?:\s|$)/);
   if (!timeMatch) return null;
   return `${deadline}T${timeMatch[1].padStart(2, "0")}:${timeMatch[2]}:00`;
 }
