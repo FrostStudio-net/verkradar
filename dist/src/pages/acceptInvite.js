@@ -19,6 +19,7 @@ export function renderAcceptInvitePage(options) {
   const emailLabel = isIs ? "Boðið netfang" : "Invited email";
   const loginLabel = isIs ? "Innskráning" : "Login";
   const signupLabel = isIs ? "Stofna aðgang" : "Create account";
+  const alreadyHaveAccount = isIs ? "Ertu þegar með aðgang?" : "Already have an account?";
   const acceptLabel = isIs ? "Tengja aðgang" : "Accept invite";
   const goLoginLabel = isIs ? "Fara í innskráningu" : "Go to login";
   const goHomeLabel = isIs ? "Fara á forsíðu" : "Go to homepage";
@@ -63,8 +64,8 @@ export function renderAcceptInvitePage(options) {
               ` : `
                 <div class="auth-actions">
                   <button class="btn btn-primary btn-large" type="button" data-action="go" data-href="${escapeHtml(signupHref)}">${escapeHtml(signupLabel)}</button>
-                  <button class="btn btn-secondary btn-large" type="button" data-action="go" data-href="${escapeHtml(loginHref)}">${escapeHtml(loginLabel)}</button>
                 </div>
+                <p class="auth-switch">${escapeHtml(alreadyHaveAccount)} <button type="button" data-action="go" data-href="${escapeHtml(loginHref)}">${escapeHtml(loginLabel)}</button></p>
               `}
             ` : ""}
           </div>
@@ -87,6 +88,11 @@ function renderInviteDebug(debugInfo, escapeHtml) {
       <span>latest_invite_expires_at: ${escapeHtml(debugInfo.latest_invite_expires_at || "none")}</span>
       <span>lookup_table: ${escapeHtml(debugInfo.lookup_table || "unknown")}</span>
       <span>lookup_column: ${escapeHtml(debugInfo.lookup_column || "unknown")}</span>
+      <span>token_source: ${escapeHtml(debugInfo.token_source || "unknown")}</span>
+      <span>user_email: ${escapeHtml(debugInfo.user_email || "none")}</span>
+      <span>invited_email: ${escapeHtml(debugInfo.invited_email || "none")}</span>
+      <span>accept_error_reason: ${escapeHtml(debugInfo.accept_error_reason || "none")}</span>
+      <span>invite_status: ${escapeHtml(debugInfo.invite_status || "none")}</span>
     </div>
   `;
 }

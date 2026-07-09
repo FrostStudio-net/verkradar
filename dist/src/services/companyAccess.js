@@ -1,7 +1,9 @@
 import { SUPABASE_ANON_KEY, SUPABASE_URL, supabaseClient } from "../supabaseClient.js";
 
 const PENDING_INVITE_TOKEN_KEY = "verkradar_pending_invite_token";
-const LEGACY_PENDING_INVITE_TOKEN_KEY = "verkradar_pending_invite_token";
+const PERSISTED_INVITE_FLOW_KEY = "verkradar_pending_invite_flow";
+const LEGACY_PENDING_INVITE_TOKEN_KEY = "verkradar_legacy_pending_invite_token";
+const INVITE_FLOW_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 
 export function normalizeAccessEmail(email) {
   return String(email || "").trim().toLowerCase();
@@ -30,7 +32,7 @@ export function isInviteAuthRoute(route) {
 }
 
 export function shouldPreserveInviteForRoute(route) {
-  return isAcceptInviteRoute(route) || isInviteAuthRoute(route);
+  return isAcceptInviteRoute(route) || isInviteAuthRoute(route) || (isAuthCallbackRoute(route) && Boolean(getStoredPendingInviteToken()));
 }
 
 export function getInitialPendingInviteToken(route) {
@@ -46,7 +48,14 @@ export function getStoredPendingInviteToken() {
     // Ignore legacy cleanup failures.
   }
   try {
-    return sessionStorage.getItem(PENDING_INVITE_TOKEN_KEY) || "";
+    const sessionToken = sessionStorage.getItem(PENDING_INVITE_TOKEN_KEY) || "";
+    if (sessionToken) return sessionToken;
+    const flow = JSON.parse(localStorage.getItem(PERSISTED_INVITE_FLOW_KEY) || "null");
+    if (!flow?.token || !flow?.expires_at || new Date(flow.expires_at).getTime() < Date.now()) {
+      localStorage.removeItem(PERSISTED_INVITE_FLOW_KEY);
+      return "";
+    }
+    return String(flow.token || "").trim();
   } catch {
     return "";
   }
@@ -55,7 +64,14 @@ export function getStoredPendingInviteToken() {
 export function setStoredPendingInviteToken(token) {
   const cleanToken = String(token || "").trim();
   try {
-    if (cleanToken) sessionStorage.setItem(PENDING_INVITE_TOKEN_KEY, cleanToken);
+    if (cleanToken) {
+      sessionStorage.setItem(PENDING_INVITE_TOKEN_KEY, cleanToken);
+      localStorage.setItem(PERSISTED_INVITE_FLOW_KEY, JSON.stringify({
+        token: cleanToken,
+        created_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + INVITE_FLOW_TTL_MS).toISOString()
+      }));
+    }
   } catch {
     // Keep token in memory if storage is unavailable.
   }
@@ -65,6 +81,7 @@ export function setStoredPendingInviteToken(token) {
 export function clearStoredPendingInviteToken() {
   try {
     sessionStorage.removeItem(PENDING_INVITE_TOKEN_KEY);
+    localStorage.removeItem(PERSISTED_INVITE_FLOW_KEY);
     localStorage.removeItem(LEGACY_PENDING_INVITE_TOKEN_KEY);
   } catch {
     // Ignore storage failures.
@@ -194,4 +211,14 @@ function getRoutePath(route) {
   const raw = String(route || "/");
   const normalized = raw.startsWith("/") ? raw : `/${raw}`;
   return normalized.split("?")[0] || "/";
+}
+
+function isAuthCallbackRoute(route) {
+  const raw = String(route || "");
+  return raw.startsWith("access_token=") ||
+    raw.startsWith("code=") ||
+    raw.includes("access_token=") ||
+    raw.includes("code=") ||
+    raw.includes("type=signup") ||
+    raw.includes("type=email_change");
 }

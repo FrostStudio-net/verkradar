@@ -81,6 +81,7 @@ Deno.serve(async (req) => {
           error: "Invite not found, expired, or revoked.",
           code: "invite_invalid",
           status: inviteStatus,
+          diagnostics: await buildAcceptDiagnostics(token, invite, "", "invalid_status"),
         }, 410);
       }
       const authHeader = req.headers.get("authorization") || "";
@@ -98,6 +99,7 @@ Deno.serve(async (req) => {
           error: `This invite was sent to ${invite.email}. Log in with that email address.`,
           code: "email_mismatch",
           invited_email: invite.email,
+          diagnostics: await buildAcceptDiagnostics(token, invite, userEmail, "email_mismatch"),
         }, 403);
       }
 
@@ -121,6 +123,7 @@ Deno.serve(async (req) => {
           error: "This invite has already been accepted.",
           code: "invite_already_accepted",
           status: "active",
+          diagnostics: await buildAcceptDiagnostics(token, invite, userEmail, "already_accepted"),
         }, 409);
       }
 
@@ -260,6 +263,20 @@ async function buildQueryErrorDiagnostics(token: string) {
     latest_invite_expires_at: "",
     lookup_table: "company_members",
     lookup_column: "token_hash",
+  };
+}
+
+async function buildAcceptDiagnostics(token: string, invite: Record<string, unknown>, userEmail: string, reason: string) {
+  const tokenHash = token ? await sha256Hex(token) : "";
+  return {
+    token_received: Boolean(token),
+    token_length: token.length,
+    computed_hash_prefix: tokenHash.slice(0, 8),
+    user_email: userEmail,
+    invited_email: String(invite.email || ""),
+    accept_error_reason: reason,
+    invite_status: getInviteStatus(invite),
+    expires_at: String(invite.expires_at || ""),
   };
 }
 

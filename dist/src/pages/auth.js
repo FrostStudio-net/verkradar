@@ -102,7 +102,8 @@ export function renderResetPasswordPage({ t, escapeHtml, authForm, authSubmittin
   `;
 }
 
-export function renderSignupPage({ t, escapeHtml, authForm, authSubmitting, authMessage, loginHref = "/login" }) {
+export function renderSignupPage({ t, escapeHtml, authForm, authSubmitting, authMessage, loginHref = "/login", inviteEmail = "", isInviteSignup = false }) {
+  const emailValue = inviteEmail || authForm.email;
   return `
     <section class="auth-page">
       <div class="auth-layout">
@@ -115,8 +116,9 @@ export function renderSignupPage({ t, escapeHtml, authForm, authSubmitting, auth
         <div class="auth-form-column">
           ${renderAuthFormMessage({ authMessage, escapeHtml })}
           <form id="signup-form" class="auth-card">
-            <label class="form-group">${escapeHtml(t("email"))} <input type="email" name="email" data-auth-field="email" value="${escapeHtml(authForm.email)}" autocomplete="email" required /></label>
+            <label class="form-group">${escapeHtml(t("email"))} <input type="email" name="email" data-auth-field="email" value="${escapeHtml(emailValue)}" autocomplete="email" ${isInviteSignup ? "readonly" : ""} required /></label>
             <label class="form-group">${escapeHtml(t("password"))} <input type="password" name="password" data-auth-field="password" value="${escapeHtml(authForm.password)}" autocomplete="new-password" minlength="6" required /></label>
+            ${isInviteSignup ? `<p class="muted-text">${escapeHtml(t("inviteSignupEmailHelp"))}</p>` : ""}
             <div class="auth-actions">
               <button class="btn btn-primary btn-large" type="submit" ${authSubmitting ? "disabled" : ""}>
                 ${authSubmitting ? escapeHtml(t("creating")) : escapeHtml(t("createAccount"))}

@@ -39,6 +39,7 @@ import {
   getCleanOpportunityBuyer,
   getInitialPendingInviteToken,
   getInviteTokenFromRoute,
+  getStoredPendingInviteToken,
   inferLocationFromSourceName,
   isUuid,
   localizeLegacyReportContent,
@@ -320,6 +321,11 @@ function syncPendingSignupPlanFromRoute(route = state.route) {
 function syncPendingInviteTokenFromRoute(route = state.route) {
   const token = getInviteTokenFromRoute(route);
   if (shouldPreserveInviteForRoute(route) && !token) {
+    const storedToken = getStoredPendingInviteToken();
+    if (storedToken) {
+      state.pendingInviteToken = storedToken;
+      return;
+    }
     clearPendingInviteState();
     return;
   }
@@ -1234,6 +1240,7 @@ function redirectAuthenticatedPublicRoute({ replace = false } = {}) {
 function afterRouteRender() {
   if (getRoutePath(state.route) === "/accept-invite") {
     loadCompanyInvitePreview();
+    if (state.user && !state.inviteAccepting && !state.invitePreviewError) acceptPendingCompanyInvite();
   }
   if (state.route === "/report" && state.companyId && !state.reportsLoaded && !state.reportArchiveLoading) {
     loadReportsForCurrentCompany();
@@ -3191,8 +3198,9 @@ async function getTedImportHeaders() {
 }
 
 function getAuthRedirectUrl() {
-  if (state.pendingInviteToken && shouldPreserveInviteForRoute(state.route)) {
-    return `${window.location.origin}/#/accept-invite?token=${encodeURIComponent(state.pendingInviteToken)}`;
+  const inviteToken = state.pendingInviteToken || getStoredPendingInviteToken();
+  if (inviteToken && shouldPreserveInviteForRoute(state.route)) {
+    return `${window.location.origin}/#/accept-invite?token=${encodeURIComponent(inviteToken)}`;
   }
   return `${window.location.origin}/#/onboarding`;
 }
@@ -3248,7 +3256,9 @@ async function signUp(email, password) {
       const hasConfirmedNewIdentity = Array.isArray(data?.user?.identities) && data.user.identities.length > 0;
       state.authMessage = {
         type: "success",
-        text: hasConfirmedNewIdentity ? t("signupCreatedConfirm") : t("signupNeutralNextSteps")
+        text: state.pendingInviteToken
+          ? t("inviteSignupCreatedConfirm")
+          : (hasConfirmedNewIdentity ? t("signupCreatedConfirm") : t("signupNeutralNextSteps"))
       };
       state.authForm.password = "";
       render();
@@ -6245,7 +6255,10 @@ async function loadCompanyInvitePreview() {
 }
 
 async function acceptPendingCompanyInvite() {
-  const token = state.pendingInviteToken || getInviteTokenFromRoute(state.route);
+  const routeToken = getInviteTokenFromRoute(state.route);
+  const storedToken = getStoredPendingInviteToken();
+  const token = routeToken || state.pendingInviteToken || storedToken;
+  const tokenSource = routeToken ? "url" : state.pendingInviteToken || storedToken ? "localStorage" : "missing";
   if (!token) return;
   if (!state.user) {
     navigate(getInviteAwareAuthHref("/login"));
@@ -6265,6 +6278,15 @@ async function acceptPendingCompanyInvite() {
   } catch (error) {
     console.error("Failed to accept company invite:", error);
     const invitedEmail = error?.details?.invited_email || state.invitePreview?.invited_email || state.invitePreview?.email || "";
+    state.invitePreviewDebug = {
+      ...(state.invitePreviewDebug || {}),
+      ...(error?.details?.diagnostics || {}),
+      token_source: tokenSource,
+      user_email: state.user?.email || "",
+      invited_email: invitedEmail,
+      accept_error_reason: error?.details?.code || error?.details?.diagnostics?.accept_error_reason || errorMessage(error)
+    };
+    console.warn("Invite accept diagnostics:", state.invitePreviewDebug);
     state.invitePreviewError = error?.details?.code === "email_mismatch" && invitedEmail
       ? (state.language === "is"
         ? `Þessi aðgangsboð var sent á ${invitedEmail}. Skráðu þig inn með því netfangi.`
@@ -6294,7 +6316,9 @@ function renderSignup() {
     authForm: state.authForm,
     authSubmitting: state.authSubmitting,
     authMessage: state.authMessage,
-    loginHref: getInviteAwareAuthHref("/login")
+    loginHref: getInviteAwareAuthHref("/login"),
+    inviteEmail: state.invitePreview?.invited_email || state.invitePreview?.email || "",
+    isInviteSignup: Boolean(state.pendingInviteToken && (state.invitePreview?.invited_email || state.invitePreview?.email))
   }));
 }
 
