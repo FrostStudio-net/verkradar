@@ -2392,20 +2392,44 @@ select option:checked {
 }
 
 .admin-company-modal {
-  max-width: 1120px;
+  width: min(90vw, 1480px);
+  max-width: 90vw;
+  max-height: min(90vh, 980px);
 }
 
 .admin-detail-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  gap: 20px;
+  align-items: start;
+}
+
+.admin-company-modal .modal-header {
+  padding: 18px 24px 14px;
+}
+
+.admin-company-modal .modal-body {
+  padding: 20px 24px 24px;
+  overscroll-behavior: contain;
+}
+
+.admin-company-modal .side-panel {
+  min-width: 0;
+}
+
+.admin-company-modal .side-panel h3 {
+  margin-top: 18px;
+}
+
+.admin-company-modal .side-panel h3:first-child {
+  margin-top: 0;
 }
 
 .admin-tag-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin: 8px 0 18px;
+  gap: 7px;
+  margin: 10px 0 22px;
 }
 
 .admin-tag-list span {
@@ -2413,9 +2437,11 @@ select option:checked {
   border-radius: 999px;
   background: rgba(255,255,255,0.05);
   color: var(--text);
-  padding: 7px 10px;
+  padding: 8px 11px;
   font-size: 0.84rem;
   font-weight: 800;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .admin-detail-list {
@@ -2438,6 +2464,42 @@ select option:checked {
 .admin-detail-list span {
   color: var(--muted);
   font-size: 0.86rem;
+}
+
+.admin-company-access-list li {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.admin-company-access-list li > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.admin-access-invite {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.admin-access-invite label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.admin-access-invite input {
+  width: 100%;
+  min-height: 42px;
+  color: var(--text);
+  background: #121212;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0 12px;
+  box-sizing: border-box;
 }
 
 .admin-filters input,

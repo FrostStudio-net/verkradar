@@ -67,8 +67,27 @@ Deno.serve(async (req) => {
     const action = String(body.action || "refresh_matches").trim();
     const reportMode: ReportMode = body.reportMode === "all_current" ? "all_current" : "new_only";
     if (!isUuid(companyId)) return json({ error: "A valid companyId is required." }, 400);
-    if (!["refresh_matches", "generate_report", "review_match", "mark_report_sent"].includes(action)) {
+    if (!["refresh_matches", "generate_report", "review_match", "mark_report_sent", "invite_customer", "revoke_customer_access"].includes(action)) {
       return json({ error: "Unsupported action." }, 400);
+    }
+
+    if (action === "invite_customer") {
+      const email = String(body.email || "").trim();
+      const result = await inviteCompanyCustomer(adminClient, {
+        companyId,
+        email,
+      });
+      return json({ ok: true, action, ...result });
+    }
+
+    if (action === "revoke_customer_access") {
+      const memberId = String(body.memberId || "").trim();
+      if (!isUuid(memberId)) return json({ error: "A valid memberId is required." }, 400);
+      const result = await revokeCompanyAccess(adminClient, {
+        companyId,
+        memberId,
+      });
+      return json({ ok: true, action, ...result });
     }
 
     if (action === "review_match") {
@@ -157,6 +176,111 @@ async function markReportSent(
     company_id: options.companyId,
     marked_sent: rows.length,
     sent_at: now,
+  };
+}
+
+async function inviteCompanyCustomer(
+  supabase: ReturnType<typeof createClient>,
+  options: { companyId: string; email: string },
+) {
+  const email = String(options.email || "").trim();
+  const emailNormalized = normalizeEmail(email);
+  if (!emailNormalized || !emailNormalized.includes("@")) {
+    throw new Error("A valid customer email is required.");
+  }
+
+  const { data: company, error: companyError } = await supabase
+    .from("companies")
+    .select("id, company_name")
+    .eq("id", options.companyId)
+    .maybeSingle();
+  if (companyError) throw companyError;
+  if (!company) throw new Error("Company not found.");
+
+  const { data: existing, error: existingError } = await supabase
+    .from("company_members")
+    .select("id, company_id, user_id, email, role, status, invited_at, accepted_at")
+    .eq("company_id", options.companyId)
+    .eq("email_normalized", emailNormalized)
+    .maybeSingle();
+  if (existingError) throw existingError;
+
+  const now = new Date().toISOString();
+  if (existing) {
+    const update = existing.status === "active"
+      ? {
+          email,
+          role: existing.role || "owner",
+          updated_at: now,
+        }
+      : {
+          email,
+          role: existing.role || "owner",
+          status: "invited",
+          invited_at: now,
+          accepted_at: null,
+          revoked_at: null,
+          user_id: null,
+          updated_at: now,
+        };
+    const { data, error } = await supabase
+      .from("company_members")
+      .update(update)
+      .eq("id", existing.id)
+      .select("id, company_id, user_id, email, role, status, invited_at, accepted_at")
+      .single();
+    if (error) throw error;
+    return {
+      company_id: options.companyId,
+      company_name: company.company_name,
+      member: data,
+      rows_updated: 1,
+    };
+  }
+
+  const { data, error } = await supabase
+    .from("company_members")
+    .insert({
+      company_id: options.companyId,
+      email,
+      email_normalized: emailNormalized,
+      role: "owner",
+      status: "invited",
+      invited_at: now,
+      updated_at: now,
+    })
+    .select("id, company_id, user_id, email, role, status, invited_at, accepted_at")
+    .single();
+  if (error) throw error;
+  return {
+    company_id: options.companyId,
+    company_name: company.company_name,
+    member: data,
+    rows_updated: 1,
+  };
+}
+
+async function revokeCompanyAccess(
+  supabase: ReturnType<typeof createClient>,
+  options: { companyId: string; memberId: string },
+) {
+  const { data, error } = await supabase
+    .from("company_members")
+    .update({
+      status: "revoked",
+      revoked_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", options.memberId)
+    .eq("company_id", options.companyId)
+    .select("id, company_id, email, role, status, revoked_at")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("Company access membership not found.");
+  return {
+    company_id: options.companyId,
+    member: data,
+    rows_updated: 1,
   };
 }
 
@@ -1824,6 +1948,10 @@ function normalizeText(value: unknown) {
 
 function normalizeLocationText(value: unknown) {
   return normalizeText(value);
+}
+
+function normalizeEmail(value: unknown) {
+  return String(value || "").trim().toLowerCase();
 }
 
 function daysUntilDeadline(value: string) {
