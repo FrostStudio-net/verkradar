@@ -18,6 +18,8 @@ export function renderAcceptInvitePage(options) {
   const loginLabel = isIs ? "Innskráning" : "Login";
   const signupLabel = isIs ? "Stofna aðgang" : "Create account";
   const acceptLabel = isIs ? "Tengja aðgang" : "Accept invite";
+  const goLoginLabel = isIs ? "Fara í innskráningu" : "Go to login";
+  const goHomeLabel = isIs ? "Fara á forsíðu" : "Go to homepage";
   const helper = isIs
     ? "Aðgangsboðið tengir innskráninguna við fyrirtækjaprófíl sem hefur þegar verið settur upp."
     : "This invite connects your login to an existing company profile.";
@@ -34,6 +36,12 @@ export function renderAcceptInvitePage(options) {
           <div class="auth-card invite-card">
             ${loading ? `<p>${escapeHtml(loadingText)}</p>` : ""}
             ${error ? `<div class="admin-message is-error">${escapeHtml(error)}</div>` : ""}
+            ${error && !invite ? `
+              <div class="auth-actions">
+                <button class="btn btn-primary btn-large" type="button" data-action="go" data-href="/login">${escapeHtml(goLoginLabel)}</button>
+                <button class="btn btn-secondary btn-large" type="button" data-action="go" data-href="/">${escapeHtml(goHomeLabel)}</button>
+              </div>
+            ` : ""}
             ${invite ? `
               <div class="invite-summary">
                 <p>${escapeHtml(isIs

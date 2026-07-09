@@ -37,8 +37,8 @@ import {
   getSafeExternalUrl,
   getAiReportPlacement,
   getCleanOpportunityBuyer,
+  getInitialPendingInviteToken,
   getInviteTokenFromRoute,
-  getStoredPendingInviteToken,
   inferLocationFromSourceName,
   isUuid,
   localizeLegacyReportContent,
@@ -84,6 +84,7 @@ import {
   renderSignupPage,
   previewCompanyInvite,
   setStoredPendingInviteToken,
+  shouldPreserveInviteForRoute,
   sortAiReportMatches,
   splitInput,
   stripHtmlFromString,
@@ -125,7 +126,7 @@ let state = {
   route: location.hash.replace("#", "") || "/",
   language: getInitialLanguage(),
   pendingSignupPlan: getPlanFromRoute(location.hash.replace("#", "") || "/") || getStoredSelectedPlan(),
-  pendingInviteToken: getInviteTokenFromRoute(location.hash.replace("#", "") || "/") || getStoredPendingInviteToken(),
+  pendingInviteToken: getInitialPendingInviteToken(location.hash.replace("#", "") || "/"),
   invitePreview: null,
   invitePreviewLoading: false,
   invitePreviewError: null,
@@ -316,17 +317,34 @@ function syncPendingSignupPlanFromRoute(route = state.route) {
 
 function syncPendingInviteTokenFromRoute(route = state.route) {
   const token = getInviteTokenFromRoute(route);
-  if (token && token !== state.pendingInviteToken) {
+  if (shouldPreserveInviteForRoute(route) && !token) {
+    clearPendingInviteState();
+    return;
+  }
+  if (shouldPreserveInviteForRoute(route) && token && token !== state.pendingInviteToken) {
     state.pendingInviteToken = setStoredPendingInviteToken(token);
     state.invitePreview = null;
     state.invitePreviewError = null;
     state.invitePreviewErrorToken = "";
+    return;
   }
+  if (!shouldPreserveInviteForRoute(route)) {
+    clearPendingInviteState();
+  }
+}
+
+function clearPendingInviteState() {
+  clearStoredPendingInviteToken();
+  state.pendingInviteToken = "";
+  state.invitePreview = null;
+  state.invitePreviewError = null;
+  state.invitePreviewErrorToken = "";
+  state.inviteAccepting = false;
 }
 
 function getInviteAwareAuthHref(path) {
   const token = state.pendingInviteToken || getInviteTokenFromRoute(state.route);
-  return token ? `${path}?invite=${encodeURIComponent(token)}` : path;
+  return token && shouldPreserveInviteForRoute(state.route) ? `${path}?invite=${encodeURIComponent(token)}` : path;
 }
 
 if ("scrollRestoration" in history) {
@@ -1166,7 +1184,7 @@ function navigate(route) {
 
 function getPostAuthRoute() {
   if (!state.user && !state.currentUser) return "/";
-  if (state.pendingInviteToken) return `/accept-invite?token=${encodeURIComponent(state.pendingInviteToken)}`;
+  if (state.pendingInviteToken && shouldPreserveInviteForRoute(state.route)) return `/accept-invite?token=${encodeURIComponent(state.pendingInviteToken)}`;
   return state.profile ? "/dashboard" : "/onboarding";
 }
 
@@ -3162,7 +3180,7 @@ async function getTedImportHeaders() {
 }
 
 function getAuthRedirectUrl() {
-  if (state.pendingInviteToken) {
+  if (state.pendingInviteToken && shouldPreserveInviteForRoute(state.route)) {
     return `${window.location.origin}/#/accept-invite?token=${encodeURIComponent(state.pendingInviteToken)}`;
   }
   return `${window.location.origin}/#/onboarding`;
@@ -3366,6 +3384,7 @@ async function signOut() {
     state.authLoaded = true;
     state.adminLoaded = true;
     state.profileLoaded = true;
+    clearPendingInviteState();
     clearLocalProfileState();
     navigate("/");
     render();
@@ -6160,8 +6179,11 @@ function renderResetPassword() {
 }
 
 function renderAcceptInvite() {
-  const token = state.pendingInviteToken || getInviteTokenFromRoute(state.route);
-  if (token && token !== state.pendingInviteToken) state.pendingInviteToken = setStoredPendingInviteToken(token);
+  const routeToken = getInviteTokenFromRoute(state.route);
+  const token = state.pendingInviteToken || (state.invitePreviewErrorToken === routeToken ? "" : routeToken);
+  if (token && token !== state.pendingInviteToken && state.invitePreviewErrorToken !== token) {
+    state.pendingInviteToken = setStoredPendingInviteToken(token);
+  }
   return renderShell(renderAcceptInvitePage({
     escapeHtml,
     invite: state.invitePreview,
@@ -6195,6 +6217,8 @@ async function loadCompanyInvitePreview() {
   } catch (error) {
     console.error("Failed to preview company invite:", error);
     state.invitePreview = null;
+    clearStoredPendingInviteToken();
+    state.pendingInviteToken = "";
     state.invitePreviewErrorToken = token;
     state.invitePreviewError = state.language === "is"
       ? "Aðgangsboðið fannst ekki, er útrunnið eða hefur verið afturkallað."

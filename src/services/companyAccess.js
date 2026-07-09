@@ -1,6 +1,7 @@
 import { SUPABASE_ANON_KEY, SUPABASE_URL, supabaseClient } from "../supabaseClient.js";
 
 const PENDING_INVITE_TOKEN_KEY = "verkradar_pending_invite_token";
+const LEGACY_PENDING_INVITE_TOKEN_KEY = "verkradar_pending_invite_token";
 
 export function normalizeAccessEmail(email) {
   return String(email || "").trim().toLowerCase();
@@ -19,9 +20,33 @@ export function getInviteTokenFromRoute(route) {
   return new URLSearchParams(query).get("token") || new URLSearchParams(query).get("invite") || "";
 }
 
+export function isAcceptInviteRoute(route) {
+  return getRoutePath(route) === "/accept-invite";
+}
+
+export function isInviteAuthRoute(route) {
+  const path = getRoutePath(route);
+  return ["/login", "/signup", "/forgot-password"].includes(path) && Boolean(getInviteTokenFromRoute(route));
+}
+
+export function shouldPreserveInviteForRoute(route) {
+  return isAcceptInviteRoute(route) || isInviteAuthRoute(route);
+}
+
+export function getInitialPendingInviteToken(route) {
+  if (shouldPreserveInviteForRoute(route)) return getInviteTokenFromRoute(route) || getStoredPendingInviteToken();
+  clearStoredPendingInviteToken();
+  return "";
+}
+
 export function getStoredPendingInviteToken() {
   try {
-    return localStorage.getItem(PENDING_INVITE_TOKEN_KEY) || "";
+    localStorage.removeItem(LEGACY_PENDING_INVITE_TOKEN_KEY);
+  } catch {
+    // Ignore legacy cleanup failures.
+  }
+  try {
+    return sessionStorage.getItem(PENDING_INVITE_TOKEN_KEY) || "";
   } catch {
     return "";
   }
@@ -30,7 +55,7 @@ export function getStoredPendingInviteToken() {
 export function setStoredPendingInviteToken(token) {
   const cleanToken = String(token || "").trim();
   try {
-    if (cleanToken) localStorage.setItem(PENDING_INVITE_TOKEN_KEY, cleanToken);
+    if (cleanToken) sessionStorage.setItem(PENDING_INVITE_TOKEN_KEY, cleanToken);
   } catch {
     // Keep token in memory if storage is unavailable.
   }
@@ -39,7 +64,8 @@ export function setStoredPendingInviteToken(token) {
 
 export function clearStoredPendingInviteToken() {
   try {
-    localStorage.removeItem(PENDING_INVITE_TOKEN_KEY);
+    sessionStorage.removeItem(PENDING_INVITE_TOKEN_KEY);
+    localStorage.removeItem(LEGACY_PENDING_INVITE_TOKEN_KEY);
   } catch {
     // Ignore storage failures.
   }
@@ -162,4 +188,10 @@ async function readJsonResponse(response) {
   } catch {
     return { error: text };
   }
+}
+
+function getRoutePath(route) {
+  const raw = String(route || "/");
+  const normalized = raw.startsWith("/") ? raw : `/${raw}`;
+  return normalized.split("?")[0] || "/";
 }
