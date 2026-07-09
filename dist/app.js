@@ -23,6 +23,8 @@ import {
   formatReportRisk as formatReportRiskBase,
   formatShortDate,
   getReportDeliveryStatus,
+  getReportStatusBadge,
+  getReportUiLabel,
   getInitialLanguage as getInitialLanguageBase,
   getLegalPageData,
   getSafeExternalUrl,
@@ -43,6 +45,7 @@ import {
   updateCompanyAutoAiReviewEnabled,
   PROFILE_SUGGESTIONS,
   mergeAiReviewsIntoAdminMatches,
+  normalizeReportRisk,
   renderAdminDailyPipelinePanel,
   renderAdminAutomaticAiReviewPanel,
   renderAdminCompanyAiReviewPanel,
@@ -6651,9 +6654,9 @@ function renderAdminReportRow(report) {
       <td>${itemCount}</td>
       <td>
         <div class="admin-row-actions">
-          <button class="btn btn-secondary btn-small" type="button" data-action="view-admin-report" data-id="${escapeHtml(report.id)}">View report</button>
-          <button class="btn btn-ghost btn-small" type="button" data-action="copy-admin-report" data-id="${escapeHtml(report.id)}">Copy report email</button>
-          <button class="btn btn-ghost btn-small" type="button" data-action="view-admin-report" data-id="${escapeHtml(report.id)}">Open for PDF</button>
+          <button class="btn btn-secondary btn-small" type="button" data-action="view-admin-report" data-id="${escapeHtml(report.id)}">${escapeHtml(state.language === "is" ? "Skoða yfirlit" : "View report")}</button>
+          <button class="btn btn-ghost btn-small" type="button" data-action="copy-admin-report" data-id="${escapeHtml(report.id)}">${escapeHtml(getReportUiLabel("copyReportEmail", state.language))}</button>
+          <button class="btn btn-ghost btn-small" type="button" data-action="view-admin-report" data-id="${escapeHtml(report.id)}">${escapeHtml(state.language === "is" ? "Opna fyrir PDF" : "Open for PDF")}</button>
         </div>
       </td>
     </tr>
@@ -6691,18 +6694,18 @@ function renderAdminReportDetails() {
       <div class="modal admin-report-modal" role="dialog" aria-modal="true">
         <div class="modal-header">
           <div>
-            <span class="status-pill is-success">${escapeHtml(report.status || "generated")}</span>
+            <span class="status-pill is-success">${escapeHtml(formatReportArchiveStatus(report.status))}</span>
             <h2>${escapeHtml(cleanTitle)}</h2>
-            <p>${escapeHtml(companyName)} · ${escapeHtml(`${formatShortDate(report.period_start)} - ${formatShortDate(report.period_end)}`)} · ${escapeHtml(formatDateTime(report.created_at))}</p>
+            <p>${escapeHtml(companyName)} · ${escapeHtml(formatReportDateRange(report.period_start, report.period_end))} · ${escapeHtml(formatDateTime(report.created_at))}</p>
           </div>
           <button type="button" class="icon-btn modal-close-btn" data-action="close-admin-report" aria-label="Close report">×</button>
         </div>
         <div class="modal-body">
           <div class="admin-report-actions">
-            <button class="btn btn-primary" type="button" data-action="download-admin-report-pdf" ${state.selectedAdminReportLoading ? "disabled" : ""}>Download PDF</button>
-            <button class="btn btn-secondary" type="button" data-action="copy-admin-report" data-id="${escapeHtml(report.id)}">Copy report email</button>
-            <button class="btn btn-secondary" type="button" data-action="mark-admin-report-sent" data-id="${escapeHtml(report.id)}" ${state.adminReportDeliveryActions[report.id] === "sent" ? "disabled" : ""}>${state.adminReportDeliveryActions[report.id] === "sent" ? "Marking..." : "Mark as sent"}</button>
-            <button class="btn btn-ghost" type="button" data-action="close-admin-report">Close</button>
+            <button class="btn btn-primary" type="button" data-action="download-admin-report-pdf" ${state.selectedAdminReportLoading ? "disabled" : ""}>${escapeHtml(getReportUiLabel("downloadPdf", state.language))}</button>
+            <button class="btn btn-secondary" type="button" data-action="copy-admin-report" data-id="${escapeHtml(report.id)}">${escapeHtml(getReportUiLabel("copyReportEmail", state.language))}</button>
+            <button class="btn btn-secondary" type="button" data-action="mark-admin-report-sent" data-id="${escapeHtml(report.id)}" ${state.adminReportDeliveryActions[report.id] === "sent" ? "disabled" : ""}>${escapeHtml(state.adminReportDeliveryActions[report.id] === "sent" ? getReportUiLabel("marking", state.language) : getReportUiLabel("markAsSent", state.language))}</button>
+            <button class="btn btn-ghost" type="button" data-action="close-admin-report">${escapeHtml(getReportUiLabel("close", state.language))}</button>
           </div>
 
           ${state.selectedAdminReportLoading ? `<div class="empty-card">Loading saved report items...</div>` : ""}
@@ -6714,7 +6717,7 @@ function renderAdminReportDetails() {
             closeButton: false,
             includeTextArea: false
           }) : !state.selectedAdminReportLoading ? `
-            <div class="empty-card">No new eligible opportunities in this report.</div>
+            <div class="empty-card">${escapeHtml(state.language === "is" ? "Engin virk tækifæri eru í þessu yfirliti." : "No active eligible opportunities in this report.")}</div>
           ` : ""}
 
           ${!state.selectedAdminReportLoading && itemCount ? renderAdminReportItems(report) : ""}
@@ -6732,11 +6735,11 @@ function renderAdminReportMetadataStrip(report, itemCount, companyName) {
       : report.status || "draft";
   return `
     <div class="admin-report-meta-strip">
-      <span><strong>Company</strong>${escapeHtml(companyName || "Unknown company")}</span>
-      <span><strong>Period</strong>${escapeHtml(`${formatShortDate(report.period_start)} - ${formatShortDate(report.period_end)}`)}</span>
-      <span><strong>Generated at</strong>${escapeHtml(formatDateTime(report.created_at))}</span>
-      <span><strong>Mode</strong>${escapeHtml(mode)}</span>
-      <span><strong>Items</strong>${Number(itemCount || 0)}</span>
+      <span><strong>${escapeHtml(getReportUiLabel("company", state.language))}:</strong> ${escapeHtml(companyName || "Unknown company")}</span>
+      <span><strong>${escapeHtml(getReportUiLabel("period", state.language))}:</strong> ${escapeHtml(formatReportDateRange(report.period_start, report.period_end))}</span>
+      <span><strong>${escapeHtml(getReportUiLabel("generatedAt", state.language))}:</strong> ${escapeHtml(formatDateTime(report.created_at))}</span>
+      <span><strong>${escapeHtml(getReportUiLabel("mode", state.language))}:</strong> ${escapeHtml(mode === "all_current" ? getReportUiLabel("currentActive", state.language) : getReportUiLabel("newOpportunities", state.language))}</span>
+      <span><strong>${escapeHtml(getReportUiLabel("items", state.language))}:</strong> ${Number(itemCount || 0)}</span>
     </div>
   `;
 }
@@ -6746,7 +6749,7 @@ function renderAdminReportItems(report) {
   const sortedItems = items.sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0));
   return `
     <section class="admin-report-items">
-      <h3>Report items</h3>
+      <h3>${escapeHtml(state.language === "is" ? "Atriði í yfirliti" : "Report items")}</h3>
       <div class="admin-report-item-list">
         ${sortedItems.map((item) => renderAdminReportItem(item)).join("")}
       </div>
@@ -6757,7 +6760,7 @@ function renderAdminReportItems(report) {
 function renderAdminReportItem(item) {
   const opp = item.opportunities ? mapSupabaseOpportunity(item.opportunities) : null;
   if (!opp) {
-    return `<article class="admin-report-item"><p>Opportunity data is no longer available.</p></article>`;
+    return `<article class="admin-report-item"><p>${escapeHtml(state.language === "is" ? "Gögn um tækifæri eru ekki lengur aðgengileg." : "Opportunity data is no longer available.")}</p></article>`;
   }
   const safeUrl = getSafeExternalUrl(opp.url);
   const deadline = getOpportunityDeadlineDisplay(opp);
@@ -6765,22 +6768,22 @@ function renderAdminReportItem(item) {
   return `
     <article class="admin-report-item">
       <div class="opportunity-badges">
-        <span class="source-pill source-badge">${escapeHtml(formatReportQualityLabel(getOpportunityQualityLabel(opp)))}</span>
-        <span class="${badgeClass(getMatchLabel(Number(item.match_score || 0)))}">${escapeHtml(formatReportMatchLabel(getMatchLabel(Number(item.match_score || 0))))} · ${Number(item.match_score || 0)}</span>
+        <span class="source-pill source-badge">${escapeHtml(getReportStatusBadge({ matchScore: Number(item.match_score || 0) }, state.language))}</span>
+        <span class="${badgeClass(getMatchLabel(Number(item.match_score || 0)))}">${escapeHtml(getReportDeliveryStatus({ matchScore: Number(item.match_score || 0) }, state.language))}</span>
       </div>
       <h4>${escapeHtml(opp.title)}</h4>
-      <p><strong>Status</strong> ${escapeHtml(getReportDeliveryStatus({ matchScore: Number(item.match_score || 0) }, state.language))}</p>
+      <p><strong>${escapeHtml(state.language === "is" ? "Staða" : "Status")}:</strong> ${escapeHtml(getReportDeliveryStatus({ matchScore: Number(item.match_score || 0) }, state.language))}</p>
       <div class="admin-report-meta-grid">
         <span><strong>${escapeHtml(t("buyer"))}</strong>${escapeHtml(formatOpportunityBuyer(opp))}</span>
         <span><strong>${escapeHtml(t("source"))}</strong>${escapeHtml(formatReportMetadataValue("source", opp.source))}</span>
         <span><strong>${escapeHtml(t("area"))}</strong>${escapeHtml(formatOpportunityLocation(opp))}</span>
         <span><strong>${escapeHtml(t("deadline"))}</strong>${escapeHtml(deadline.label)}</span>
         <span><strong>${escapeHtml(t("estimatedValue"))}</strong>${escapeHtml(opp.estimatedValue ? formatISK(opp.estimatedValue) : t("notListed"))}</span>
-        <span><strong>Sent status</strong>${escapeHtml(item.sent_at ? `Sent on ${formatDateTime(item.sent_at)}` : "Not sent")}</span>
+        <span><strong>${escapeHtml(getReportUiLabel("sentStatus", state.language))}</strong>${escapeHtml(item.sent_at ? `${getReportUiLabel("sentOn", state.language)} ${formatDateTime(item.sent_at)}` : getReportUiLabel("notSent", state.language))}</span>
       </div>
-      ${reasons.length ? `<div><strong>Reasons</strong><ul>${reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul></div>` : ""}
+      ${reasons.length ? `<div><strong>${escapeHtml(getReportUiLabel("reasons", state.language))}</strong><ul>${reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul></div>` : ""}
       <p>${escapeHtml(opp.description || "")}</p>
-      ${safeUrl ? `<a class="btn btn-secondary btn-small" href="${escapeHtml(safeUrl)}" target="_blank" rel="noreferrer">${escapeHtml(t("openSource"))}</a>` : ""}
+      ${safeUrl ? `<a class="btn btn-secondary btn-small" href="${escapeHtml(safeUrl)}" target="_blank" rel="noreferrer">${escapeHtml(getReportUiLabel("openSource", state.language))}</a>` : ""}
     </article>
   `;
 }
@@ -9218,18 +9221,22 @@ function renderReportOpportunitySection(title, description, opportunities) {
 
 function renderReportOpportunityItem(opp) {
   const valueKnown = Boolean(opp.estimatedValue);
-  const risks = getReportRisks(opp);
+  const cleanedOpp = {
+    ...opp,
+    matchReasons: cleanReportReasons(opp.matchReasons, state.language),
+  };
+  const risks = getReportRisks(opp).map((risk) => normalizeReportRisk(risk, state.language)).filter(Boolean);
   const deadlineText = opp.deadline ? formatCustomerReportDate(opp.deadline) : t("notFound");
   const valueText = valueKnown ? formatISK(opp.estimatedValue) : t("notListed");
   const sourceUrl = getSafeExternalUrl(opp.url);
   return renderReportOpportunityItemPage({
-    opp,
+    opp: cleanedOpp,
     valueText,
     deadlineText,
     sourceUrl,
     risks,
-    fallbackReason: "Matched to your profile by service, location or keyword overlap.",
-    qualityBadgeHtml: renderReportQualityBadge(opp),
+    fallbackReason: state.language === "is" ? "Passar við fyrirtækjaprófílinn." : "Matches your company profile.",
+    qualityBadgeHtml: renderReportQualityBadge(cleanedOpp),
     matchBadgeClass: badgeClass(opp.matchLabel),
     matchLabel: getReportFitLabel(opp),
     buyerLabel: t("buyer"),
@@ -9251,17 +9258,13 @@ function renderReportOpportunityItem(opp) {
 }
 
 function getReportFitLabel(opp) {
-  const fit = String(opp?.aiReviewFit || opp?.ai_review_fit || "").toLowerCase();
-  if (fit === "strong") return state.language === "is" ? "AI mælir með" : "AI recommended";
-  if (fit === "possible") return state.language === "is" ? "AI mögulegt" : "AI possible";
-  return formatReportMatchLabel(opp.matchLabel);
+  return getReportDeliveryStatus(opp, state.language);
 }
 
 function renderReportQualityBadge(opp) {
-  const status = normalizeOpportunityQualityStatus(opp.qualityStatus, opp);
   return renderReportQualityBadgePage({
-    status,
-    label: formatReportQualityLabel(getOpportunityQualityLabel(opp)),
+    status: "verify",
+    label: getReportStatusBadge(opp, state.language),
     escapeHtml
   });
 }
@@ -9299,11 +9302,11 @@ function formatCustomerLocation(value) {
 }
 
 function formatReportReason(reason) {
-  return formatReportReasonBase(reason, { language: state.language, translate: t });
+  return cleanReportReasons([formatReportReasonBase(reason, { language: state.language, translate: t })], state.language)[0] || "";
 }
 
 function formatReportRisk(risk) {
-  return formatReportRiskBase(risk, state.language);
+  return normalizeReportRisk(formatReportRiskBase(risk, state.language), state.language);
 }
 
 function formatNextStep(step) {
@@ -9338,17 +9341,16 @@ ${state.language === "is" ? "Samantekt" : "Summary"}:
 - ${t("upcomingOpportunities")}: ${sections.early.length}
 
 ${orderedMatches.length ? orderedMatches.map((opp, i) => `${i + 1}. ${opp.title}
-${state.language === "is" ? "Gæði" : "Quality"}: ${formatReportQualityLabel(getOpportunityQualityLabel(opp))}
+${state.language === "is" ? "Staða" : "Status"}: ${getReportDeliveryStatus(opp, state.language)}
 ${t("buyer")}: ${formatOpportunityBuyer(opp)}
 ${t("source")}: ${formatReportMetadataValue("source", opp.source)}
 ${t("area")}: ${formatOpportunityLocation(opp)}
 ${t("deadline")}: ${formatOpportunityDeadlineForReport(opp)}
 ${t("estimatedValue")}: ${opp.estimatedValue ? formatISK(opp.estimatedValue) : t("notListed")}
-${state.language === "is" ? "Samsvörun" : "Match"}: ${opp.matchScore}/100 (${formatReportMatchLabel(opp.matchLabel)})
 ${t("whyThisMatters")}:
-${(opp.matchReasons.length ? opp.matchReasons : ["Matched to your company profile."]).map((r) => `- ${formatReportReason(r)}`).join("\n")}
+${(cleanReportReasons(opp.matchReasons.length ? opp.matchReasons : ["Matched to your company profile."], state.language)).map((r) => `- ${r}`).join("\n")}
 ${t("risksToCheck")}:
-${getReportRisks(opp).map((r) => `- ${formatReportRisk(r)}`).join("\n")}
+${getReportRisks(opp).map((r) => `- ${normalizeReportRisk(formatReportRisk(r), state.language)}`).join("\n")}
 ${state.language === "is" ? "Næsta skref" : "Next step"}:
 ${opp.url ? `${t("openSource")}: ${opp.url}` : (state.language === "is" ? "Finnið og staðfestið upprunalega heimild áður en brugðist er við." : "Find and verify the original source page before acting.")}
 `).join("\n") : (state.language === "is" ? "Engin skýr útboð eða verðfyrirspurnir fundust fyrir þetta tímabil." : "No report-ready matches were found for this period.")}
@@ -9371,17 +9373,16 @@ function generateSavedReportText(savedReport, companyName, matches) {
 ${state.language === "is" ? "Tímabil" : "Date range"}: ${formatReportDateRange(periodStart, periodEnd)}
 
 ${orderedMatches.length ? orderedMatches.map((opp, i) => `${i + 1}. ${opp.title}
-${state.language === "is" ? "Gæði" : "Quality"}: ${formatReportQualityLabel(getOpportunityQualityLabel(opp))}
+${state.language === "is" ? "Staða" : "Status"}: ${getReportDeliveryStatus(opp, state.language)}
 ${t("buyer")}: ${formatOpportunityBuyer(opp)}
 ${t("source")}: ${formatReportMetadataValue("source", opp.source)}
 ${t("area")}: ${formatOpportunityLocation(opp)}
 ${t("deadline")}: ${formatOpportunityDeadlineForReport(opp)}
 ${t("estimatedValue")}: ${opp.estimatedValue ? formatISK(opp.estimatedValue) : t("notListed")}
-${state.language === "is" ? "Samsvörun" : "Match"}: ${opp.matchScore}/100 (${formatReportMatchLabel(opp.matchLabel)})
 ${t("whyThisMatters")}:
-${(opp.matchReasons.length ? opp.matchReasons : ["Matched to your company profile."]).map((r) => `- ${formatReportReason(r)}`).join("\n")}
+${(cleanReportReasons(opp.matchReasons.length ? opp.matchReasons : ["Matched to your company profile."], state.language)).map((r) => `- ${r}`).join("\n")}
 ${t("risksToCheck")}:
-${getReportRisks(opp).map((r) => `- ${formatReportRisk(r)}`).join("\n")}
+${getReportRisks(opp).map((r) => `- ${normalizeReportRisk(formatReportRisk(r), state.language)}`).join("\n")}
 ${opp.url ? `${t("openSource")}: ${opp.url}` : ""}
 `).join("\n") : (state.language === "is" ? "Engin atriði eru vistuð í þessu yfirliti." : "No items are saved in this report.")}
 

@@ -22,7 +22,8 @@ export {
 } from "./pages/reports.js";
 export { renderSettingsPage } from "./pages/settings.js";
 export { localizeLegacyReportContent } from "./services/reports.js";
-export { buildReportEmail, cleanReportReasons, getReportDeliveryStatus } from "./services/reportDelivery.js";
+export { buildReportEmail } from "./services/reportDelivery.js";
+export { cleanReportReasons, getReportDeliveryStatus, getReportStatusBadge, getReportUiLabel, normalizeReportRisk } from "./services/reportLocalization.js";
 export { getAiReportPlacement, mergeAiReviewsIntoReportMatches, sortAiReportMatches } from "./services/reportAiRanking.js";
 export { SUPABASE_URL, SUPABASE_ANON_KEY, supabaseClient } from "./supabaseClient.js";
 export { daysUntilDeadline, formatDateTime, formatShortDate } from "./utils/dates.js";

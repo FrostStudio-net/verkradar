@@ -1,53 +1,6 @@
-function uniqueStrings(values) {
-  return Array.from(new Set((values || []).map((value) => String(value || "").trim()).filter(Boolean)));
-}
+import { cleanReportReasons, getReportDeliveryStatus } from "./reportLocalization.js";
 
-function normalizeReason(reason) {
-  return String(reason || "")
-    .replace(/^mentions your service:\s*/i, "")
-    .replace(/^contains your keyword:\s*/i, "")
-    .replace(/^mentions core service:\s*/i, "")
-    .replace(/^deadline is valid and in the future\.?$/i, "deadline")
-    .replace(/^location matches company service areas\.?$/i, "location")
-    .trim();
-}
-
-export function cleanReportReasons(reasons = [], language = "is") {
-  const seenTerms = new Set();
-  const cleaned = [];
-  for (const reason of reasons || []) {
-    const normalized = normalizeReason(reason);
-    if (!normalized) continue;
-    const key = normalized.toLowerCase();
-    if (key === "deadline") {
-      cleaned.push(language === "is" ? "Skilafrestur er skráður og þarf að staðfesta á heimild." : "A deadline is listed and should be verified at the source.");
-      continue;
-    }
-    if (key === "location") {
-      cleaned.push(language === "is" ? "Verkið er á svæði sem passar við þjónustusvæði fyrirtækisins." : "The location matches the company service area.");
-      continue;
-    }
-    if (seenTerms.has(key)) continue;
-    seenTerms.add(key);
-    cleaned.push(language === "is"
-      ? `Passar við þjónustu eða leitarorð: ${normalized}`
-      : `Matches service or keyword: ${normalized}`);
-  }
-  return uniqueStrings(cleaned).slice(0, 4);
-}
-
-export function getReportDeliveryStatus(match, language = "is") {
-  const fit = String(match?.aiReviewFit || match?.ai_review_fit || "").toLowerCase();
-  const isRecommended = fit === "strong" || Number(match?.matchScore || 0) >= 85;
-  if (language === "is") {
-    return isRecommended
-      ? "Mælt með — staðfesta þarf útboðsgögn"
-      : "Mögulegt tækifæri — staðfesta þarf útboðsgögn";
-  }
-  return isRecommended
-    ? "Recommended — tender documents should be verified"
-    : "Possible opportunity — tender documents should be verified";
-}
+export { cleanReportReasons, getReportDeliveryStatus };
 
 export function buildReportEmail({ companyName, matches, language = "is" }) {
   const isIs = language !== "en";
