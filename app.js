@@ -22,9 +22,11 @@ import {
   formatReportReason as formatReportReasonBase,
   formatReportRisk as formatReportRiskBase,
   formatShortDate,
-  getReportDeliveryStatus,
+  getReportEmailStatus,
+  getReportScoreLabel,
   getReportStatusBadge,
   getReportUiLabel,
+  getReportVerificationSentence,
   hasFutureDeadline,
   getInitialLanguage as getInitialLanguageBase,
   getLegalPageData,
@@ -6770,10 +6772,11 @@ function renderAdminReportItem(item) {
     <article class="admin-report-item">
       <div class="opportunity-badges">
         <span class="source-pill source-badge">${escapeHtml(getReportStatusBadge({ matchScore: Number(item.match_score || 0) }, state.language))}</span>
-        <span class="${badgeClass(getMatchLabel(Number(item.match_score || 0)))}">${escapeHtml(getReportDeliveryStatus({ matchScore: Number(item.match_score || 0) }, state.language))}</span>
+        <span class="${badgeClass(getMatchLabel(Number(item.match_score || 0)))}">${escapeHtml(`${getReportScoreLabel({ matchScore: Number(item.match_score || 0) }, state.language)} ${Number(item.match_score || 0)}`)}</span>
       </div>
       <h4>${escapeHtml(opp.title)}</h4>
-      <p><strong>${escapeHtml(state.language === "is" ? "Staða" : "Status")}:</strong> ${escapeHtml(getReportDeliveryStatus({ matchScore: Number(item.match_score || 0) }, state.language))}</p>
+      <p><strong>${escapeHtml(state.language === "is" ? "Staða" : "Status")}:</strong> ${escapeHtml(getReportStatusBadge({ matchScore: Number(item.match_score || 0) }, state.language))}</p>
+      <p>${escapeHtml(getReportVerificationSentence(state.language))}</p>
       <div class="admin-report-meta-grid">
         <span><strong>${escapeHtml(t("buyer"))}</strong>${escapeHtml(formatOpportunityBuyer(opp))}</span>
         <span><strong>${escapeHtml(t("source"))}</strong>${escapeHtml(formatReportMetadataValue("source", opp.source))}</span>
@@ -9245,8 +9248,8 @@ function renderReportOpportunityItem(opp) {
     fallbackReason: state.language === "is" ? "Passar við fyrirtækjaprófílinn." : "Matches your company profile.",
     qualityBadgeHtml: renderReportQualityBadge(cleanedOpp),
     matchBadgeClass: badgeClass(opp.matchLabel),
-    matchLabel: getReportUiLabel("verifyTenderDocs", state.language),
-    statusText: getReportFitLabel(opp),
+    matchLabel: getReportScoreLabel(opp, state.language),
+    statusText: getReportVerificationSentence(state.language),
     buyerLabel: t("buyer"),
     buyerValue: formatOpportunityBuyer(opp),
     sourceLabel: t("source"),
@@ -9263,10 +9266,6 @@ function renderReportOpportunityItem(opp) {
     formatRisk: formatReportRisk,
     escapeHtml
   });
-}
-
-function getReportFitLabel(opp) {
-  return getReportDeliveryStatus(opp, state.language);
 }
 
 function renderReportQualityBadge(opp) {
@@ -9351,7 +9350,7 @@ ${state.language === "is" ? "Samantekt" : "Summary"}:
 - ${getReportUiLabel("earlyTitle", state.language)}: ${sections.early.length}
 
 ${orderedMatches.length ? orderedMatches.map((opp, i) => `${i + 1}. ${opp.title}
-${state.language === "is" ? "Staða" : "Status"}: ${getReportDeliveryStatus(opp, state.language)}
+${state.language === "is" ? "Staða" : "Status"}: ${getReportEmailStatus(opp, state.language)}
 ${t("buyer")}: ${formatOpportunityBuyer(opp)}
 ${t("source")}: ${formatReportMetadataValue("source", opp.source)}
 ${t("area")}: ${formatOpportunityLocation(opp)}
@@ -9384,7 +9383,7 @@ function generateSavedReportText(savedReport, companyName, matches) {
 ${state.language === "is" ? "Tímabil" : "Date range"}: ${formatReportDateRange(periodStart, periodEnd)}
 
 ${orderedMatches.length ? orderedMatches.map((opp, i) => `${i + 1}. ${opp.title}
-${state.language === "is" ? "Staða" : "Status"}: ${getReportDeliveryStatus(opp, state.language)}
+${state.language === "is" ? "Staða" : "Status"}: ${getReportEmailStatus(opp, state.language)}
 ${t("buyer")}: ${formatOpportunityBuyer(opp)}
 ${t("source")}: ${formatReportMetadataValue("source", opp.source)}
 ${t("area")}: ${formatOpportunityLocation(opp)}

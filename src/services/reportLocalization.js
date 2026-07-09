@@ -35,6 +35,11 @@ export function getReportUiLabel(key, language = "is") {
     openSource: is ? "Opna heimild" : "Open source",
     verifyBadge: is ? "Staðfesta gögn" : "Verify documents",
     verifyTenderDocs: is ? "Staðfesta útboðsgögn" : "Verify tender documents",
+    verificationSentence: is
+      ? "Staðfesta þarf útboðsgögn áður en brugðist er við."
+      : "Tender documents should be verified before taking action.",
+    matchScore: is ? "Samsvörun" : "Match",
+    strongMatchScore: is ? "Sterk samsvörun" : "Strong match",
     openActiveTitle: is ? "Opin útboð / virk tækifæri" : "Open tenders / active opportunities",
     openActiveDescription: is
       ? "Opin útboð eða virk verðfyrirspurnaratriði með skilafresti. Yfirfarið frumgögn áður en brugðist er við."
@@ -51,7 +56,18 @@ export function getReportUiLabel(key, language = "is") {
   return labels[key] || key;
 }
 
-export function getReportDeliveryStatus(match, language = "is") {
+export function getReportVerificationSentence(language = "is") {
+  return getReportUiLabel("verificationSentence", language);
+}
+
+export function getReportScoreLabel(match, language = "is") {
+  const score = Number(match?.matchScore || match?.match_score || 0);
+  const isStrong = score >= 85;
+  if (language !== "en") return isStrong ? "Sterk samsvörun" : "Samsvörun";
+  return isStrong ? "Strong match" : "Match";
+}
+
+export function getReportEmailStatus(match, language = "is") {
   const fit = String(match?.aiReviewFit || match?.ai_review_fit || "").toLowerCase();
   const isRecommended = fit === "strong" || Number(match?.matchScore || match?.match_score || 0) >= 85;
   if (language !== "en") {

@@ -1,6 +1,6 @@
-import { cleanReportReasons, getReportDeliveryStatus } from "./reportLocalization.js";
+import { cleanReportReasons, getReportEmailStatus } from "./reportLocalization.js";
 
-export { cleanReportReasons, getReportDeliveryStatus };
+export { cleanReportReasons, getReportEmailStatus };
 
 export function buildReportEmail({ companyName, matches, language = "is" }) {
   const isIs = language !== "en";
@@ -20,7 +20,7 @@ export function buildReportEmail({ companyName, matches, language = "is" }) {
       return `${match.title}
 Útboðsaðili: ${match.buyer || "Óþekktur kaupandi"}
 Skilafrestur: ${match.deadline || "Fannst ekki"}
-Staða: ${getReportDeliveryStatus(match, language)}
+Staða: ${getReportEmailStatus(match, language)}
 
 Af hverju þetta gæti passað:
 ${reasonLines}
@@ -31,7 +31,7 @@ ${match.url || "Engin heimild skráð"}`;
     return `${match.title}
 Buyer: ${match.buyer || "Unknown buyer"}
 Deadline: ${match.deadline || "Not found"}
-Status: ${getReportDeliveryStatus(match, language)}
+Status: ${getReportEmailStatus(match, language)}
 
 Why this may fit:
 ${reasonLines}
