@@ -231,15 +231,17 @@ async function inviteCompanyCustomer(
       .from("company_members")
       .update(update)
       .eq("id", existing.id)
-      .select("id, company_id, user_id, email, role, status, invited_at, accepted_at")
+      .select("id, company_id, user_id, email, role, status, invited_at, accepted_at, expires_at, token_hash")
       .single();
     if (error) throw error;
+    const debug = await buildInviteDebug(supabase, data, inviteToken, tokenHash);
     return {
       company_id: options.companyId,
       company_name: company.company_name,
-      member: data,
+      member: sanitizeInviteMember(data),
       invite_token: inviteToken,
       expires_at: expiresAt,
+      debug,
       rows_updated: 1,
     };
   }
@@ -258,16 +260,58 @@ async function inviteCompanyCustomer(
       invited_by: options.invitedBy,
       updated_at: now,
     })
-    .select("id, company_id, user_id, email, role, status, invited_at, accepted_at")
+    .select("id, company_id, user_id, email, role, status, invited_at, accepted_at, expires_at, token_hash")
     .single();
   if (error) throw error;
+  const debug = await buildInviteDebug(supabase, data, inviteToken, tokenHash);
   return {
     company_id: options.companyId,
     company_name: company.company_name,
-    member: data,
+    member: sanitizeInviteMember(data),
     invite_token: inviteToken,
     expires_at: expiresAt,
+    debug,
     rows_updated: 1,
+  };
+}
+
+async function buildInviteDebug(
+  supabase: ReturnType<typeof createClient>,
+  member: Record<string, unknown>,
+  inviteToken: string,
+  tokenHash: string,
+) {
+  const { data, error } = await supabase
+    .from("company_members")
+    .select("id, status, expires_at")
+    .eq("token_hash", tokenHash)
+    .eq("id", member.id)
+    .maybeSingle();
+  if (error) throw error;
+  return {
+    member_id: String(member.id || ""),
+    email: String(member.email || ""),
+    status: String(member.status || ""),
+    expires_at: String(member.expires_at || ""),
+    has_token_hash: Boolean(member.token_hash),
+    copied_link_token_length: inviteToken.length,
+    hash_lookup_found: Boolean(data),
+    hash_lookup_status: data?.status || "",
+    hash_lookup_expires_at: data?.expires_at || "",
+  };
+}
+
+function sanitizeInviteMember(member: Record<string, unknown>) {
+  return {
+    id: member.id,
+    company_id: member.company_id,
+    user_id: member.user_id,
+    email: member.email,
+    role: member.role,
+    status: member.status,
+    invited_at: member.invited_at,
+    accepted_at: member.accepted_at,
+    expires_at: member.expires_at,
   };
 }
 

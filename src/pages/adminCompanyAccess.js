@@ -4,6 +4,7 @@ export function renderAdminCompanyAccessPanel(company, options) {
     formatDateTime,
     inviteEmail = "",
     inviteLink = "",
+    inviteDebug = null,
     actionState = "",
   } = options;
   const members = Array.isArray(company.members) ? company.members : [];
@@ -44,10 +45,28 @@ export function renderAdminCompanyAccessPanel(company, options) {
             <input type="text" readonly value="${escapeHtml(inviteLink)}" aria-label="Invite link" />
             <button class="btn btn-ghost btn-small" type="button" data-action="admin-copy-company-invite-link" data-id="${escapeHtml(company.id)}">Copy invite link</button>
           </div>
+          ${renderInviteDebug(inviteDebug, escapeHtml)}
+        ` : invitedMembers.length ? `
+          <p class="muted-text">No raw invite token is available in this browser session. Regenerate invite link before copying.</p>
         ` : ""}
       </div>
       <p class="muted-text">Aðgangur að fyrirtæki er afturkallaður, en innskráningaraðgangi notandans er ekki eytt.</p>
     </section>
+  `;
+}
+
+function renderInviteDebug(debug, escapeHtml) {
+  if (!debug) return "";
+  return `
+    <div class="admin-invite-debug">
+      <span>member_id: ${escapeHtml(debug.member_id || "unknown")}</span>
+      <span>email: ${escapeHtml(debug.email || "unknown")}</span>
+      <span>status: ${escapeHtml(debug.status || "unknown")}</span>
+      <span>expires_at: ${escapeHtml(debug.expires_at || "not set")}</span>
+      <span>has_token_hash: ${debug.has_token_hash ? "true" : "false"}</span>
+      <span>copied_link_token_length: ${Number(debug.copied_link_token_length || 0)}</span>
+      <span>hash_lookup_found: ${debug.hash_lookup_found ? "true" : "false"}</span>
+    </div>
   `;
 }
 

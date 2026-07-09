@@ -30,12 +30,14 @@ Deno.serve(async (req) => {
       return json({ error: "Unsupported invite action." }, 400);
     }
 
-    const invite = await loadInviteByToken(adminClient, token);
+    const lookup = await loadInviteByToken(adminClient, token);
+    const invite = lookup.invite;
     if (!invite) {
       return json({
         error: "Invite not found, expired, or revoked.",
         code: "invite_invalid",
         status: "invalid",
+        diagnostics: lookup.diagnostics,
       }, 404);
     }
 
@@ -132,12 +134,24 @@ async function loadInviteByToken(supabase: ReturnType<typeof createClient>, toke
   const tokenHash = await sha256Hex(token);
   const { data, error } = await supabase
     .from("company_members")
-    .select("id, company_id, user_id, email, role, status, expires_at, accepted_at, revoked_at, companies(company_name)")
+    .select("id, company_id, user_id, email, role, status, expires_at, accepted_at, revoked_at, created_at, companies(company_name)")
     .eq("token_hash", tokenHash)
-    .maybeSingle();
+    .order("created_at", { ascending: false })
+    .limit(10);
   if (error) throw error;
-  if (!data) return null;
-  return data;
+  const rows = data || [];
+  const validInvite = rows.find((row) => getInviteStatus(row) === "valid");
+  if (validInvite) {
+    return {
+      invite: validInvite,
+      diagnostics: buildPreviewDiagnostics(token, true, validInvite),
+    };
+  }
+  const latest = rows[0] || null;
+  return {
+    invite: null,
+    diagnostics: buildPreviewDiagnostics(token, rows.length > 0, latest),
+  };
 }
 
 function getInviteStatus(invite: Record<string, unknown>) {
@@ -146,6 +160,28 @@ function getInviteStatus(invite: Record<string, unknown>) {
   if (invite.expires_at && new Date(String(invite.expires_at)).getTime() < Date.now()) return "expired";
   if (status === "active") return "active";
   return "valid";
+}
+
+function buildPreviewDiagnostics(token: string, found: boolean, row: Record<string, unknown> | null) {
+  const status = row ? getInviteStatus(row) : "";
+  return {
+    token_received: Boolean(token),
+    token_length: token.length,
+    hash_lookup_found: found,
+    found_status: String(row?.status || ""),
+    found_expires_at: String(row?.expires_at || ""),
+    reason: !token
+      ? "no_token"
+      : !found
+        ? "no_hash_match"
+        : status === "expired"
+          ? "expired"
+          : status === "revoked"
+            ? "revoked"
+            : status === "active"
+              ? "already_accepted"
+              : "unknown",
+  };
 }
 
 async function sha256Hex(value: string) {

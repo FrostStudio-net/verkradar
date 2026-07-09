@@ -221,6 +221,7 @@ let state = {
   adminCompanyAccessActions: {},
   adminCompanyInviteDrafts: {},
   adminCompanyInviteLinks: {},
+  adminCompanyInviteDebug: {},
   adminReportDeliveryActions: {},
   selectedAdminCompanyId: null,
   adminActiveTab: "overview",
@@ -1890,6 +1891,10 @@ async function inviteAdminCompanyCustomer(companyId) {
     state.adminCompanyInviteLinks = {
       ...(state.adminCompanyInviteLinks || {}),
       [companyId]: inviteLink
+    };
+    state.adminCompanyInviteDebug = {
+      ...(state.adminCompanyInviteDebug || {}),
+      [companyId]: payload.debug || null
     };
     state.adminCompanyInviteDrafts = {
       ...(state.adminCompanyInviteDrafts || {}),
@@ -6216,6 +6221,7 @@ async function loadCompanyInvitePreview() {
     state.authForm.email = payload.invited_email || payload.email || state.authForm.email;
   } catch (error) {
     console.error("Failed to preview company invite:", error);
+    if (error?.details?.diagnostics) console.warn("Invite preview diagnostics:", error.details.diagnostics);
     state.invitePreview = null;
     clearStoredPendingInviteToken();
     state.pendingInviteToken = "";
@@ -8605,6 +8611,7 @@ function renderAdminCompanyDetails(company) {
               formatDateTime,
               inviteEmail: getAdminCompanyInviteEmail(company),
               inviteLink: state.adminCompanyInviteLinks?.[company.id] || "",
+              inviteDebug: state.adminCompanyInviteDebug?.[company.id] || null,
               actionState: state.adminCompanyAccessActions?.[company.id] || ""
             })}
 
