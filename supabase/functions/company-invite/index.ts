@@ -1,0 +1,133 @@
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
+
+  try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!supabaseUrl || !anonKey || !serviceRoleKey) {
+      return json({ error: "Missing Supabase Edge Function environment variables." }, 500);
+    }
+
+    const body = await safeJson(req);
+    const token = String(body.token || "").trim();
+    if (!token) return json({ error: "Invite token is required." }, 400);
+
+    const adminClient = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false },
+    });
+    const invite = await loadInviteByToken(adminClient, token);
+    if (!invite) return json({ error: "Invite not found or expired." }, 404);
+
+    if (body.preview === true) {
+      return json({
+        ok: true,
+        company_id: invite.company_id,
+        company_name: invite.companies?.company_name || "Company",
+        email: invite.email,
+        role: invite.role,
+        status: invite.status,
+        expires_at: invite.expires_at,
+      });
+    }
+
+    if (body.accept === true) {
+      const authHeader = req.headers.get("authorization") || "";
+      const userClient = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: authHeader } },
+        auth: { persistSession: false },
+      });
+      const { data: userData, error: userError } = await userClient.auth.getUser();
+      if (userError || !userData.user) return json({ error: "Log in to accept this invite." }, 401);
+
+      const userEmail = normalizeEmail(userData.user.email);
+      if (userEmail !== normalizeEmail(invite.email)) {
+        return json({
+          error: `This invite was sent to ${invite.email}. Log in with that email address.`,
+          code: "email_mismatch",
+          invited_email: invite.email,
+        }, 403);
+      }
+
+      const now = new Date().toISOString();
+      const { data, error } = await adminClient
+        .from("company_members")
+        .update({
+          user_id: userData.user.id,
+          status: "active",
+          accepted_at: now,
+          revoked_at: null,
+          updated_at: now,
+        })
+        .eq("id", invite.id)
+        .select("id, company_id, email, role, status, accepted_at")
+        .single();
+      if (error) throw error;
+
+      return json({
+        ok: true,
+        company_id: data.company_id,
+        company_name: invite.companies?.company_name || "Company",
+        member: data,
+      });
+    }
+
+    return json({ error: "Unsupported invite action." }, 400);
+  } catch (error) {
+    console.error("Company invite failed:", error);
+    return json({ error: errorMessage(error) }, 500);
+  }
+});
+
+async function loadInviteByToken(supabase: ReturnType<typeof createClient>, token: string) {
+  const tokenHash = await sha256Hex(token);
+  const { data, error } = await supabase
+    .from("company_members")
+    .select("id, company_id, email, role, status, expires_at, companies(company_name)")
+    .eq("token_hash", tokenHash)
+    .eq("status", "invited")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  if (data.expires_at && new Date(data.expires_at).getTime() < Date.now()) return null;
+  return data;
+}
+
+async function sha256Hex(value: string) {
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(hash)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function normalizeEmail(value: unknown) {
+  return String(value || "").trim().toLowerCase();
+}
+
+async function safeJson(req: Request) {
+  try {
+    return await req.json();
+  } catch {
+    return {};
+  }
+}
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "content-type": "application/json" },
+  });
+}
+
+function errorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && error && "message" in error) return String((error as Record<string, unknown>).message);
+  return String(error || "Unknown error");
+}

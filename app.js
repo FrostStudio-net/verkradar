@@ -2,9 +2,12 @@ import {
   STORAGE_KEYS,
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
+  acceptCompanyInvite,
   capitalize,
+  buildCompanyInviteLink,
   buildReportEmail,
   claimInvitedCompanyMemberships,
+  clearStoredPendingInviteToken,
   cleanStringArray,
   cleanReportReasons,
   createEmptyProfile,
@@ -34,6 +37,8 @@ import {
   getSafeExternalUrl,
   getAiReportPlacement,
   getCleanOpportunityBuyer,
+  getInviteTokenFromRoute,
+  getStoredPendingInviteToken,
   inferLocationFromSourceName,
   isUuid,
   localizeLegacyReportContent,
@@ -54,6 +59,7 @@ import {
   normalizeReportRisk,
   renderAdminDailyPipelinePanel,
   renderAdminCompanyAccessPanel,
+  renderAcceptInvitePage,
   renderAdminAutomaticAiReviewPanel,
   renderAdminCompanyAiReviewPanel,
   renderAdminCompanyMatchList,
@@ -76,6 +82,8 @@ import {
   renderResetPasswordPage,
   renderSettingsPage,
   renderSignupPage,
+  previewCompanyInvite,
+  setStoredPendingInviteToken,
   sortAiReportMatches,
   splitInput,
   stripHtmlFromString,
@@ -117,6 +125,12 @@ let state = {
   route: location.hash.replace("#", "") || "/",
   language: getInitialLanguage(),
   pendingSignupPlan: getPlanFromRoute(location.hash.replace("#", "") || "/") || getStoredSelectedPlan(),
+  pendingInviteToken: getInviteTokenFromRoute(location.hash.replace("#", "") || "/") || getStoredPendingInviteToken(),
+  invitePreview: null,
+  invitePreviewLoading: false,
+  invitePreviewError: null,
+  invitePreviewErrorToken: "",
+  inviteAccepting: false,
   user: null,
   currentUser: null,
   isAdmin: false,
@@ -205,6 +219,7 @@ let state = {
   adminCompanyActions: {},
   adminCompanyAccessActions: {},
   adminCompanyInviteDrafts: {},
+  adminCompanyInviteLinks: {},
   adminReportDeliveryActions: {},
   selectedAdminCompanyId: null,
   adminActiveTab: "overview",
@@ -297,6 +312,21 @@ function getPlanFromRoute(route = state.route) {
 function syncPendingSignupPlanFromRoute(route = state.route) {
   const plan = getPlanFromRoute(route);
   if (plan) state.pendingSignupPlan = setStoredSelectedPlan(plan);
+}
+
+function syncPendingInviteTokenFromRoute(route = state.route) {
+  const token = getInviteTokenFromRoute(route);
+  if (token && token !== state.pendingInviteToken) {
+    state.pendingInviteToken = setStoredPendingInviteToken(token);
+    state.invitePreview = null;
+    state.invitePreviewError = null;
+    state.invitePreviewErrorToken = "";
+  }
+}
+
+function getInviteAwareAuthHref(path) {
+  const token = state.pendingInviteToken || getInviteTokenFromRoute(state.route);
+  return token ? `${path}?invite=${encodeURIComponent(token)}` : path;
 }
 
 if ("scrollRestoration" in history) {
@@ -401,6 +431,7 @@ window.addEventListener("hashchange", () => {
 
   state.route = nextRoute;
   syncPendingSignupPlanFromRoute(nextRoute);
+  syncPendingInviteTokenFromRoute(nextRoute);
   state.isMobileMenuOpen = false;
   state.profileMenuOpen = false;
   if (routeChanged) clearOpportunityDetailsState();
@@ -550,6 +581,10 @@ document.addEventListener("click", (event) => {
     navigate(action.dataset.href);
     return;
   }
+  if (name === "accept-company-invite") {
+    acceptPendingCompanyInvite();
+    return;
+  }
   if (name === "save") toggleSave(id);
   if (name === "ignore") ignoreOpportunity(id);
   if (name === "unignore") unignoreOpportunity(id);
@@ -653,6 +688,10 @@ document.addEventListener("click", (event) => {
   }
   if (name === "admin-revoke-company-access") {
     revokeAdminCompanyAccess(id, action.dataset.memberId || "");
+    return;
+  }
+  if (name === "admin-copy-company-invite-link") {
+    copyAdminCompanyInviteLink(id);
     return;
   }
   if (name === "import-ted") importTedNotices();
@@ -1117,6 +1156,7 @@ function navigate(route) {
   clearOpportunityDetailsState();
   state.route = route;
   syncPendingSignupPlanFromRoute(route);
+  syncPendingInviteTokenFromRoute(route);
   suppressNextHashChange = true;
   location.hash = route;
   render();
@@ -1126,6 +1166,7 @@ function navigate(route) {
 
 function getPostAuthRoute() {
   if (!state.user && !state.currentUser) return "/";
+  if (state.pendingInviteToken) return `/accept-invite?token=${encodeURIComponent(state.pendingInviteToken)}`;
   return state.profile ? "/dashboard" : "/onboarding";
 }
 
@@ -1170,6 +1211,9 @@ function redirectAuthenticatedPublicRoute({ replace = false } = {}) {
 }
 
 function afterRouteRender() {
+  if (getRoutePath(state.route) === "/accept-invite") {
+    loadCompanyInvitePreview();
+  }
   if (state.route === "/report" && state.companyId && !state.reportsLoaded && !state.reportArchiveLoading) {
     loadReportsForCurrentCompany();
   }
@@ -1550,7 +1594,7 @@ async function loadAdminCompanies() {
           .in("company_id", companyIds),
         supabaseClient.from("reports").select("id, company_id, title, created_at, period_start, period_end, status").in("company_id", companyIds).order("created_at", { ascending: false }),
         supabaseClient.from("ai_match_reviews").select("id, company_id, opportunity_id, match_id, fit, confidence, send_to_client, reason, reviewed_profile_hash, profile_updated_at, company_services_snapshot, company_locations_snapshot, created_at, updated_at").in("company_id", companyIds),
-        supabaseClient.from("company_members").select("id, company_id, user_id, email, role, status, invited_at, accepted_at, revoked_at").in("company_id", companyIds).order("created_at", { ascending: false })
+        supabaseClient.from("company_members").select("id, company_id, user_id, email, role, status, invited_at, accepted_at, revoked_at, expires_at").in("company_id", companyIds).order("created_at", { ascending: false })
       ]);
 
       services = servicesResult.error ? [] : servicesResult.data || [];
@@ -1726,6 +1770,7 @@ function mapAdminCompany(company, related) {
     invited_at: member.invited_at || "",
     accepted_at: member.accepted_at || "",
     revoked_at: member.revoked_at || "",
+    expires_at: member.expires_at || "",
   }));
   const complete = Boolean(company.company_name && company.contact_email && company.industry && services.length && (locations.length || company.base_location || cleanStringArray(company.service_areas).length));
 
@@ -1822,16 +1867,21 @@ async function inviteAdminCompanyCustomer(companyId) {
   render();
   try {
     const payload = await runAdminCompanyAction(companyId, "invite_customer", { email });
+    const inviteLink = buildCompanyInviteLink(payload.invite_token || "");
     await loadAdminCompanies();
+    state.adminCompanyInviteLinks = {
+      ...(state.adminCompanyInviteLinks || {}),
+      [companyId]: inviteLink
+    };
     state.adminCompanyInviteDrafts = {
       ...(state.adminCompanyInviteDrafts || {}),
       [companyId]: ""
     };
     state.adminMessage = {
       type: "success",
-      text: `Invited ${payload.member?.email || email} to ${company?.companyName || "company dashboard access"}.`
+      text: `Invite link created for ${payload.member?.email || email}. Copy it and send it manually.`
     };
-    showToast("Customer access invited", "success");
+    showToast("Invite link created", "success");
   } catch (error) {
     console.error("Failed to invite company customer:", error);
     state.adminMessage = {
@@ -1863,6 +1913,21 @@ async function revokeAdminCompanyAccess(companyId, memberId) {
   } finally {
     clearAdminCompanyAccessAction(companyId);
     render();
+  }
+}
+
+async function copyAdminCompanyInviteLink(companyId) {
+  const link = state.adminCompanyInviteLinks?.[companyId] || "";
+  if (!link) {
+    showToast("Create or regenerate an invite link first.", "error");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(link);
+    showToast("Invite link copied", "success");
+  } catch (error) {
+    console.error("Failed to copy invite link:", error);
+    showToast("Could not copy invite link", "error");
   }
 }
 
@@ -3097,6 +3162,9 @@ async function getTedImportHeaders() {
 }
 
 function getAuthRedirectUrl() {
+  if (state.pendingInviteToken) {
+    return `${window.location.origin}/#/accept-invite?token=${encodeURIComponent(state.pendingInviteToken)}`;
+  }
   return `${window.location.origin}/#/onboarding`;
 }
 
@@ -3111,8 +3179,8 @@ function isExistingSignupResponse(data) {
 
 function getExistingAccountAuthActions() {
   return [
-    { label: t("login"), href: "/login", variant: "primary" },
-    { label: t("forgotPassword"), href: "/forgot-password", variant: "secondary" }
+    { label: t("login"), href: getInviteAwareAuthHref("/login"), variant: "primary" },
+    { label: t("forgotPassword"), href: getInviteAwareAuthHref("/forgot-password"), variant: "secondary" }
   ];
 }
 
@@ -5716,6 +5784,7 @@ function render() {
   else if (route === "/signup") html = renderSignup();
   else if (route === "/forgot-password") html = renderForgotPassword();
   else if (route === "/reset-password") html = renderResetPassword();
+  else if (route === "/accept-invite") html = renderAcceptInvite();
   else if (route === "/onboarding") html = renderOnboarding();
   else if (route === "/dashboard") html = state.user ? renderDashboard() : requireAuthPage();
   else if (route === "/report") html = state.user ? renderReport() : requireAuthPage();
@@ -6062,7 +6131,9 @@ function renderLogin() {
     escapeHtml,
     authForm: state.authForm,
     authSubmitting: state.authSubmitting,
-    authMessage: state.authMessage
+    authMessage: state.authMessage,
+    signupHref: getInviteAwareAuthHref("/signup"),
+    forgotPasswordHref: getInviteAwareAuthHref("/forgot-password")
   }));
 }
 
@@ -6088,6 +6159,79 @@ function renderResetPassword() {
   }));
 }
 
+function renderAcceptInvite() {
+  const token = state.pendingInviteToken || getInviteTokenFromRoute(state.route);
+  if (token && token !== state.pendingInviteToken) state.pendingInviteToken = setStoredPendingInviteToken(token);
+  return renderShell(renderAcceptInvitePage({
+    escapeHtml,
+    invite: state.invitePreview,
+    loading: state.invitePreviewLoading,
+    error: state.invitePreviewError,
+    user: state.user,
+    accepting: state.inviteAccepting,
+    signupHref: getInviteAwareAuthHref("/signup"),
+    loginHref: getInviteAwareAuthHref("/login"),
+    language: state.language
+  }));
+}
+
+async function loadCompanyInvitePreview() {
+  const token = state.pendingInviteToken || getInviteTokenFromRoute(state.route);
+  if (!token || state.invitePreviewLoading) return;
+  if (state.invitePreview?.token === token || state.invitePreviewErrorToken === token) return;
+  state.pendingInviteToken = setStoredPendingInviteToken(token);
+  state.invitePreviewLoading = true;
+  state.invitePreviewError = null;
+  render();
+  try {
+    const payload = await previewCompanyInvite(token);
+    state.invitePreview = { ...payload, token };
+    state.authForm.email = payload.email || state.authForm.email;
+  } catch (error) {
+    console.error("Failed to preview company invite:", error);
+    state.invitePreview = null;
+    state.invitePreviewErrorToken = token;
+    state.invitePreviewError = state.language === "is"
+      ? `Aðgangsboðið fannst ekki eða er útrunnið. ${formatSupabaseError(error)}`
+      : `Invite not found or expired. ${formatSupabaseError(error)}`;
+  } finally {
+    state.invitePreviewLoading = false;
+    render();
+  }
+}
+
+async function acceptPendingCompanyInvite() {
+  const token = state.pendingInviteToken || getInviteTokenFromRoute(state.route);
+  if (!token) return;
+  if (!state.user) {
+    navigate(getInviteAwareAuthHref("/login"));
+    return;
+  }
+  state.inviteAccepting = true;
+  state.invitePreviewError = null;
+  render();
+  try {
+    await acceptCompanyInvite(token);
+    clearStoredPendingInviteToken();
+    state.pendingInviteToken = "";
+    state.invitePreview = null;
+    state.invitePreviewError = null;
+    await loadProfileFromSupabase({ overwriteDraft: true });
+    navigate("/dashboard");
+  } catch (error) {
+    console.error("Failed to accept company invite:", error);
+    const invitedEmail = error?.details?.invited_email || state.invitePreview?.email || "";
+    state.invitePreviewError = error?.details?.code === "email_mismatch" && invitedEmail
+      ? (state.language === "is"
+        ? `Þessi aðgangsboð var sent á ${invitedEmail}. Skráðu þig inn með því netfangi.`
+        : `This invite was sent to ${invitedEmail}. Log in with that email address.`)
+      : formatSupabaseError(error);
+  } finally {
+    state.inviteAccepting = false;
+    render();
+  }
+}
+
 function renderSignup() {
   if (state.user) {
     const route = getPostAuthRoute();
@@ -6105,7 +6249,8 @@ function renderSignup() {
     escapeHtml,
     authForm: state.authForm,
     authSubmitting: state.authSubmitting,
-    authMessage: state.authMessage
+    authMessage: state.authMessage,
+    loginHref: getInviteAwareAuthHref("/login")
   }));
 }
 
@@ -8430,6 +8575,7 @@ function renderAdminCompanyDetails(company) {
               escapeHtml,
               formatDateTime,
               inviteEmail: getAdminCompanyInviteEmail(company),
+              inviteLink: state.adminCompanyInviteLinks?.[company.id] || "",
               actionState: state.adminCompanyAccessActions?.[company.id] || ""
             })}
 

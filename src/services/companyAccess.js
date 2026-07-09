@@ -1,10 +1,91 @@
+import { SUPABASE_ANON_KEY, SUPABASE_URL, supabaseClient } from "../supabaseClient.js";
+
+const PENDING_INVITE_TOKEN_KEY = "verkradar_pending_invite_token";
+
 export function normalizeAccessEmail(email) {
   return String(email || "").trim().toLowerCase();
 }
 
-export async function claimInvitedCompanyMemberships(supabaseClient, user) {
+export function getCompanyInviteEndpoint() {
+  if (window.VERKRADAR_COMPANY_INVITE_URL) return window.VERKRADAR_COMPANY_INVITE_URL;
+  if (window.VERKRADAR_SUPABASE_URL) return `${window.VERKRADAR_SUPABASE_URL}/functions/v1/company-invite`;
+  if (SUPABASE_URL) return `${SUPABASE_URL}/functions/v1/company-invite`;
+  return null;
+}
+
+export function getInviteTokenFromRoute(route) {
+  const raw = String(route || "");
+  const query = raw.includes("?") ? raw.slice(raw.indexOf("?") + 1) : "";
+  return new URLSearchParams(query).get("token") || new URLSearchParams(query).get("invite") || "";
+}
+
+export function getStoredPendingInviteToken() {
+  try {
+    return localStorage.getItem(PENDING_INVITE_TOKEN_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+export function setStoredPendingInviteToken(token) {
+  const cleanToken = String(token || "").trim();
+  try {
+    if (cleanToken) localStorage.setItem(PENDING_INVITE_TOKEN_KEY, cleanToken);
+  } catch {
+    // Keep token in memory if storage is unavailable.
+  }
+  return cleanToken;
+}
+
+export function clearStoredPendingInviteToken() {
+  try {
+    localStorage.removeItem(PENDING_INVITE_TOKEN_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+export function buildCompanyInviteLink(token) {
+  const cleanToken = String(token || "").trim();
+  if (!cleanToken) return "";
+  return `${window.location.origin}/#/accept-invite?token=${encodeURIComponent(cleanToken)}`;
+}
+
+export async function previewCompanyInvite(token) {
+  const endpoint = getCompanyInviteEndpoint();
+  if (!endpoint) throw new Error("Company invite function is not configured.");
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: getAnonHeaders(),
+    body: JSON.stringify({ preview: true, token }),
+  });
+  const payload = await readJsonResponse(response);
+  if (!response.ok) throw new Error(payload.error || payload.message || `Invite preview failed with status ${response.status}`);
+  return payload;
+}
+
+export async function acceptCompanyInvite(token) {
+  const endpoint = getCompanyInviteEndpoint();
+  if (!endpoint) throw new Error("Company invite function is not configured.");
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: await getAuthenticatedHeaders(),
+    body: JSON.stringify({ accept: true, token }),
+  });
+  const payload = await readJsonResponse(response);
+  if (!response.ok) {
+    const error = new Error(payload.error || payload.message || `Invite acceptance failed with status ${response.status}`);
+    error.details = payload;
+    throw error;
+  }
+  return payload;
+}
+
+export async function claimInvitedCompanyMemberships(supabaseClient, user, options = {}) {
+  const token = String(options.token || "").trim();
+  if (token) return [await acceptCompanyInvite(token)];
   const email = normalizeAccessEmail(user?.email);
-  if (!supabaseClient || !user?.id || !email) return [];
+  if (!supabaseClient || !user?.id || !email || options.allowEmailClaim !== true) return [];
 
   const { data: invites, error: inviteError } = await supabaseClient
     .from("company_members")
@@ -48,4 +129,33 @@ export async function loadActiveCompanyMemberships(supabaseClient, user) {
     .order("accepted_at", { ascending: true });
   if (error) throw error;
   return data || [];
+}
+
+function getAnonHeaders() {
+  const headers = { "content-type": "application/json" };
+  const anonKey = window.VERKRADAR_SUPABASE_ANON_KEY || SUPABASE_ANON_KEY;
+  if (anonKey) headers.apikey = anonKey;
+  return headers;
+}
+
+async function getAuthenticatedHeaders() {
+  const headers = getAnonHeaders();
+  const { data, error } = supabaseClient
+    ? await supabaseClient.auth.getSession()
+    : { data: { session: null }, error: null };
+  if (error) throw error;
+  const accessToken = data.session?.access_token;
+  if (!accessToken) throw new Error("You must be logged in to accept this invite.");
+  headers.authorization = `Bearer ${accessToken}`;
+  return headers;
+}
+
+async function readJsonResponse(response) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { error: text };
+  }
 }

@@ -17,7 +17,7 @@ function renderAuthFormMessage({ authMessage, escapeHtml }) {
   `;
 }
 
-export function renderLoginPage({ t, escapeHtml, authForm, authSubmitting, authMessage }) {
+export function renderLoginPage({ t, escapeHtml, authForm, authSubmitting, authMessage, signupHref = "/signup", forgotPasswordHref = "/forgot-password" }) {
   return `
     <section class="auth-page">
       <div class="auth-layout">
@@ -32,13 +32,13 @@ export function renderLoginPage({ t, escapeHtml, authForm, authSubmitting, authM
           <form id="login-form" class="auth-card">
             <label class="form-group">${escapeHtml(t("email"))} <input type="email" name="email" data-auth-field="email" value="${escapeHtml(authForm.email)}" autocomplete="email" required /></label>
             <label class="form-group">${escapeHtml(t("password"))} <input type="password" name="password" data-auth-field="password" value="${escapeHtml(authForm.password)}" autocomplete="current-password" required /></label>
-            <p class="auth-help-link"><button type="button" data-action="go" data-href="/forgot-password">${escapeHtml(t("forgotPassword"))}</button></p>
+            <p class="auth-help-link"><button type="button" data-action="go" data-href="${escapeHtml(forgotPasswordHref)}">${escapeHtml(t("forgotPassword"))}</button></p>
             <div class="auth-actions">
               <button class="btn btn-primary btn-large" type="submit" ${authSubmitting ? "disabled" : ""}>
                 ${authSubmitting ? escapeHtml(t("loggingIn")) : escapeHtml(t("login"))}
               </button>
             </div>
-            <p class="auth-switch">${escapeHtml(t("newToVerkRadar"))} <button type="button" data-action="go" data-href="/signup">${escapeHtml(t("createAccount"))}</button></p>
+            <p class="auth-switch">${escapeHtml(t("newToVerkRadar"))} <button type="button" data-action="go" data-href="${escapeHtml(signupHref)}">${escapeHtml(t("createAccount"))}</button></p>
           </form>
         </div>
       </div>
@@ -102,7 +102,7 @@ export function renderResetPasswordPage({ t, escapeHtml, authForm, authSubmittin
   `;
 }
 
-export function renderSignupPage({ t, escapeHtml, authForm, authSubmitting, authMessage }) {
+export function renderSignupPage({ t, escapeHtml, authForm, authSubmitting, authMessage, loginHref = "/login" }) {
   return `
     <section class="auth-page">
       <div class="auth-layout">
@@ -122,7 +122,7 @@ export function renderSignupPage({ t, escapeHtml, authForm, authSubmitting, auth
                 ${authSubmitting ? escapeHtml(t("creating")) : escapeHtml(t("createAccount"))}
               </button>
             </div>
-            <p class="auth-switch">${escapeHtml(t("alreadyHaveAccount"))} <button type="button" data-action="go" data-href="/login">${escapeHtml(t("login"))}</button></p>
+            <p class="auth-switch">${escapeHtml(t("alreadyHaveAccount"))} <button type="button" data-action="go" data-href="${escapeHtml(loginHref)}">${escapeHtml(t("login"))}</button></p>
           </form>
         </div>
       </div>

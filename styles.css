@@ -2508,6 +2508,18 @@ select option:checked {
   box-sizing: border-box;
 }
 
+.admin-invite-link-box {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.admin-invite-link-box input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.78rem;
+}
+
 .admin-filters input,
 .admin-filters select {
   width: 100%;
@@ -4146,6 +4158,10 @@ body.modal-open {
   }
 
   .admin-company-access-list li {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-invite-link-box {
     grid-template-columns: 1fr;
   }
 

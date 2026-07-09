@@ -76,6 +76,7 @@ Deno.serve(async (req) => {
       const result = await inviteCompanyCustomer(adminClient, {
         companyId,
         email,
+        invitedBy: userData.user.id,
       });
       return json({ ok: true, action, ...result });
     }
@@ -181,7 +182,7 @@ async function markReportSent(
 
 async function inviteCompanyCustomer(
   supabase: ReturnType<typeof createClient>,
-  options: { companyId: string; email: string },
+  options: { companyId: string; email: string; invitedBy: string },
 ) {
   const email = String(options.email || "").trim();
   const emailNormalized = normalizeEmail(email);
@@ -206,23 +207,26 @@ async function inviteCompanyCustomer(
   if (existingError) throw existingError;
 
   const now = new Date().toISOString();
+  const inviteToken = generateInviteToken();
+  const tokenHash = await sha256Hex(inviteToken);
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
   if (existing) {
-    const update = existing.status === "active"
-      ? {
-          email,
-          role: existing.role || "owner",
-          updated_at: now,
-        }
-      : {
-          email,
-          role: existing.role || "owner",
-          status: "invited",
-          invited_at: now,
-          accepted_at: null,
-          revoked_at: null,
-          user_id: null,
-          updated_at: now,
-        };
+    if (existing.status === "active") {
+      throw new Error("This customer already has active access.");
+    }
+    const update = {
+      email,
+      role: existing.role || "owner",
+      status: "invited",
+      invited_at: now,
+      accepted_at: null,
+      revoked_at: null,
+      user_id: null,
+      token_hash: tokenHash,
+      expires_at: expiresAt,
+      invited_by: options.invitedBy,
+      updated_at: now,
+    };
     const { data, error } = await supabase
       .from("company_members")
       .update(update)
@@ -234,6 +238,8 @@ async function inviteCompanyCustomer(
       company_id: options.companyId,
       company_name: company.company_name,
       member: data,
+      invite_token: inviteToken,
+      expires_at: expiresAt,
       rows_updated: 1,
     };
   }
@@ -247,6 +253,9 @@ async function inviteCompanyCustomer(
       role: "owner",
       status: "invited",
       invited_at: now,
+      token_hash: tokenHash,
+      expires_at: expiresAt,
+      invited_by: options.invitedBy,
       updated_at: now,
     })
     .select("id, company_id, user_id, email, role, status, invited_at, accepted_at")
@@ -256,6 +265,8 @@ async function inviteCompanyCustomer(
     company_id: options.companyId,
     company_name: company.company_name,
     member: data,
+    invite_token: inviteToken,
+    expires_at: expiresAt,
     rows_updated: 1,
   };
 }
@@ -1952,6 +1963,25 @@ function normalizeLocationText(value: unknown) {
 
 function normalizeEmail(value: unknown) {
   return String(value || "").trim().toLowerCase();
+}
+
+function generateInviteToken() {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return base64UrlEncode(bytes);
+}
+
+function base64UrlEncode(bytes: Uint8Array) {
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+async function sha256Hex(value: string) {
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(hash)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function daysUntilDeadline(value: string) {

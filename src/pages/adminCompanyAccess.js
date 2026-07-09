@@ -3,6 +3,7 @@ export function renderAdminCompanyAccessPanel(company, options) {
     escapeHtml,
     formatDateTime,
     inviteEmail = "",
+    inviteLink = "",
     actionState = "",
   } = options;
   const members = Array.isArray(company.members) ? company.members : [];
@@ -18,6 +19,7 @@ export function renderAdminCompanyAccessPanel(company, options) {
     <section class="side-panel admin-company-access-panel">
       <h3>Customer access</h3>
       <p><strong>Access status:</strong> ${escapeHtml(accessLabel)}</p>
+      <p class="muted-text">Create an invite link, copy it, and send it manually. VerkRadar does not send invite emails yet.</p>
       ${members.length ? `
         <ul class="admin-detail-list admin-company-access-list">
           ${members.map((member) => renderCompanyMemberRow(member, { escapeHtml, formatDateTime, busy })).join("")}
@@ -35,9 +37,16 @@ export function renderAdminCompanyAccessPanel(company, options) {
           />
         </label>
         <button class="btn btn-secondary btn-small" type="button" data-action="admin-invite-company-customer" data-id="${escapeHtml(company.id)}" ${busy ? "disabled" : ""}>
-          ${actionState === "invite" ? "Inviting..." : invitedMembers.length ? "Resend invite" : "Invite customer"}
+          ${actionState === "invite" ? "Creating link..." : invitedMembers.length ? "Regenerate invite link" : "Create invite link"}
         </button>
+        ${inviteLink ? `
+          <div class="admin-invite-link-box">
+            <input type="text" readonly value="${escapeHtml(inviteLink)}" aria-label="Invite link" />
+            <button class="btn btn-ghost btn-small" type="button" data-action="admin-copy-company-invite-link" data-id="${escapeHtml(company.id)}">Copy invite link</button>
+          </div>
+        ` : ""}
       </div>
+      <p class="muted-text">Aðgangur að fyrirtæki er afturkallaður, en innskráningaraðgangi notandans er ekki eytt.</p>
     </section>
   `;
 }
@@ -52,6 +61,7 @@ function renderCompanyMemberRow(member, options) {
         <strong>${escapeHtml(member.email || "Unknown email")}</strong>
         <span>${escapeHtml(member.role || "member")} · <span class="status-pill ${statusClass}">${escapeHtml(member.status || "unknown")}</span></span>
         <span>${member.accepted_at ? `Accepted ${escapeHtml(formatDateTime(member.accepted_at))}` : `Invited ${escapeHtml(formatDateTime(member.invited_at))}`}</span>
+        ${member.expires_at && member.status === "invited" ? `<span>Invite expires ${escapeHtml(formatDateTime(member.expires_at))}</span>` : ""}
       </div>
       ${isRevoked ? "" : `
         <button
