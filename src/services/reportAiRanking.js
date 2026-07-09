@@ -96,9 +96,15 @@ export function getReportCandidateKind(match) {
 
 export function getAiReportPlacement(match) {
   const kind = getReportCandidateKind(match);
-  if (kind === "ai_strong") return "confirmed";
+  if (hasFutureDeadline(match)) {
+    if (kind === "ai_strong" || kind === "ai_possible" || kind === "rule_fallback") return "confirmed";
+  }
   if (kind === "ai_possible" || kind === "rule_fallback") return "early";
   return "excluded";
+}
+
+export function hasFutureDeadline(match) {
+  return Boolean(match?.deadline) && !isExpiredDeadline(match.deadline);
 }
 
 export function sortAiReportMatches(matches) {

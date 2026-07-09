@@ -34,6 +34,19 @@ export function getReportUiLabel(key, language = "is") {
     reasons: is ? "Ástæður" : "Reasons",
     openSource: is ? "Opna heimild" : "Open source",
     verifyBadge: is ? "Staðfesta gögn" : "Verify documents",
+    verifyTenderDocs: is ? "Staðfesta útboðsgögn" : "Verify tender documents",
+    openActiveTitle: is ? "Opin útboð / virk tækifæri" : "Open tenders / active opportunities",
+    openActiveDescription: is
+      ? "Opin útboð eða virk verðfyrirspurnaratriði með skilafresti. Yfirfarið frumgögn áður en brugðist er við."
+      : "Open tenders or active quote-request items with deadlines. Review source documents before acting.",
+    possibleTitle: is ? "Möguleg tækifæri til skoðunar" : "Possible opportunities to review",
+    possibleDescription: is
+      ? "Tækifæri sem gætu átt við, en þar sem þarf að staðfesta umfang, kröfur eða hlutverk fyrirtækisins."
+      : "Opportunities that may fit, but where scope, requirements, or company role should be verified.",
+    earlyTitle: is ? "Væntanleg verkefni / early signals" : "Upcoming projects / early signals",
+    earlyDescription: is
+      ? "Vísbendingar um möguleg framtíðarverkefni sem eru ekki endilega formleg útboð ennþá."
+      : "Signals for possible future projects that may not be formal tenders yet.",
   };
   return labels[key] || key;
 }
@@ -56,10 +69,12 @@ export function getReportStatusBadge(match, language = "is") {
   if (language !== "en") {
     if (fit === "strong" || Number(match?.matchScore || 0) >= 85) return "Mælt með";
     if (fit === "possible") return "Mögulegt tækifæri";
-    return "Staðfesta gögn";
+    if (String(match?.reportSection || "") === "early") return "Væntanlegt / merki";
+    return "Staðfesta útboðsgögn";
   }
   if (fit === "strong" || Number(match?.matchScore || 0) >= 85) return "Recommended";
   if (fit === "possible") return "Possible opportunity";
+  if (String(match?.reportSection || "") === "early") return "Upcoming signal";
   return "Verify documents";
 }
 

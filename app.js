@@ -25,6 +25,7 @@ import {
   getReportDeliveryStatus,
   getReportStatusBadge,
   getReportUiLabel,
+  hasFutureDeadline,
   getInitialLanguage as getInitialLanguageBase,
   getLegalPageData,
   getSafeExternalUrl,
@@ -8653,9 +8654,9 @@ function getSavedReportItemMatches(savedReport) {
 function buildSavedReportItemsHtml(matches) {
   const sections = getSavedReportSections(matches);
   return `
-    ${sections.confirmed.length ? renderReportOpportunitySection(t("openTenders"), t("openTendersDescription"), sections.confirmed) : ""}
-    ${sections.early.length ? renderReportOpportunitySection(t("upcomingOpportunities"), t("upcomingDescription"), sections.early) : ""}
-    ${sections.review.length ? renderReportOpportunitySection(t("needsReview"), state.language === "is" ? "Atriði úr vistuðu yfirliti sem þarf að staðfesta á heimild." : "Saved report items that should be verified at the source.", sections.review) : ""}
+    ${sections.confirmed.length ? renderReportOpportunitySection(getReportUiLabel("openActiveTitle", state.language), getReportUiLabel("openActiveDescription", state.language), sections.confirmed) : ""}
+    ${sections.possible.length ? renderReportOpportunitySection(getReportUiLabel("possibleTitle", state.language), getReportUiLabel("possibleDescription", state.language), sections.possible) : ""}
+    ${sections.early.length ? renderReportOpportunitySection(getReportUiLabel("earlyTitle", state.language), getReportUiLabel("earlyDescription", state.language), sections.early) : ""}
     <p class="report-footer-note">${escapeHtml(t("reportFooter"))}</p>
   `;
 }
@@ -8663,6 +8664,7 @@ function buildSavedReportItemsHtml(matches) {
 function getSavedReportSections(matches) {
   const sections = {
     confirmed: [],
+    possible: [],
     early: [],
     review: []
   };
@@ -8670,6 +8672,7 @@ function getSavedReportSections(matches) {
   matches.forEach((opp) => {
     const placement = getReportOpportunityPlacement(opp);
     if (placement === "confirmed") sections.confirmed.push(opp);
+    else if (placement === "possible") sections.possible.push(opp);
     else if (placement === "early") sections.early.push(opp);
     else if (placement !== "excluded") sections.review.push(opp);
   });
@@ -8729,7 +8732,7 @@ function buildReportContent(profile, matches) {
   const periodStart = start.toISOString().slice(0, 10);
   const title = t("reportForCompany", { company: profile.companyName });
   const sections = getReportSections(matches);
-  const coreCount = sections.confirmed.length + sections.early.length;
+  const coreCount = sections.confirmed.length + sections.possible.length + sections.early.length;
   const summary = state.language === "is"
     ? `${coreCount} viðeigandi útboðs- eða verðfyrirspurnaratriði fundust fyrir ${profile.companyName}.`
     : `${coreCount} relevant tender/quote-request ${coreCount === 1 ? "item" : "items"} found for ${profile.companyName}.`;
@@ -8744,12 +8747,13 @@ function buildReportContent(profile, matches) {
     </div>
 
     <div class="report-summary-grid">
-      ${renderReportSummaryCard(t("openTenders"), sections.confirmed.length)}
-      ${renderReportSummaryCard(t("upcomingOpportunities"), sections.early.length)}
+      ${renderReportSummaryCard(getReportUiLabel("openActiveTitle", state.language), sections.confirmed.length)}
+      ${renderReportSummaryCard(getReportUiLabel("possibleTitle", state.language), sections.possible.length)}
     </div>
 
-    ${renderReportOpportunitySection(t("openTenders"), t("openTendersDescription"), sections.confirmed)}
-    ${sections.early.length ? renderReportOpportunitySection(t("upcomingOpportunities"), t("upcomingDescription"), sections.early) : ""}
+    ${renderReportOpportunitySection(getReportUiLabel("openActiveTitle", state.language), getReportUiLabel("openActiveDescription", state.language), sections.confirmed)}
+    ${sections.possible.length ? renderReportOpportunitySection(getReportUiLabel("possibleTitle", state.language), getReportUiLabel("possibleDescription", state.language), sections.possible) : ""}
+    ${sections.early.length ? renderReportOpportunitySection(getReportUiLabel("earlyTitle", state.language), getReportUiLabel("earlyDescription", state.language), sections.early) : ""}
 
     <p class="report-footer-note">${escapeHtml(t("reportFooter"))}</p>
   `;
@@ -8799,6 +8803,7 @@ function formatCustomerReportDate(value) {
 function getReportSections(matches) {
   const buckets = {
     confirmed: [],
+    possible: [],
     early: [],
   };
   const seen = new Set();
@@ -8812,12 +8817,13 @@ function getReportSections(matches) {
     seen.add(opp.id);
 
     if (placement === "confirmed") buckets.confirmed.push(opp);
+    else if (placement === "possible") buckets.possible.push(opp);
     else if (placement === "early") buckets.early.push(opp);
   });
 
   const mainBudget = 8;
   let remainingMain = mainBudget;
-  for (const key of ["confirmed", "early"]) {
+  for (const key of ["confirmed", "possible", "early"]) {
     const kept = buckets[key].slice(0, remainingMain);
     buckets[key] = kept;
     remainingMain = Math.max(0, remainingMain - kept.length);
@@ -8830,6 +8836,7 @@ function getReportOpportunityPlacement(opp) {
   const aiPlacement = getAiReportPlacement(opp);
   if (aiPlacement !== "excluded" || opp?.aiReviewFit || opp?.ai_review_fit) return aiPlacement;
   if (!isStrictCustomerReportEligible(opp)) return "excluded";
+  if (hasFutureDeadline(opp)) return "confirmed";
   const intent = getOpportunityIntent(opp);
   if (intent === "confirmed_tender") return "confirmed";
   if (intent === "early_opportunity") return "early";
@@ -9238,7 +9245,8 @@ function renderReportOpportunityItem(opp) {
     fallbackReason: state.language === "is" ? "Passar við fyrirtækjaprófílinn." : "Matches your company profile.",
     qualityBadgeHtml: renderReportQualityBadge(cleanedOpp),
     matchBadgeClass: badgeClass(opp.matchLabel),
-    matchLabel: getReportFitLabel(opp),
+    matchLabel: getReportUiLabel("verifyTenderDocs", state.language),
+    statusText: getReportFitLabel(opp),
     buyerLabel: t("buyer"),
     buyerValue: formatOpportunityBuyer(opp),
     sourceLabel: t("source"),
@@ -9331,14 +9339,16 @@ function generateWeeklyReport(profile, matches) {
   const sections = getReportSections(matches);
   const orderedMatches = [
     ...sections.confirmed,
+    ...sections.possible,
     ...sections.early,
   ];
   return `${t("reportForCompany", { company: profile.companyName })}
 ${state.language === "is" ? "Tímabil" : "Date range"}: ${formatReportDateRange(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10), new Date().toISOString().slice(0, 10))}
 
 ${state.language === "is" ? "Samantekt" : "Summary"}:
-- ${t("openTenders")}: ${sections.confirmed.length}
-- ${t("upcomingOpportunities")}: ${sections.early.length}
+- ${getReportUiLabel("openActiveTitle", state.language)}: ${sections.confirmed.length}
+- ${getReportUiLabel("possibleTitle", state.language)}: ${sections.possible.length}
+- ${getReportUiLabel("earlyTitle", state.language)}: ${sections.early.length}
 
 ${orderedMatches.length ? orderedMatches.map((opp, i) => `${i + 1}. ${opp.title}
 ${state.language === "is" ? "Staða" : "Status"}: ${getReportDeliveryStatus(opp, state.language)}
@@ -9365,6 +9375,7 @@ function generateSavedReportText(savedReport, companyName, matches) {
   const sections = getSavedReportSections(matches);
   const orderedMatches = [
     ...sections.confirmed,
+    ...sections.possible,
     ...sections.early,
     ...sections.review,
   ];

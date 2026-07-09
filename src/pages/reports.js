@@ -94,6 +94,7 @@ export function renderReportOpportunityItemPage({
   qualityBadgeHtml,
   matchBadgeClass,
   matchLabel,
+  statusText,
   buyerLabel,
   buyerValue,
   sourceLabel,
@@ -118,6 +119,7 @@ export function renderReportOpportunityItemPage({
         <span class="${matchBadgeClass}">${escapeHtml(matchLabel)} · ${opp.matchScore}</span>
       </div>
       <h4>${escapeHtml(opp.title)}</h4>
+      ${statusText ? `<p class="report-item-status">${escapeHtml(statusText)}</p>` : ""}
       <div class="report-facts">
         <span><strong>${escapeHtml(buyerLabel)}</strong>${escapeHtml(buyerValue)}</span>
         <span><strong>${escapeHtml(sourceLabel)}</strong>${escapeHtml(sourceValue)}</span>
