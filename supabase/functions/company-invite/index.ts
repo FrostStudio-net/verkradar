@@ -56,13 +56,22 @@ Deno.serve(async (req) => {
 
     const inviteStatus = getInviteStatus(invite);
     if (action === "preview") {
+      console.info("company_invite_preview_success", {
+        member_id: invite.id,
+        company_id: invite.company_id,
+        invited_email: invite.email,
+        status: invite.status,
+        expires_at: invite.expires_at,
+        token_hash_prefix: lookup.diagnostics.computed_hash_prefix,
+      });
       return json({
         ok: true,
-        company_name: invite.companies?.company_name || "Company",
+        company_name: invite.company_name || "Company",
         invited_email: invite.email,
         role: invite.role,
         status: inviteStatus,
         expires_at: invite.expires_at,
+        diagnostics: lookup.diagnostics,
       });
     }
 
@@ -97,7 +106,7 @@ Deno.serve(async (req) => {
           return json({
             ok: true,
             company_id: invite.company_id,
-            company_name: invite.companies?.company_name || "Company",
+            company_name: invite.company_name || "Company",
             member: {
               id: invite.id,
               company_id: invite.company_id,
@@ -133,7 +142,7 @@ Deno.serve(async (req) => {
       return json({
         ok: true,
         company_id: data.company_id,
-        company_name: invite.companies?.company_name || "Company",
+        company_name: invite.company_name || "Company",
         member: data,
       });
     }
@@ -147,20 +156,32 @@ async function loadInviteByToken(supabase: ReturnType<typeof createClient>, toke
   const tokenHash = await sha256Hex(token);
   const { data, error } = await supabase
     .from("company_members")
-    .select("id, company_id, user_id, email, role, status, expires_at, accepted_at, revoked_at, created_at, companies(company_name)")
+    .select("id, company_id, user_id, email, role, status, expires_at, accepted_at, revoked_at, created_at")
     .eq("token_hash", tokenHash)
     .order("created_at", { ascending: false })
     .limit(10);
   if (error) throw error;
   const rows = data || [];
   const diagnosticRow = (row: Record<string, unknown> | null) => row
-    ? { ...row, computed_hash_prefix: tokenHash.slice(0, 8), matching_rows_count: rows.length }
-    : { computed_hash_prefix: tokenHash.slice(0, 8), matching_rows_count: rows.length };
+    ? {
+      ...row,
+      computed_hash_prefix: tokenHash.slice(0, 8),
+      matching_rows_count: rows.length,
+      lookup_table: "company_members",
+      lookup_column: "token_hash",
+    }
+    : {
+      computed_hash_prefix: tokenHash.slice(0, 8),
+      matching_rows_count: rows.length,
+      lookup_table: "company_members",
+      lookup_column: "token_hash",
+    };
   const validInvite = rows.find((row) => getInviteStatus(row) === "valid");
   if (validInvite) {
+    const invite = await attachCompanyName(supabase, validInvite);
     return {
-      invite: validInvite,
-      diagnostics: buildPreviewDiagnostics(token, true, diagnosticRow(validInvite)),
+      invite,
+      diagnostics: buildPreviewDiagnostics(token, true, diagnosticRow(invite)),
     };
   }
   const latest = rows[0] || null;
@@ -168,6 +189,25 @@ async function loadInviteByToken(supabase: ReturnType<typeof createClient>, toke
     invite: null,
     diagnostics: buildPreviewDiagnostics(token, rows.length > 0, diagnosticRow(latest)),
   };
+}
+
+async function attachCompanyName(supabase: ReturnType<typeof createClient>, invite: Record<string, unknown>) {
+  const companyId = String(invite.company_id || "");
+  if (!companyId) return { ...invite, company_name: "Company" };
+  const { data, error } = await supabase
+    .from("companies")
+    .select("company_name")
+    .eq("id", companyId)
+    .maybeSingle();
+  if (error) {
+    console.info("company_invite_company_lookup_failed", {
+      member_id: invite.id,
+      company_id: companyId,
+      reason: error.message,
+    });
+    return { ...invite, company_name: "Company" };
+  }
+  return { ...invite, company_name: data?.company_name || "Company" };
 }
 
 function getInviteStatus(invite: Record<string, unknown>) {
@@ -202,6 +242,8 @@ function buildPreviewDiagnostics(token: string, found: boolean, row: Record<stri
     matching_rows_count: matchingRowsCount,
     latest_invite_status: String(row?.status || ""),
     latest_invite_expires_at: String(row?.expires_at || ""),
+    lookup_table: String(row?.lookup_table || "company_members"),
+    lookup_column: String(row?.lookup_column || "token_hash"),
   };
 }
 
@@ -216,6 +258,8 @@ async function buildQueryErrorDiagnostics(token: string) {
     matching_rows_count: 0,
     latest_invite_status: "",
     latest_invite_expires_at: "",
+    lookup_table: "company_members",
+    lookup_column: "token_hash",
   };
 }
 

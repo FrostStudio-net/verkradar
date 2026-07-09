@@ -152,6 +152,8 @@
       <span>matching_rows_count: ${Number(e.matching_rows_count||0)}</span>
       <span>latest_invite_status: ${t(e.latest_invite_status||`none`)}</span>
       <span>latest_invite_expires_at: ${t(e.latest_invite_expires_at||`none`)}</span>
+      <span>lookup_table: ${t(e.lookup_table||`unknown`)}</span>
+      <span>lookup_column: ${t(e.lookup_column||`unknown`)}</span>
     </div>
   `}function Ve({authMessage:e,escapeHtml:t}){if(!e)return``;let n=Array.isArray(e.actions)?e.actions:[];return`
     <div class="admin-message ${e.type===`error`?`is-error`:`is-success`}">

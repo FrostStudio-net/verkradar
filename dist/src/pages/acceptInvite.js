@@ -85,6 +85,8 @@ function renderInviteDebug(debugInfo, escapeHtml) {
       <span>matching_rows_count: ${Number(debugInfo.matching_rows_count || 0)}</span>
       <span>latest_invite_status: ${escapeHtml(debugInfo.latest_invite_status || "none")}</span>
       <span>latest_invite_expires_at: ${escapeHtml(debugInfo.latest_invite_expires_at || "none")}</span>
+      <span>lookup_table: ${escapeHtml(debugInfo.lookup_table || "unknown")}</span>
+      <span>lookup_column: ${escapeHtml(debugInfo.lookup_column || "unknown")}</span>
     </div>
   `;
 }
