@@ -19,8 +19,8 @@ export function renderAcceptInvitePage(options) {
   const signupLabel = isIs ? "Stofna aðgang" : "Create account";
   const acceptLabel = isIs ? "Tengja aðgang" : "Accept invite";
   const helper = isIs
-    ? "Notaðu sama netfang og aðgangsboðið var sent á. Eftir innskráningu tengist aðgangurinn við fyrirliggjandi fyrirtækjaprófíl."
-    : "Use the same email address this invite was created for. After login, your account will be connected to the existing company profile.";
+    ? "Aðgangsboðið tengir innskráninguna við fyrirtækjaprófíl sem hefur þegar verið settur upp."
+    : "This invite connects your login to an existing company profile.";
 
   return `
     <section class="auth-page">
@@ -36,8 +36,14 @@ export function renderAcceptInvitePage(options) {
             ${error ? `<div class="admin-message is-error">${escapeHtml(error)}</div>` : ""}
             ${invite ? `
               <div class="invite-summary">
+                <p>${escapeHtml(isIs
+                  ? `Þér hefur verið boðið að fá aðgang að ${invite.company_name || "fyrirtæki"}.`
+                  : `You have been invited to access ${invite.company_name || "a company"}.`)}</p>
                 <p><strong>${escapeHtml(companyLabel)}:</strong> ${escapeHtml(invite.company_name || "")}</p>
-                <p><strong>${escapeHtml(emailLabel)}:</strong> ${escapeHtml(invite.email || "")}</p>
+                <p><strong>${escapeHtml(emailLabel)}:</strong> ${escapeHtml(invite.invited_email || invite.email || "")}</p>
+                <p>${escapeHtml(isIs
+                  ? `Skráðu þig inn eða stofnaðu aðgang með ${invite.invited_email || invite.email || "boðið netfang"} til að virkja aðganginn.`
+                  : `Log in or create an account with ${invite.invited_email || invite.email || "the invited email"} to activate access.`)}</p>
               </div>
               ${user ? `
                 <button class="btn btn-primary btn-large" type="button" data-action="accept-company-invite" ${accepting ? "disabled" : ""}>

@@ -57,10 +57,14 @@ export async function previewCompanyInvite(token) {
   const response = await fetch(endpoint, {
     method: "POST",
     headers: getAnonHeaders(),
-    body: JSON.stringify({ preview: true, token }),
+    body: JSON.stringify({ action: "preview", token }),
   });
   const payload = await readJsonResponse(response);
-  if (!response.ok) throw new Error(payload.error || payload.message || `Invite preview failed with status ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(payload.error || payload.message || `Invite preview failed with status ${response.status}`);
+    error.details = payload;
+    throw error;
+  }
   return payload;
 }
 
@@ -70,7 +74,7 @@ export async function acceptCompanyInvite(token) {
   const response = await fetch(endpoint, {
     method: "POST",
     headers: await getAuthenticatedHeaders(),
-    body: JSON.stringify({ accept: true, token }),
+    body: JSON.stringify({ action: "accept", token }),
   });
   const payload = await readJsonResponse(response);
   if (!response.ok) {

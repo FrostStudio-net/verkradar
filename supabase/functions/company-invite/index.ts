@@ -25,23 +25,42 @@ Deno.serve(async (req) => {
     const adminClient = createClient(supabaseUrl, serviceRoleKey, {
       auth: { persistSession: false },
     });
-    const invite = await loadInviteByToken(adminClient, token);
-    if (!invite) return json({ error: "Invite not found or expired." }, 404);
+    const action = String(body.action || (body.preview === true ? "preview" : body.accept === true ? "accept" : "")).trim();
+    if (!["preview", "accept"].includes(action)) {
+      return json({ error: "Unsupported invite action." }, 400);
+    }
 
-    if (body.preview === true) {
+    const invite = await loadInviteByToken(adminClient, token);
+    if (!invite) {
+      return json({
+        error: "Invite not found, expired, or revoked.",
+        code: "invite_invalid",
+        status: "invalid",
+      }, 404);
+    }
+
+    const inviteStatus = getInviteStatus(invite);
+    if (action === "preview") {
       return json({
         ok: true,
-        company_id: invite.company_id,
         company_name: invite.companies?.company_name || "Company",
-        email: invite.email,
+        invited_email: invite.email,
         role: invite.role,
-        status: invite.status,
+        status: inviteStatus,
         expires_at: invite.expires_at,
       });
     }
 
-    if (body.accept === true) {
+    if (action === "accept") {
+      if (inviteStatus === "expired" || inviteStatus === "revoked") {
+        return json({
+          error: "Invite not found, expired, or revoked.",
+          code: "invite_invalid",
+          status: inviteStatus,
+        }, 410);
+      }
       const authHeader = req.headers.get("authorization") || "";
+      if (!authHeader) return json({ error: "Log in to accept this invite." }, 401);
       const userClient = createClient(supabaseUrl, anonKey, {
         global: { headers: { Authorization: authHeader } },
         auth: { persistSession: false },
@@ -56,6 +75,29 @@ Deno.serve(async (req) => {
           code: "email_mismatch",
           invited_email: invite.email,
         }, 403);
+      }
+
+      if (invite.status === "active") {
+        if (invite.user_id === userData.user.id) {
+          return json({
+            ok: true,
+            company_id: invite.company_id,
+            company_name: invite.companies?.company_name || "Company",
+            member: {
+              id: invite.id,
+              company_id: invite.company_id,
+              email: invite.email,
+              role: invite.role,
+              status: invite.status,
+              accepted_at: invite.accepted_at,
+            },
+          });
+        }
+        return json({
+          error: "This invite has already been accepted.",
+          code: "invite_already_accepted",
+          status: "active",
+        }, 409);
       }
 
       const now = new Date().toISOString();
@@ -80,8 +122,6 @@ Deno.serve(async (req) => {
         member: data,
       });
     }
-
-    return json({ error: "Unsupported invite action." }, 400);
   } catch (error) {
     console.error("Company invite failed:", error);
     return json({ error: errorMessage(error) }, 500);
@@ -92,14 +132,20 @@ async function loadInviteByToken(supabase: ReturnType<typeof createClient>, toke
   const tokenHash = await sha256Hex(token);
   const { data, error } = await supabase
     .from("company_members")
-    .select("id, company_id, email, role, status, expires_at, companies(company_name)")
+    .select("id, company_id, user_id, email, role, status, expires_at, accepted_at, revoked_at, companies(company_name)")
     .eq("token_hash", tokenHash)
-    .eq("status", "invited")
     .maybeSingle();
   if (error) throw error;
   if (!data) return null;
-  if (data.expires_at && new Date(data.expires_at).getTime() < Date.now()) return null;
   return data;
+}
+
+function getInviteStatus(invite: Record<string, unknown>) {
+  const status = String(invite.status || "");
+  if (status === "revoked" || invite.revoked_at) return "revoked";
+  if (invite.expires_at && new Date(String(invite.expires_at)).getTime() < Date.now()) return "expired";
+  if (status === "active") return "active";
+  return "valid";
 }
 
 async function sha256Hex(value: string) {

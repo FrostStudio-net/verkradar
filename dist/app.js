@@ -6185,15 +6185,20 @@ async function loadCompanyInvitePreview() {
   render();
   try {
     const payload = await previewCompanyInvite(token);
+    if (payload.status && payload.status !== "valid") {
+      const error = new Error("Invite is not valid.");
+      error.details = payload;
+      throw error;
+    }
     state.invitePreview = { ...payload, token };
-    state.authForm.email = payload.email || state.authForm.email;
+    state.authForm.email = payload.invited_email || payload.email || state.authForm.email;
   } catch (error) {
     console.error("Failed to preview company invite:", error);
     state.invitePreview = null;
     state.invitePreviewErrorToken = token;
     state.invitePreviewError = state.language === "is"
-      ? `Aðgangsboðið fannst ekki eða er útrunnið. ${formatSupabaseError(error)}`
-      : `Invite not found or expired. ${formatSupabaseError(error)}`;
+      ? "Aðgangsboðið fannst ekki, er útrunnið eða hefur verið afturkallað."
+      : "The invite was not found, has expired, or has been revoked.";
   } finally {
     state.invitePreviewLoading = false;
     render();
@@ -6220,7 +6225,7 @@ async function acceptPendingCompanyInvite() {
     navigate("/dashboard");
   } catch (error) {
     console.error("Failed to accept company invite:", error);
-    const invitedEmail = error?.details?.invited_email || state.invitePreview?.email || "";
+    const invitedEmail = error?.details?.invited_email || state.invitePreview?.invited_email || state.invitePreview?.email || "";
     state.invitePreviewError = error?.details?.code === "email_mismatch" && invitedEmail
       ? (state.language === "is"
         ? `Þessi aðgangsboð var sent á ${invitedEmail}. Skráðu þig inn með því netfangi.`
