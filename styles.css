@@ -2392,29 +2392,35 @@ select option:checked {
 }
 
 .admin-company-modal {
-  width: min(90vw, 1480px);
+  width: min(90vw, 1300px);
   max-width: 90vw;
-  max-height: min(90vh, 980px);
+  height: min(92vh, 980px);
+  max-height: 92vh;
 }
 
 .admin-detail-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 20px;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(320px, 1.15fr) minmax(320px, 1.15fr);
+  gap: 22px;
   align-items: start;
 }
 
 .admin-company-modal .modal-header {
-  padding: 18px 24px 14px;
+  align-items: flex-start;
+  padding: 18px 28px 15px;
+  box-shadow: 0 12px 24px rgba(0,0,0,0.2);
 }
 
 .admin-company-modal .modal-body {
-  padding: 20px 24px 24px;
+  flex: 1 1 auto;
+  padding: 22px 28px 28px;
+  overflow-y: auto;
   overscroll-behavior: contain;
 }
 
 .admin-company-modal .side-panel {
   min-width: 0;
+  height: fit-content;
 }
 
 .admin-company-modal .side-panel h3 {
@@ -2429,7 +2435,7 @@ select option:checked {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
-  margin: 10px 0 22px;
+  margin: 10px 0 24px;
 }
 
 .admin-tag-list span {
@@ -3679,7 +3685,28 @@ body.modal-open {
   }
 }
 
+@media (max-width: 1180px) {
+  .admin-detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 920px) {
+  .admin-company-modal {
+    width: calc(100vw - 24px);
+    max-width: calc(100vw - 24px);
+    height: calc(100dvh - 24px);
+    max-height: calc(100dvh - 24px);
+  }
+
+  .admin-company-modal .modal-header {
+    padding: 16px 18px 12px;
+  }
+
+  .admin-company-modal .modal-body {
+    padding: 18px;
+  }
+
   .site-header {
     gap: 0;
     align-items: flex-start;
@@ -4116,6 +4143,10 @@ body.modal-open {
 
   .modal-body {
     padding: 0 16px 16px;
+  }
+
+  .admin-company-access-list li {
+    grid-template-columns: 1fr;
   }
 
   .modal-close-btn {
