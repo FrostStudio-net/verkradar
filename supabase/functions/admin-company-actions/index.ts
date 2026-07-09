@@ -67,7 +67,7 @@ Deno.serve(async (req) => {
     const action = String(body.action || "refresh_matches").trim();
     const reportMode: ReportMode = body.reportMode === "all_current" ? "all_current" : "new_only";
     if (!isUuid(companyId)) return json({ error: "A valid companyId is required." }, 400);
-    if (!["refresh_matches", "generate_report", "review_match"].includes(action)) {
+    if (!["refresh_matches", "generate_report", "review_match", "mark_report_sent"].includes(action)) {
       return json({ error: "Unsupported action." }, 400);
     }
 
@@ -83,6 +83,17 @@ Deno.serve(async (req) => {
         reviewedBy: userData.user.id,
       });
       return json({ ok: true, action, ...reviewResult });
+    }
+
+    if (action === "mark_report_sent") {
+      const reportId = String(body.reportId || "").trim();
+      if (!isUuid(reportId)) return json({ error: "A valid reportId is required." }, 400);
+      const result = await markReportSent(adminClient, {
+        reportId,
+        companyId,
+        sentBy: userData.user.id,
+      });
+      return json({ ok: true, action, ...result });
     }
 
     const refreshResult = await refreshCompanyMatches(adminClient, companyId);
@@ -111,6 +122,43 @@ Deno.serve(async (req) => {
     return json({ error: errorMessage(error) }, 500);
   }
 });
+
+async function markReportSent(
+  supabase: ReturnType<typeof createClient>,
+  options: { reportId: string; companyId: string; sentBy: string },
+) {
+  const { data: report, error } = await supabase
+    .from("reports")
+    .select("id, company_id, report_items(opportunity_id)")
+    .eq("id", options.reportId)
+    .eq("company_id", options.companyId)
+    .single();
+  if (error) throw error;
+  const items = Array.isArray(report.report_items) ? report.report_items : [];
+  const opportunityIds = uniqueStrings(items.map((item) => String(item.opportunity_id || ""))).filter(Boolean);
+  if (!opportunityIds.length) {
+    return { report_id: options.reportId, company_id: options.companyId, marked_sent: 0 };
+  }
+  const now = new Date().toISOString();
+  const rows = opportunityIds.map((opportunityId) => ({
+    company_id: options.companyId,
+    opportunity_id: opportunityId,
+    channel: "manual_email",
+    sent_at: now,
+    sent_by: options.sentBy,
+    note: `Manually marked sent from report ${options.reportId}`,
+  }));
+  const { error: upsertError } = await supabase
+    .from("company_opportunity_sends")
+    .upsert(rows, { onConflict: "company_id,opportunity_id,channel" });
+  if (upsertError) throw upsertError;
+  return {
+    report_id: options.reportId,
+    company_id: options.companyId,
+    marked_sent: rows.length,
+    sent_at: now,
+  };
+}
 
 async function reviewOpportunityMatch(
   supabase: ReturnType<typeof createClient>,

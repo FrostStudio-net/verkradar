@@ -3,7 +3,9 @@ import {
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
   capitalize,
+  buildReportEmail,
   cleanStringArray,
+  cleanReportReasons,
   createEmptyProfile,
   daysUntilDeadline,
   DEFAULT_PROFILE,
@@ -20,6 +22,7 @@ import {
   formatReportReason as formatReportReasonBase,
   formatReportRisk as formatReportRiskBase,
   formatShortDate,
+  getReportDeliveryStatus,
   getInitialLanguage as getInitialLanguageBase,
   getLegalPageData,
   getSafeExternalUrl,
@@ -189,6 +192,7 @@ let state = {
   adminCompanyAiReviewResults: {},
   adminCompanyAiReviewFilter: "not_reviewed",
   adminCompanyActions: {},
+  adminReportDeliveryActions: {},
   selectedAdminCompanyId: null,
   adminActiveTab: "overview",
   adminCompanyFilters: {
@@ -577,7 +581,11 @@ document.addEventListener("click", (event) => {
     return;
   }
   if (name === "copy-admin-report") {
-    copyAdminReportText(id);
+    copyAdminReportEmail(id);
+    return;
+  }
+  if (name === "mark-admin-report-sent") {
+    markAdminReportSent(id);
     return;
   }
   if (name === "admin-tab") {
@@ -1333,6 +1341,7 @@ async function loadAdminReportDetails(reportId) {
       .single();
 
     if (error) throw error;
+    await attachReportSentStatuses(data);
     if (state.selectedAdminReportId === reportId) {
       state.selectedAdminReport = data;
     }
@@ -1348,6 +1357,28 @@ async function loadAdminReportDetails(reportId) {
       render();
     }
   }
+}
+
+async function attachReportSentStatuses(report) {
+  const items = Array.isArray(report?.report_items) ? report.report_items : [];
+  const opportunityIds = items.map((item) => item.opportunity_id).filter(Boolean);
+  if (!supabaseClient || !report?.company_id || !opportunityIds.length) return;
+  const { data, error } = await supabaseClient
+    .from("company_opportunity_sends")
+    .select("opportunity_id, sent_at, created_at, channel")
+    .eq("company_id", report.company_id)
+    .in("opportunity_id", opportunityIds)
+    .in("channel", ["manual_email", "automated_email"]);
+  if (error) {
+    console.warn("Failed to load report sent status:", error);
+    return;
+  }
+  const sentByOpportunity = new Map((data || []).map((row) => [String(row.opportunity_id), row]));
+  items.forEach((item) => {
+    const sent = sentByOpportunity.get(String(item.opportunity_id));
+    item.sent_at = sent?.sent_at || sent?.created_at || "";
+    item.delivery_type = sent?.channel || "";
+  });
 }
 
 async function loadSourceCoverageForAdmin() {
@@ -6621,7 +6652,7 @@ function renderAdminReportRow(report) {
       <td>
         <div class="admin-row-actions">
           <button class="btn btn-secondary btn-small" type="button" data-action="view-admin-report" data-id="${escapeHtml(report.id)}">View report</button>
-          <button class="btn btn-ghost btn-small" type="button" data-action="copy-admin-report" data-id="${escapeHtml(report.id)}">Copy text</button>
+          <button class="btn btn-ghost btn-small" type="button" data-action="copy-admin-report" data-id="${escapeHtml(report.id)}">Copy report email</button>
           <button class="btn btn-ghost btn-small" type="button" data-action="view-admin-report" data-id="${escapeHtml(report.id)}">Open for PDF</button>
         </div>
       </td>
@@ -6669,7 +6700,8 @@ function renderAdminReportDetails() {
         <div class="modal-body">
           <div class="admin-report-actions">
             <button class="btn btn-primary" type="button" data-action="download-admin-report-pdf" ${state.selectedAdminReportLoading ? "disabled" : ""}>Download PDF</button>
-            <button class="btn btn-secondary" type="button" data-action="copy-admin-report" data-id="${escapeHtml(report.id)}">Copy text/email summary</button>
+            <button class="btn btn-secondary" type="button" data-action="copy-admin-report" data-id="${escapeHtml(report.id)}">Copy report email</button>
+            <button class="btn btn-secondary" type="button" data-action="mark-admin-report-sent" data-id="${escapeHtml(report.id)}" ${state.adminReportDeliveryActions[report.id] === "sent" ? "disabled" : ""}>${state.adminReportDeliveryActions[report.id] === "sent" ? "Marking..." : "Mark as sent"}</button>
             <button class="btn btn-ghost" type="button" data-action="close-admin-report">Close</button>
           </div>
 
@@ -6729,6 +6761,7 @@ function renderAdminReportItem(item) {
   }
   const safeUrl = getSafeExternalUrl(opp.url);
   const deadline = getOpportunityDeadlineDisplay(opp);
+  const reasons = cleanReportReasons(Array.isArray(item.match_reasons) ? item.match_reasons : [], state.language);
   return `
     <article class="admin-report-item">
       <div class="opportunity-badges">
@@ -6736,20 +6769,23 @@ function renderAdminReportItem(item) {
         <span class="${badgeClass(getMatchLabel(Number(item.match_score || 0)))}">${escapeHtml(formatReportMatchLabel(getMatchLabel(Number(item.match_score || 0))))} · ${Number(item.match_score || 0)}</span>
       </div>
       <h4>${escapeHtml(opp.title)}</h4>
+      <p><strong>Status</strong> ${escapeHtml(getReportDeliveryStatus({ matchScore: Number(item.match_score || 0) }, state.language))}</p>
       <div class="admin-report-meta-grid">
         <span><strong>${escapeHtml(t("buyer"))}</strong>${escapeHtml(formatOpportunityBuyer(opp))}</span>
         <span><strong>${escapeHtml(t("source"))}</strong>${escapeHtml(formatReportMetadataValue("source", opp.source))}</span>
         <span><strong>${escapeHtml(t("area"))}</strong>${escapeHtml(formatOpportunityLocation(opp))}</span>
         <span><strong>${escapeHtml(t("deadline"))}</strong>${escapeHtml(deadline.label)}</span>
         <span><strong>${escapeHtml(t("estimatedValue"))}</strong>${escapeHtml(opp.estimatedValue ? formatISK(opp.estimatedValue) : t("notListed"))}</span>
+        <span><strong>Sent status</strong>${escapeHtml(item.sent_at ? `Sent on ${formatDateTime(item.sent_at)}` : "Not sent")}</span>
       </div>
+      ${reasons.length ? `<div><strong>Reasons</strong><ul>${reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul></div>` : ""}
       <p>${escapeHtml(opp.description || "")}</p>
       ${safeUrl ? `<a class="btn btn-secondary btn-small" href="${escapeHtml(safeUrl)}" target="_blank" rel="noreferrer">${escapeHtml(t("openSource"))}</a>` : ""}
     </article>
   `;
 }
 
-async function copyAdminReportText(reportId) {
+async function copyAdminReportEmail(reportId) {
   const report = state.selectedAdminReport?.id === reportId
     ? state.selectedAdminReport
     : (state.adminReports || []).find((item) => item.id === reportId);
@@ -6759,15 +6795,45 @@ async function copyAdminReportText(reportId) {
   }
   const companyName = report.companies?.company_name || "Company";
   const detailedMatches = getSavedReportItemMatches(report);
-  const text = detailedMatches.length
-    ? generateSavedReportText(report, companyName, detailedMatches)
-    : report.text_content || stripHtmlFromString(normalizeSavedReportHtml(report));
+  const text = buildReportEmail({
+    companyName,
+    language: state.language,
+    matches: detailedMatches.map((match) => ({
+      ...match,
+      buyer: formatOpportunityBuyer(match),
+      deadline: formatOpportunityDeadlineForReport(match),
+      matchReasons: cleanReportReasons(match.matchReasons, state.language),
+    })),
+  });
   try {
     await navigator.clipboard.writeText(text);
-    showToast("Report text copied", "success");
+    showToast("Report email copied", "success");
   } catch (error) {
     console.error("Failed to copy admin report:", error);
-    showToast("Could not copy report text", "error");
+    showToast("Could not copy report email", "error");
+  }
+}
+
+async function markAdminReportSent(reportId) {
+  const report = state.selectedAdminReport?.id === reportId
+    ? state.selectedAdminReport
+    : (state.adminReports || []).find((item) => item.id === reportId);
+  if (!report?.company_id) {
+    showToast("Report not found", "error");
+    return;
+  }
+  state.adminReportDeliveryActions[reportId] = "sent";
+  render();
+  try {
+    const payload = await runAdminCompanyAction(report.company_id, "mark_report_sent", { reportId });
+    await loadAdminReportDetails(reportId);
+    showToast(`Marked ${Number(payload.marked_sent || 0)} report item${Number(payload.marked_sent || 0) === 1 ? "" : "s"} as sent`, "success");
+  } catch (error) {
+    console.error("Failed to mark report as sent:", error);
+    showToast(`Could not mark report as sent. ${formatSupabaseError(error)}`, "error");
+  } finally {
+    delete state.adminReportDeliveryActions[reportId];
+    render();
   }
 }
 
