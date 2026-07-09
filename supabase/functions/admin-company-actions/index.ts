@@ -258,7 +258,8 @@ async function generateCompanyReport(
     ? await loadPreviouslyReportedOpportunityIds(supabase, company.id)
     : new Set<string>();
   const ignoredIds = await loadCompanyActionOpportunityIds(supabase, company.id, ["ignored"]);
-  const reportMatches = buildCompanyReportMatches(company, matches, reportMode, {
+  const aiEnrichedMatches = await enrichMatchesWithAiReviews(supabase, company.id, matches);
+  const reportMatches = buildCompanyReportMatches(company, aiEnrichedMatches, reportMode, {
     previouslyReportedIds: seenIds,
     ignoredIds,
   });
@@ -297,8 +298,8 @@ async function generateCompanyReport(
     report_id: savedReport.id,
     opportunity_id: match.id,
     match_score: match.matchScore,
-    match_reasons: Array.isArray(match.matchReasons) ? match.matchReasons : [],
-    risks: Array.isArray(match.risks) ? match.risks : [],
+    match_reasons: getAiReportReasons(match),
+    risks: getAiReportRisks(match),
     sort_order: index + 1,
   }));
 
@@ -342,18 +343,108 @@ function buildCompanyReportMatches(
   const modeMatches = reportMode === "new_only"
     ? matches.filter((match) => !previouslyReportedIds.has(String(match.id || "")))
     : matches;
-  const sections = getReportSections(company, modeMatches
+  return sortAiReportMatches(modeMatches
     .filter((match) => !ignoredIds.has(String(match.id || "")))
     .filter((match) => isReportModeSafetyEligible(match, reportMode))
-  );
-  return [...sections.confirmed, ...sections.early];
+  ).slice(0, 8);
 }
 
 function isReportModeSafetyEligible(match: Record<string, unknown>, reportMode: ReportMode) {
   const safety = getMatchSafetyStatus(match);
   if (safety === "hidden") return false;
-  if (reportMode === "new_only") return safety === "auto_approved" && match.alertEligible !== false;
-  return safety === "auto_approved" || safety === "needs_review";
+  if (!isAiReportMatchEligible(match)) return false;
+  if (reportMode === "new_only") return match.aiReviewSendToClient === true;
+  return true;
+}
+
+async function enrichMatchesWithAiReviews(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+  matches: Array<Record<string, unknown>>,
+) {
+  const opportunityIds = uniqueStrings(matches.map((match) => String(match.id || ""))).filter(Boolean);
+  if (!opportunityIds.length) return matches;
+  const { data, error } = await supabase
+    .from("ai_match_reviews")
+    .select("opportunity_id, fit, confidence, send_to_client, reason, fit_reasons, risks_or_questions, suggested_client_summary, created_at, updated_at")
+    .eq("company_id", companyId)
+    .in("opportunity_id", opportunityIds);
+  if (error) throw error;
+  const reviewsByOpportunity = new Map<string, Record<string, unknown>>();
+  for (const review of data || []) {
+    const opportunityId = String(review.opportunity_id || "");
+    if (opportunityId) reviewsByOpportunity.set(opportunityId, review as Record<string, unknown>);
+  }
+  return matches.map((match) => {
+    const review = reviewsByOpportunity.get(String(match.id || ""));
+    if (!review) return match;
+    const aiFitReasons = Array.isArray(review.fit_reasons) ? review.fit_reasons.map(String).filter(Boolean) : [];
+    const aiRisksOrQuestions = Array.isArray(review.risks_or_questions) ? review.risks_or_questions.map(String).filter(Boolean) : [];
+    const aiSuggestedClientSummary = String(review.suggested_client_summary || "");
+    return {
+      ...match,
+      aiReviewFit: String(review.fit || "").toLowerCase(),
+      aiReviewConfidence: Number(review.confidence || 0),
+      aiReviewSendToClient: review.send_to_client === true,
+      aiReviewReason: String(review.reason || ""),
+      aiFitReasons,
+      aiRisksOrQuestions,
+      aiSuggestedClientSummary,
+      aiReviewedAt: String(review.updated_at || review.created_at || ""),
+      matchReasons: uniqueStrings([
+        aiSuggestedClientSummary,
+        ...aiFitReasons,
+        ...(Array.isArray(match.matchReasons) ? match.matchReasons.map(String) : []),
+      ]),
+      risks: uniqueStrings([
+        ...aiRisksOrQuestions,
+        ...(Array.isArray(match.risks) ? match.risks.map(String) : []),
+      ]),
+    };
+  });
+}
+
+function isAiReportMatchEligible(match: Record<string, unknown>) {
+  const fit = String(match.aiReviewFit || "").toLowerCase();
+  if (fit !== "strong" && fit !== "possible") return false;
+  if (match.aiReviewSendToClient !== true) return false;
+  if (!match.deadline || daysUntilDeadline(String(match.deadline || "")) < 0) return false;
+  const riskText = [
+    match.aiReviewReason,
+    ...(Array.isArray(match.aiRisksOrQuestions) ? match.aiRisksOrQuestions : []),
+  ].filter(Boolean).join(" ").toLowerCase();
+  if (riskText.includes("outside service area")) return false;
+  return true;
+}
+
+function sortAiReportMatches(matches: Array<Record<string, unknown>>) {
+  const fitRank: Record<string, number> = { strong: 0, possible: 1 };
+  return [...matches]
+    .filter(isAiReportMatchEligible)
+    .sort((a, b) => {
+      const rankDiff = (fitRank[String(a.aiReviewFit || "").toLowerCase()] ?? 9) - (fitRank[String(b.aiReviewFit || "").toLowerCase()] ?? 9);
+      if (rankDiff) return rankDiff;
+      const confidenceDiff = Number(b.aiReviewConfidence || 0) - Number(a.aiReviewConfidence || 0);
+      if (confidenceDiff) return confidenceDiff;
+      const scoreDiff = Number(b.matchScore || 0) - Number(a.matchScore || 0);
+      if (scoreDiff) return scoreDiff;
+      return daysUntilDeadline(String(a.deadline || "")) - daysUntilDeadline(String(b.deadline || ""));
+    });
+}
+
+function getAiReportReasons(match: Record<string, unknown>) {
+  return uniqueStrings([
+    match.aiSuggestedClientSummary,
+    ...(Array.isArray(match.aiFitReasons) ? match.aiFitReasons : []),
+    ...(Array.isArray(match.matchReasons) ? match.matchReasons : []),
+  ].map(String));
+}
+
+function getAiReportRisks(match: Record<string, unknown>) {
+  return uniqueStrings([
+    ...(Array.isArray(match.aiRisksOrQuestions) ? match.aiRisksOrQuestions : []),
+    ...(Array.isArray(match.risks) ? match.risks : []),
+  ].map(String));
 }
 
 async function loadPreviouslyReportedOpportunityIds(supabase: ReturnType<typeof createClient>, companyId: string) {
@@ -1242,7 +1333,21 @@ function buildReportContent(company: CompanyProfile, matches: Array<Record<strin
   const periodStart = start.toISOString().slice(0, 10);
   const title = `Útboðs- og verkefnayfirlit fyrir ${company.companyName}`;
   const summary = `${matches.length} viðeigandi útboðs- eða verðfyrirspurnaratriði fundust fyrir ${company.companyName}.`;
-  const textContent = `${title}\n${periodStart} - ${periodEnd}\n\n${summary}\n\n${matches.map((match, index) => `${index + 1}. ${match.title}`).join("\n")}`;
+  const textContent = `${title}
+${periodStart} - ${periodEnd}
+
+${summary}
+
+${matches.map((match, index) => {
+    const reasons = getAiReportReasons(match);
+    return `${index + 1}. ${match.title}
+   Kaupandi: ${match.buyer || "Óþekktur kaupandi"}
+   Skilafrestur: ${match.deadline || "Fannst ekki"}
+   Heimild: ${match.source || "Óþekkt heimild"}${match.url ? ` (${match.url})` : ""}
+   AI mat: ${match.aiReviewFit || "possible"}${match.aiReviewConfidence ? ` (${Math.round(Number(match.aiReviewConfidence) * 100)}%)` : ""}
+   Samantekt: ${match.aiSuggestedClientSummary || match.aiReviewReason || "Viðeigandi atriði samkvæmt AI yfirferð."}
+   Ástæður: ${reasons.length ? reasons.join("; ") : "Passar við fyrirtækjaprófílinn."}`;
+  }).join("\n\n")}`;
   const htmlContent = `
     <section>
       <h2>${escapeHtml(title)}</h2>
@@ -1250,7 +1355,15 @@ function buildReportContent(company: CompanyProfile, matches: Array<Record<strin
       ${matches.map((match, index) => `
         <article>
           <h3>${index + 1}. ${escapeHtml(String(match.title || ""))}</h3>
-          <p>${escapeHtml(String(match.buyer || "Óþekktur kaupandi"))} · ${escapeHtml(String(match.source || ""))} · ${Number(match.matchScore || 0)}/100</p>
+          <p>
+            <strong>Kaupandi:</strong> ${escapeHtml(String(match.buyer || "Óþekktur kaupandi"))} ·
+            <strong>Skilafrestur:</strong> ${escapeHtml(String(match.deadline || "Fannst ekki"))} ·
+            <strong>Heimild:</strong> ${escapeHtml(String(match.source || ""))}
+          </p>
+          ${match.url ? `<p><a href="${escapeHtml(String(match.url))}" target="_blank" rel="noopener noreferrer">Opna heimild</a></p>` : ""}
+          <p><strong>AI mat:</strong> ${escapeHtml(String(match.aiReviewFit || "possible"))}${match.aiReviewConfidence ? ` (${Math.round(Number(match.aiReviewConfidence) * 100)}%)` : ""}</p>
+          <p>${escapeHtml(String(match.aiSuggestedClientSummary || match.aiReviewReason || "Viðeigandi atriði samkvæmt AI yfirferð."))}</p>
+          ${getAiReportReasons(match).length ? `<ul>${getAiReportReasons(match).map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}
         </article>
       `).join("")}
     </section>

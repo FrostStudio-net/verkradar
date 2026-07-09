@@ -22,6 +22,7 @@ export {
 } from "./pages/reports.js";
 export { renderSettingsPage } from "./pages/settings.js";
 export { localizeLegacyReportContent } from "./services/reports.js";
+export { getAiReportPlacement, mergeAiReviewsIntoReportMatches, sortAiReportMatches } from "./services/reportAiRanking.js";
 export { SUPABASE_URL, SUPABASE_ANON_KEY, supabaseClient } from "./supabaseClient.js";
 export { daysUntilDeadline, formatDateTime, formatShortDate } from "./utils/dates.js";
 export {

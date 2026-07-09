@@ -23,10 +23,12 @@ import {
   getInitialLanguage as getInitialLanguageBase,
   getLegalPageData,
   getSafeExternalUrl,
+  getAiReportPlacement,
   getCleanOpportunityBuyer,
   inferLocationFromSourceName,
   isUuid,
   localizeLegacyReportContent,
+  mergeAiReviewsIntoReportMatches,
   normalizeLocationText,
   parseCommaList,
   formatAiUsageCost,
@@ -61,6 +63,7 @@ import {
   renderResetPasswordPage,
   renderSettingsPage,
   renderSignupPage,
+  sortAiReportMatches,
   splitInput,
   stripHtmlFromString,
   supabaseClient,
@@ -3668,11 +3671,23 @@ async function loadStoredMatchesForCurrentCompany() {
     state.lastMatchedAt = matchedAtValues.length
       ? new Date(Math.max(...matchedAtValues)).toISOString()
       : null;
-    state.storedMatches = (data || [])
+    const storedMatches = (data || [])
       .filter((row) => row.opportunities)
       .map(mapStoredMatch)
       .filter(isCustomerMatchEligibleOpportunity)
       .filter(isDashboardVisibleOpportunity);
+    const opportunityIds = storedMatches.map((match) => match.id).filter(Boolean);
+    let aiReviews = [];
+    if (opportunityIds.length) {
+      const { data: reviewRows, error: reviewError } = await supabaseClient
+        .from("ai_match_reviews")
+        .select("company_id, opportunity_id, fit, confidence, send_to_client, reason, fit_reasons, risks_or_questions, suggested_client_summary, created_at, updated_at")
+        .eq("company_id", state.companyId)
+        .in("opportunity_id", opportunityIds);
+      if (reviewError) console.warn("Failed to load AI reviews for report ranking:", reviewError);
+      aiReviews = reviewRows || [];
+    }
+    state.storedMatches = mergeAiReviewsIntoReportMatches(storedMatches, aiReviews);
   } catch (error) {
     console.error("Failed to load stored opportunity matches. Falling back to frontend matching:", error);
     state.storedMatches = [];
@@ -8630,15 +8645,11 @@ function getReportMatches(mode = "all_current", previouslyReportedIds = new Set(
 function buildCurrentReportMatches({ mode = "all_current", previouslyReportedIds = new Set() } = {}) {
   const matches = getMatchedOpportunities()
     .filter((opp) => opp.matchScore >= 50)
-    .filter((opp) => isCustomerReportModeEligible(opp, mode));
+    .filter((opp) => isCustomerReportModeEligible(opp, "all_current"));
   const modeMatches = mode === "new_only"
     ? matches.filter((opp) => !previouslyReportedIds.has(opp.id))
     : matches;
-  const sections = getReportSections(modeMatches);
-  return [
-    ...sections.confirmed,
-    ...sections.early,
-  ];
+  return sortAiReportMatches(modeMatches).slice(0, 8);
 }
 
 function buildReportContent(profile, matches) {
@@ -8745,6 +8756,8 @@ function getReportSections(matches) {
 }
 
 function getReportOpportunityPlacement(opp) {
+  const aiPlacement = getAiReportPlacement(opp);
+  if (aiPlacement !== "excluded" || opp?.aiReviewFit || opp?.ai_review_fit) return aiPlacement;
   if (!isStrictCustomerReportEligible(opp)) return "excluded";
   const intent = getOpportunityIntent(opp);
   if (intent === "confirmed_tender") return "confirmed";
