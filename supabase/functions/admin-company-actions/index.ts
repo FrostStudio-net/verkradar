@@ -235,6 +235,7 @@ async function inviteCompanyCustomer(
       .single();
     if (error) throw error;
     const debug = await buildInviteDebug(supabase, data, inviteToken, tokenHash);
+    console.info("company_invite_created", debug);
     return {
       company_id: options.companyId,
       company_name: company.company_name,
@@ -264,6 +265,7 @@ async function inviteCompanyCustomer(
     .single();
   if (error) throw error;
   const debug = await buildInviteDebug(supabase, data, inviteToken, tokenHash);
+  console.info("company_invite_created", debug);
   return {
     company_id: options.companyId,
     company_name: company.company_name,
@@ -290,11 +292,14 @@ async function buildInviteDebug(
   if (error) throw error;
   return {
     member_id: String(member.id || ""),
+    company_id: String(member.company_id || ""),
     email: String(member.email || ""),
     status: String(member.status || ""),
     expires_at: String(member.expires_at || ""),
     has_token_hash: Boolean(member.token_hash),
-    copied_link_token_length: inviteToken.length,
+    raw_token_length: inviteToken.length,
+    token_hash_prefix: tokenHash.slice(0, 8),
+    copied_invite_url_present: Boolean(inviteToken),
     hash_lookup_found: Boolean(data),
     hash_lookup_status: data?.status || "",
     hash_lookup_expires_at: data?.expires_at || "",

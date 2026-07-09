@@ -131,6 +131,7 @@ let state = {
   invitePreviewLoading: false,
   invitePreviewError: null,
   invitePreviewErrorToken: "",
+  invitePreviewDebug: null,
   inviteAccepting: false,
   user: null,
   currentUser: null,
@@ -340,6 +341,7 @@ function clearPendingInviteState() {
   state.invitePreview = null;
   state.invitePreviewError = null;
   state.invitePreviewErrorToken = "";
+  state.invitePreviewDebug = null;
   state.inviteAccepting = false;
 }
 
@@ -1894,7 +1896,11 @@ async function inviteAdminCompanyCustomer(companyId) {
     };
     state.adminCompanyInviteDebug = {
       ...(state.adminCompanyInviteDebug || {}),
-      [companyId]: payload.debug || null
+      [companyId]: payload.debug ? {
+        ...payload.debug,
+        copied_url_token_length: String(payload.invite_token || "").length,
+        copied_invite_url_present: Boolean(inviteLink)
+      } : null
     };
     state.adminCompanyInviteDrafts = {
       ...(state.adminCompanyInviteDrafts || {}),
@@ -6194,6 +6200,8 @@ function renderAcceptInvite() {
     invite: state.invitePreview,
     loading: state.invitePreviewLoading,
     error: state.invitePreviewError,
+    debugInfo: state.invitePreviewDebug,
+    showDebug: state.isAdmin || ["localhost", "127.0.0.1"].includes(window.location.hostname),
     user: state.user,
     accepting: state.inviteAccepting,
     signupHref: getInviteAwareAuthHref("/signup"),
@@ -6223,6 +6231,7 @@ async function loadCompanyInvitePreview() {
     console.error("Failed to preview company invite:", error);
     if (error?.details?.diagnostics) console.warn("Invite preview diagnostics:", error.details.diagnostics);
     state.invitePreview = null;
+    state.invitePreviewDebug = error?.details?.diagnostics || null;
     clearStoredPendingInviteToken();
     state.pendingInviteToken = "";
     state.invitePreviewErrorToken = token;

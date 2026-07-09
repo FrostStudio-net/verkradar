@@ -4,6 +4,8 @@ export function renderAcceptInvitePage(options) {
     invite = null,
     loading = false,
     error = "",
+    debugInfo = null,
+    showDebug = false,
     user = null,
     accepting = false,
     signupHref = "/signup",
@@ -36,6 +38,7 @@ export function renderAcceptInvitePage(options) {
           <div class="auth-card invite-card">
             ${loading ? `<p>${escapeHtml(loadingText)}</p>` : ""}
             ${error ? `<div class="admin-message is-error">${escapeHtml(error)}</div>` : ""}
+            ${showDebug && debugInfo ? renderInviteDebug(debugInfo, escapeHtml) : ""}
             ${error && !invite ? `
               <div class="auth-actions">
                 <button class="btn btn-primary btn-large" type="button" data-action="go" data-href="/login">${escapeHtml(goLoginLabel)}</button>
@@ -68,5 +71,20 @@ export function renderAcceptInvitePage(options) {
         </div>
       </div>
     </section>
+  `;
+}
+
+function renderInviteDebug(debugInfo, escapeHtml) {
+  return `
+    <div class="admin-invite-debug">
+      <span>invalid_reason: ${escapeHtml(debugInfo.invalid_reason || debugInfo.reason || "unknown")}</span>
+      <span>token_received: ${debugInfo.token_received ? "true" : "false"}</span>
+      <span>token_length: ${Number(debugInfo.token_length || 0)}</span>
+      <span>computed_hash_prefix: ${escapeHtml(debugInfo.computed_hash_prefix || "missing")}</span>
+      <span>lookup_found: ${debugInfo.lookup_found ? "true" : "false"}</span>
+      <span>matching_rows_count: ${Number(debugInfo.matching_rows_count || 0)}</span>
+      <span>latest_invite_status: ${escapeHtml(debugInfo.latest_invite_status || "none")}</span>
+      <span>latest_invite_expires_at: ${escapeHtml(debugInfo.latest_invite_expires_at || "none")}</span>
+    </div>
   `;
 }

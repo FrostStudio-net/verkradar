@@ -64,7 +64,10 @@ function renderInviteDebug(debug, escapeHtml) {
       <span>status: ${escapeHtml(debug.status || "unknown")}</span>
       <span>expires_at: ${escapeHtml(debug.expires_at || "not set")}</span>
       <span>has_token_hash: ${debug.has_token_hash ? "true" : "false"}</span>
-      <span>copied_link_token_length: ${Number(debug.copied_link_token_length || 0)}</span>
+      <span>raw_token_length: ${Number(debug.raw_token_length || debug.copied_link_token_length || 0)}</span>
+      <span>token_hash_prefix: ${escapeHtml(debug.token_hash_prefix || "missing")}</span>
+      <span>copied_invite_url_present: ${debug.copied_invite_url_present ? "true" : "false"}</span>
+      <span>copied_url_token_length: ${Number(debug.copied_url_token_length || debug.raw_token_length || 0)}</span>
       <span>hash_lookup_found: ${debug.hash_lookup_found ? "true" : "false"}</span>
     </div>
   `;

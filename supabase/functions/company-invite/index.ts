@@ -20,7 +20,11 @@ Deno.serve(async (req) => {
 
     const body = await safeJson(req);
     const token = String(body.token || "").trim();
-    if (!token) return json({ error: "Invite token is required." }, 400);
+    if (!token) {
+      const diagnostics = buildPreviewDiagnostics("", false, null);
+      console.info("company_invite_preview_lookup", diagnostics);
+      return json({ error: "Invite token is required.", code: "invite_invalid", diagnostics }, 400);
+    }
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey, {
       auth: { persistSession: false },
@@ -30,7 +34,16 @@ Deno.serve(async (req) => {
       return json({ error: "Unsupported invite action." }, 400);
     }
 
-    const lookup = await loadInviteByToken(adminClient, token);
+    let lookup;
+    try {
+      lookup = await loadInviteByToken(adminClient, token);
+    } catch (lookupError) {
+      const diagnostics = await buildQueryErrorDiagnostics(token);
+      console.info("company_invite_preview_lookup", diagnostics);
+      console.error("Company invite lookup failed:", errorMessage(lookupError));
+      return json({ error: "Invite lookup failed.", code: "invite_invalid", diagnostics }, 500);
+    }
+    console.info("company_invite_preview_lookup", lookup.diagnostics);
     const invite = lookup.invite;
     if (!invite) {
       return json({
@@ -140,17 +153,20 @@ async function loadInviteByToken(supabase: ReturnType<typeof createClient>, toke
     .limit(10);
   if (error) throw error;
   const rows = data || [];
+  const diagnosticRow = (row: Record<string, unknown> | null) => row
+    ? { ...row, computed_hash_prefix: tokenHash.slice(0, 8), matching_rows_count: rows.length }
+    : { computed_hash_prefix: tokenHash.slice(0, 8), matching_rows_count: rows.length };
   const validInvite = rows.find((row) => getInviteStatus(row) === "valid");
   if (validInvite) {
     return {
       invite: validInvite,
-      diagnostics: buildPreviewDiagnostics(token, true, validInvite),
+      diagnostics: buildPreviewDiagnostics(token, true, diagnosticRow(validInvite)),
     };
   }
   const latest = rows[0] || null;
   return {
     invite: null,
-    diagnostics: buildPreviewDiagnostics(token, rows.length > 0, latest),
+    diagnostics: buildPreviewDiagnostics(token, rows.length > 0, diagnosticRow(latest)),
   };
 }
 
@@ -164,13 +180,13 @@ function getInviteStatus(invite: Record<string, unknown>) {
 
 function buildPreviewDiagnostics(token: string, found: boolean, row: Record<string, unknown> | null) {
   const status = row ? getInviteStatus(row) : "";
+  const matchingRowsCount = Number(row?.matching_rows_count || 0);
   return {
     token_received: Boolean(token),
     token_length: token.length,
-    hash_lookup_found: found,
-    found_status: String(row?.status || ""),
-    found_expires_at: String(row?.expires_at || ""),
-    reason: !token
+    computed_hash_prefix: String(row?.computed_hash_prefix || ""),
+    lookup_found: found,
+    invalid_reason: !token
       ? "no_token"
       : !found
         ? "no_hash_match"
@@ -180,7 +196,26 @@ function buildPreviewDiagnostics(token: string, found: boolean, row: Record<stri
             ? "revoked"
             : status === "active"
               ? "already_accepted"
-              : "unknown",
+              : row?.status && row.status !== "invited"
+                ? "wrong_status"
+                : "unknown",
+    matching_rows_count: matchingRowsCount,
+    latest_invite_status: String(row?.status || ""),
+    latest_invite_expires_at: String(row?.expires_at || ""),
+  };
+}
+
+async function buildQueryErrorDiagnostics(token: string) {
+  const tokenHash = token ? await sha256Hex(token) : "";
+  return {
+    token_received: Boolean(token),
+    token_length: token.length,
+    computed_hash_prefix: tokenHash.slice(0, 8),
+    lookup_found: false,
+    invalid_reason: "query_error",
+    matching_rows_count: 0,
+    latest_invite_status: "",
+    latest_invite_expires_at: "",
   };
 }
 
