@@ -64,26 +64,40 @@ export function mergeAiReviewsIntoReportMatches(matches, aiReviews) {
 }
 
 export function isAiReportMatchEligible(match) {
+  return getReportCandidateKind(match) !== "excluded";
+}
+
+export function getReportCandidateKind(match) {
   const fit = normalizeFit(match?.aiReviewFit || match?.ai_review_fit);
-  if (!["strong", "possible"].includes(fit)) return false;
+  if (!match?.deadline || isExpiredDeadline(match.deadline)) return "excluded";
   const sendToClient = match?.aiReviewSendToClient === true || match?.ai_review_send_to_client === true;
-  if (!sendToClient) return false;
-  if (!match?.deadline || isExpiredDeadline(match.deadline)) return false;
   const skippedReason = String(match?.aiReviewSkippedReason || match?.ai_review_skipped_reason || "").toLowerCase();
-  if (skippedReason === "outside_service_area") return false;
+  if (skippedReason === "outside_service_area") return "excluded";
   const riskText = [
     match?.aiReviewReason,
     ...(toArray(match?.aiRisksOrQuestions || match?.risks_or_questions)),
   ].join(" ").toLowerCase();
-  if (riskText.includes("outside service area")) return false;
-  return true;
+  if (riskText.includes("outside service area")) return "excluded";
+
+  if (fit) {
+    if (["weak", "no_fit"].includes(fit)) return "excluded";
+    if (fit === "strong" && sendToClient) return "ai_strong";
+    if (fit === "possible" && sendToClient) return "ai_possible";
+    return "excluded";
+  }
+
+  const safety = String(match?.safetyStatus || match?.safety_status || "auto_approved").toLowerCase();
+  if (safety === "hidden" || safety === "needs_review") return "excluded";
+  const score = Number(match?.matchScore || match?.match_score || 0);
+  const label = String(match?.matchLabel || match?.match_label || "").toLowerCase();
+  if (score >= 75 || label.includes("strong") || label.includes("good")) return "rule_fallback";
+  return "excluded";
 }
 
 export function getAiReportPlacement(match) {
-  if (!isAiReportMatchEligible(match)) return "excluded";
-  const fit = normalizeFit(match?.aiReviewFit || match?.ai_review_fit);
-  if (fit === "strong") return "confirmed";
-  if (fit === "possible") return "early";
+  const kind = getReportCandidateKind(match);
+  if (kind === "ai_strong") return "confirmed";
+  if (kind === "ai_possible" || kind === "rule_fallback") return "early";
   return "excluded";
 }
 
@@ -91,10 +105,10 @@ export function sortAiReportMatches(matches) {
   return [...(matches || [])]
     .filter(isAiReportMatchEligible)
     .sort((a, b) => {
-      const fitRank = { strong: 0, possible: 1 };
-      const aFit = normalizeFit(a.aiReviewFit || a.ai_review_fit);
-      const bFit = normalizeFit(b.aiReviewFit || b.ai_review_fit);
-      const rankDiff = (fitRank[aFit] ?? 9) - (fitRank[bFit] ?? 9);
+      const kindRank = { ai_strong: 0, ai_possible: 1, rule_fallback: 2 };
+      const aKind = getReportCandidateKind(a);
+      const bKind = getReportCandidateKind(b);
+      const rankDiff = (kindRank[aKind] ?? 9) - (kindRank[bKind] ?? 9);
       if (rankDiff) return rankDiff;
       const confidenceDiff = Number(b.aiReviewConfidence || b.ai_review_confidence || 0) - Number(a.aiReviewConfidence || a.ai_review_confidence || 0);
       if (confidenceDiff) return confidenceDiff;

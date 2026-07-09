@@ -254,9 +254,7 @@ async function generateCompanyReport(
   matches: Array<Record<string, unknown>>,
   reportMode: ReportMode,
 ) {
-  const seenIds = reportMode === "new_only"
-    ? await loadPreviouslyReportedOpportunityIds(supabase, company.id)
-    : new Set<string>();
+  const seenIds = await loadPreviouslyReportedOpportunityIds(supabase, company.id);
   const ignoredIds = await loadCompanyActionOpportunityIds(supabase, company.id, ["ignored"]);
   const aiEnrichedMatches = await enrichMatchesWithAiReviews(supabase, company.id, matches);
   const reportMatches = buildCompanyReportMatches(company, aiEnrichedMatches, reportMode, {
@@ -264,6 +262,7 @@ async function generateCompanyReport(
     ignoredIds,
   });
   if (!reportMatches.length) {
+    const diagnostics = summarizeReportCandidateExclusions(aiEnrichedMatches, seenIds, ignoredIds);
     return {
       report_created: false,
       report_id: null,
@@ -271,8 +270,8 @@ async function generateCompanyReport(
       report_mode: reportMode,
       previous_report_items_excluded: seenIds.size,
       message: reportMode === "new_only"
-        ? "No new eligible opportunities found for this company. Use all current mode to generate a full current report."
-        : "No customer-report-ready matches found.",
+        ? `No new eligible opportunities found for this company. ${diagnostics}`
+        : `No customer-report-ready matches found. ${diagnostics}`,
     };
   }
 
@@ -306,17 +305,6 @@ async function generateCompanyReport(
   if (itemRows.length) {
     const { error: itemsError } = await supabase.from("report_items").insert(itemRows);
     if (itemsError) throw itemsError;
-
-    const sendRows = reportMatches.map((match) => ({
-      company_id: company.id,
-      opportunity_id: match.id,
-      channel: "report",
-      note: `Included in ${reportMode} report ${savedReport.id}`,
-    }));
-    const { error: sendsError } = await supabase
-      .from("company_opportunity_sends")
-      .upsert(sendRows, { onConflict: "company_id,opportunity_id,channel", ignoreDuplicates: true });
-    if (sendsError && !String(sendsError.message || "").includes("company_opportunity_sends")) throw sendsError;
   }
 
   return {
@@ -353,8 +341,42 @@ function isReportModeSafetyEligible(match: Record<string, unknown>, reportMode: 
   const safety = getMatchSafetyStatus(match);
   if (safety === "hidden") return false;
   if (!isAiReportMatchEligible(match)) return false;
-  if (reportMode === "new_only") return match.aiReviewSendToClient === true;
+  if (reportMode === "new_only") return true;
   return true;
+}
+
+function summarizeReportCandidateExclusions(
+  matches: Array<Record<string, unknown>>,
+  previouslyReportedIds: Set<string>,
+  ignoredIds: Set<string>,
+) {
+  let activeRelevant = 0;
+  let aiReviewed = 0;
+  let weakOrNoFit = 0;
+  let missingDeadline = 0;
+  let expired = 0;
+  let alreadySent = 0;
+  let ignored = 0;
+  let noAiReview = 0;
+  let outsideServiceArea = 0;
+  for (const match of matches) {
+    const id = String(match.id || "");
+    if (previouslyReportedIds.has(id)) alreadySent += 1;
+    if (ignoredIds.has(id)) ignored += 1;
+    if (match.aiReviewFit) aiReviewed += 1;
+    else noAiReview += 1;
+    const fit = String(match.aiReviewFit || "").toLowerCase();
+    if (fit === "weak" || fit === "no_fit") weakOrNoFit += 1;
+    const riskText = [
+      match.aiReviewReason,
+      ...(Array.isArray(match.aiRisksOrQuestions) ? match.aiRisksOrQuestions : []),
+    ].filter(Boolean).join(" ").toLowerCase();
+    if (riskText.includes("outside service area")) outsideServiceArea += 1;
+    if (!match.deadline) missingDeadline += 1;
+    else if (daysUntilDeadline(String(match.deadline || "")) < 0) expired += 1;
+    if (isAiReportMatchEligible(match) && !ignoredIds.has(id)) activeRelevant += 1;
+  }
+  return `Diagnostics: ${matches.length} matches checked, ${activeRelevant} active relevant matches found, ${aiReviewed} AI reviewed, ${noAiReview} without AI review, ${alreadySent} already sent, ${ignored} ignored, ${missingDeadline} missing deadline, ${expired} expired, ${weakOrNoFit} AI weak/no-fit, ${outsideServiceArea} outside service area.`;
 }
 
 async function enrichMatchesWithAiReviews(
@@ -405,24 +427,39 @@ async function enrichMatchesWithAiReviews(
 }
 
 function isAiReportMatchEligible(match: Record<string, unknown>) {
+  return getReportCandidateKind(match) !== "excluded";
+}
+
+function getReportCandidateKind(match: Record<string, unknown>) {
   const fit = String(match.aiReviewFit || "").toLowerCase();
-  if (fit !== "strong" && fit !== "possible") return false;
-  if (match.aiReviewSendToClient !== true) return false;
-  if (!match.deadline || daysUntilDeadline(String(match.deadline || "")) < 0) return false;
+  if (!match.deadline || daysUntilDeadline(String(match.deadline || "")) < 0) return "excluded";
   const riskText = [
     match.aiReviewReason,
     ...(Array.isArray(match.aiRisksOrQuestions) ? match.aiRisksOrQuestions : []),
   ].filter(Boolean).join(" ").toLowerCase();
-  if (riskText.includes("outside service area")) return false;
-  return true;
+  if (riskText.includes("outside service area")) return "excluded";
+
+  if (fit) {
+    if (fit === "weak" || fit === "no_fit") return "excluded";
+    if (fit === "strong" && match.aiReviewSendToClient === true) return "ai_strong";
+    if (fit === "possible" && match.aiReviewSendToClient === true) return "ai_possible";
+    return "excluded";
+  }
+
+  const safety = getMatchSafetyStatus(match);
+  if (safety === "hidden" || safety === "needs_review") return "excluded";
+  const label = String(match.matchLabel || "").toLowerCase();
+  const score = Number(match.matchScore || 0);
+  if (score >= 75 || label.includes("strong") || label.includes("good")) return "rule_fallback";
+  return "excluded";
 }
 
 function sortAiReportMatches(matches: Array<Record<string, unknown>>) {
-  const fitRank: Record<string, number> = { strong: 0, possible: 1 };
+  const kindRank: Record<string, number> = { ai_strong: 0, ai_possible: 1, rule_fallback: 2 };
   return [...matches]
     .filter(isAiReportMatchEligible)
     .sort((a, b) => {
-      const rankDiff = (fitRank[String(a.aiReviewFit || "").toLowerCase()] ?? 9) - (fitRank[String(b.aiReviewFit || "").toLowerCase()] ?? 9);
+      const rankDiff = (kindRank[getReportCandidateKind(a)] ?? 9) - (kindRank[getReportCandidateKind(b)] ?? 9);
       if (rankDiff) return rankDiff;
       const confidenceDiff = Number(b.aiReviewConfidence || 0) - Number(a.aiReviewConfidence || 0);
       if (confidenceDiff) return confidenceDiff;
@@ -448,23 +485,12 @@ function getAiReportRisks(match: Record<string, unknown>) {
 }
 
 async function loadPreviouslyReportedOpportunityIds(supabase: ReturnType<typeof createClient>, companyId: string) {
-  const { data, error } = await supabase
-    .from("reports")
-    .select("report_items(opportunity_id)")
-    .eq("company_id", companyId);
-  if (error) throw error;
   const ids = new Set<string>();
-  for (const report of data || []) {
-    const items = Array.isArray(report.report_items) ? report.report_items : [];
-    for (const item of items) {
-      if (item?.opportunity_id) ids.add(String(item.opportunity_id));
-    }
-  }
   const { data: sends, error: sendsError } = await supabase
     .from("company_opportunity_sends")
     .select("opportunity_id")
     .eq("company_id", companyId)
-    .in("channel", ["manual_email", "automated_email", "report"]);
+    .in("channel", ["manual_email", "automated_email"]);
   if (!sendsError) {
     for (const row of sends || []) {
       if (row?.opportunity_id) ids.add(String(row.opportunity_id));

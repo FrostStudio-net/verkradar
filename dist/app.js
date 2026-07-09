@@ -197,7 +197,7 @@ let state = {
     profileStatus: "all",
     plan: "all"
   },
-  adminReportMode: "new_only",
+  adminReportMode: "all_current",
   adminOpportunityFilters: {
     source: "all",
     missingDeadlineSource: "all",
@@ -1782,7 +1782,7 @@ async function generateAdminCompanyReport(companyId) {
 
   try {
     const payload = await runAdminCompanyAction(companyId, "generate_report", {
-      reportMode: state.adminReportMode || "new_only"
+      reportMode: state.adminReportMode || "all_current"
     });
     if (!payload.report_created) {
       state.adminMessage = {
@@ -2046,11 +2046,11 @@ async function runAdminCompanyAction(companyId, action, extra = {}) {
 }
 
 function formatAdminReportMode(mode) {
-  return mode === "all_current" ? "all current matches" : "new opportunities";
+  return mode === "all_current" ? "current active opportunities" : "new opportunities";
 }
 
 function getAdminNoReportMessage(payload, companyName) {
-  const mode = payload?.report_mode || state.adminReportMode || "new_only";
+  const mode = payload?.report_mode || state.adminReportMode || "all_current";
   return payload?.message || (mode === "new_only"
     ? "No new eligible opportunities found since the previous report."
     : `No customer-report-ready matches found for ${companyName}.`);
@@ -8011,8 +8011,8 @@ function renderAdminCompaniesSection(compact = false) {
           <label class="admin-inline-control">
             <span>Report mode</span>
             <select data-admin-report-mode>
-              <option value="new_only" ${state.adminReportMode !== "all_current" ? "selected" : ""}>New opportunities report</option>
-              <option value="all_current" ${state.adminReportMode === "all_current" ? "selected" : ""}>All current matches report</option>
+              <option value="new_only" ${state.adminReportMode === "new_only" ? "selected" : ""}>New opportunities report</option>
+              <option value="all_current" ${state.adminReportMode === "all_current" ? "selected" : ""}>Current active opportunities report</option>
             </select>
           </label>
         `}
@@ -8734,7 +8734,9 @@ function getReportSections(matches) {
   };
   const seen = new Set();
 
-  sortCustomerReportMatches(matches).forEach((opp) => {
+  const aiRankedMatches = sortAiReportMatches(matches);
+  const orderedMatches = aiRankedMatches.length ? aiRankedMatches : sortCustomerReportMatches(matches);
+  orderedMatches.forEach((opp) => {
     const placement = getReportOpportunityPlacement(opp);
     if (placement === "excluded") return;
     if (seen.has(opp.id)) return;
@@ -9163,7 +9165,7 @@ function renderReportOpportunityItem(opp) {
     fallbackReason: "Matched to your profile by service, location or keyword overlap.",
     qualityBadgeHtml: renderReportQualityBadge(opp),
     matchBadgeClass: badgeClass(opp.matchLabel),
-    matchLabel: formatReportMatchLabel(opp.matchLabel),
+    matchLabel: getReportFitLabel(opp),
     buyerLabel: t("buyer"),
     buyerValue: formatOpportunityBuyer(opp),
     sourceLabel: t("source"),
@@ -9180,6 +9182,13 @@ function renderReportOpportunityItem(opp) {
     formatRisk: formatReportRisk,
     escapeHtml
   });
+}
+
+function getReportFitLabel(opp) {
+  const fit = String(opp?.aiReviewFit || opp?.ai_review_fit || "").toLowerCase();
+  if (fit === "strong") return state.language === "is" ? "AI mælir með" : "AI recommended";
+  if (fit === "possible") return state.language === "is" ? "AI mögulegt" : "AI possible";
+  return formatReportMatchLabel(opp.matchLabel);
 }
 
 function renderReportQualityBadge(opp) {
