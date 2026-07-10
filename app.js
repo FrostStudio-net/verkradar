@@ -74,6 +74,7 @@ import {
   renderOpportunityModalPage,
   renderPricingPage,
   renderProfileFormPage,
+  renderPublicSignupUnavailablePage,
   renderReportArchiveRowPage,
   renderReportOpportunityItemPage,
   renderReportOpportunitySectionPage,
@@ -90,6 +91,7 @@ import {
   sortAiReportMatches,
   splitInput,
   stripHtmlFromString,
+  submitTrialRequest,
   supabaseClient,
   translate,
   uniqueStrings
@@ -1007,9 +1009,15 @@ document.addEventListener("submit", async (event) => {
 
   if (event.target.id === "trial-request-form") {
     event.preventDefault();
-    state.trialRequestSubmitted = true;
-    render();
-    scrollToPageTop();
+    try {
+      await submitTrialRequest(new FormData(event.target));
+      state.trialRequestSubmitted = true;
+      render();
+      scrollToPageTop();
+    } catch (error) {
+      console.error("Trial request failed:", error);
+      showToast(state.language === "is" ? "Gat ekki sent beiðni." : "Could not submit request.", "error");
+    }
     return;
   }
 
@@ -3461,7 +3469,7 @@ function requireAuthPage() {
       <h1>${escapeHtml(t("authRequiredTitle"))}</h1>
       <p>${escapeHtml(t("authRequiredText"))}</p>
       <button class="btn btn-primary" data-action="go" data-href="/login">${escapeHtml(t("login"))}</button>
-      <button class="btn btn-secondary" data-action="go" data-href="/signup">${escapeHtml(t("createAccount"))}</button>
+      <button class="btn btn-secondary" data-action="go" data-href="/trial">${escapeHtml(t("createFreeDemoProfile"))}</button>
     </section>
   `);
 }
@@ -6320,6 +6328,15 @@ function renderSignup() {
         <p>${escapeHtml(t("alreadyLoggedInText"))}</p>
       </section>
     `);
+  }
+
+  const inviteToken = state.pendingInviteToken || getInviteTokenFromRoute(state.route);
+  if (!inviteToken) {
+    return renderShell(renderPublicSignupUnavailablePage({
+      t,
+      escapeHtml,
+      trialHref: "/trial"
+    }));
   }
 
   return renderShell(renderSignupPage({

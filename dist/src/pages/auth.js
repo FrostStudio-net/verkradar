@@ -132,3 +132,26 @@ export function renderSignupPage({ t, escapeHtml, authForm, authSubmitting, auth
     </section>
   `;
 }
+
+export function renderPublicSignupUnavailablePage({ t, escapeHtml, trialHref = "/trial" }) {
+  return `
+    <section class="auth-page">
+      <div class="auth-layout">
+        <div class="auth-copy">
+          <p class="eyebrow">${escapeHtml(t("trialRequestEyebrow"))}</p>
+          <h1>${escapeHtml(t("publicSignupUnavailableTitle"))}</h1>
+          <p>${escapeHtml(t("publicSignupUnavailableText"))}</p>
+        </div>
+        <div class="auth-form-column">
+          <div class="auth-card">
+            <p>${escapeHtml(t("publicSignupUnavailableHelp"))}</p>
+            <div class="auth-actions">
+              <button class="btn btn-primary btn-large" type="button" data-action="go" data-href="${escapeHtml(trialHref)}">${escapeHtml(t("createFreeDemoProfile"))}</button>
+              <button class="btn btn-secondary btn-large" type="button" data-action="go" data-href="/login">${escapeHtml(t("login"))}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  `;
+}

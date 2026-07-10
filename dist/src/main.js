@@ -9,7 +9,7 @@ export { mergeAiReviewsIntoAdminMatches } from "./services/matchDisplay.js";
 export { renderAdminDailyPipelinePanel } from "./pages/adminAutomation.js";
 export { renderAdminCompanyAccessPanel } from "./pages/adminCompanyAccess.js";
 export { renderAcceptInvitePage } from "./pages/acceptInvite.js";
-export { renderForgotPasswordPage, renderLoginPage, renderResetPasswordPage, renderSignupPage } from "./pages/auth.js";
+export { renderForgotPasswordPage, renderLoginPage, renderPublicSignupUnavailablePage, renderResetPasswordPage, renderSignupPage } from "./pages/auth.js";
 export { renderAdminAutomaticAiReviewPanel, renderAdminCompanyAiReviewPanel, renderAdminCompanyMatchList } from "./pages/adminAiReviews.js";
 export { renderDashboardEmptyStatePage, renderDashboardPage, renderOpportunityCardPage, renderOpportunityModalPage } from "./pages/dashboard.js";
 export { renderLegalPageContent } from "./pages/legal.js";
@@ -24,6 +24,7 @@ export {
   renderReportSummaryCardPage
 } from "./pages/reports.js";
 export { renderSettingsPage } from "./pages/settings.js";
+export { submitTrialRequest } from "./services/trialRequests.js";
 export { localizeLegacyReportContent } from "./services/reports.js";
 export { buildReportEmail } from "./services/reportDelivery.js";
 export { cleanReportReasons, getReportEmailStatus, getReportScoreLabel, getReportStatusBadge, getReportUiLabel, getReportVerificationSentence, normalizeReportRisk } from "./services/reportLocalization.js";
