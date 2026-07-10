@@ -3559,12 +3559,18 @@ body.modal-open {
 .pricing-card {
   display: flex;
   flex-direction: column;
-  padding: 26px;
+  gap: 14px;
+  padding: 28px;
   position: relative;
 }
 
+.pricing-card h2 {
+  margin: 0;
+}
+
 .pricing-card .check-list {
-  margin-bottom: 24px;
+  margin: 4px 0 22px;
+  line-height: 1.48;
 }
 
 .pricing-cta {
@@ -3579,9 +3585,10 @@ body.modal-open {
 }
 
 .pricing-subtext {
-  margin: -8px 0 14px;
+  margin: -12px 0 4px;
   color: var(--muted);
   font-size: 14px;
+  line-height: 1.25;
 }
 
 .trial-request-layout {
@@ -3618,8 +3625,10 @@ body.modal-open {
 }
 
 .price {
+  margin: 2px 0 0;
   font-size: 34px;
   font-weight: 900;
+  line-height: 1;
 }
 
 .price span {
@@ -3629,15 +3638,14 @@ body.modal-open {
 }
 
 .popular {
-  position: absolute;
-  top: 16px;
-  right: 16px;
+  align-self: flex-start;
   background: rgba(215,255,63,0.16);
   color: #ecff99;
   padding: 7px 10px;
   border-radius: var(--radius-sm);
   font-size: 12px;
   font-weight: 800;
+  line-height: 1.1;
 }
 
 .note-panel, .danger-zone {
