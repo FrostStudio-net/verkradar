@@ -138,6 +138,7 @@ let state = {
   invitePreviewDebug: null,
   inviteAccepting: false,
   trialRequestSubmitted: false,
+  trialRequestError: "",
   user: null,
   currentUser: null,
   isAdmin: false,
@@ -1009,6 +1010,7 @@ document.addEventListener("submit", async (event) => {
 
   if (event.target.id === "trial-request-form") {
     event.preventDefault();
+    state.trialRequestError = "";
     try {
       await submitTrialRequest(new FormData(event.target));
       state.trialRequestSubmitted = true;
@@ -1016,7 +1018,10 @@ document.addEventListener("submit", async (event) => {
       scrollToPageTop();
     } catch (error) {
       console.error("Trial request failed:", error);
-      showToast(state.language === "is" ? "Gat ekki sent beiðni." : "Could not submit request.", "error");
+      state.trialRequestSubmitted = false;
+      state.trialRequestError = t("trialRequestError");
+      render();
+      showToast(t("trialRequestError"), "error");
     }
     return;
   }
@@ -10065,7 +10070,8 @@ function renderTrialRequest() {
   return renderShell(renderTrialRequestPage({
     t,
     escapeHtml,
-    submitted: state.trialRequestSubmitted
+    submitted: state.trialRequestSubmitted,
+    error: state.trialRequestError
   }));
 }
 

@@ -256,7 +256,7 @@ function pricingCard(plan, { t, escapeHtml, trialHref }) {
   `;
 }
 
-export function renderTrialRequestPage({ t, escapeHtml, submitted = false }) {
+export function renderTrialRequestPage({ t, escapeHtml, submitted = false, error = "" }) {
   return `
     <section class="page-head pricing-head">
       <p class="eyebrow">${escapeHtml(t("trialRequestEyebrow"))}</p>
@@ -269,6 +269,11 @@ export function renderTrialRequestPage({ t, escapeHtml, submitted = false }) {
         ${submitted ? `
           <div class="admin-message is-success">
             <span>${escapeHtml(t("trialRequestSuccess"))}</span>
+          </div>
+        ` : ""}
+        ${error ? `
+          <div class="admin-message is-error">
+            <span>${escapeHtml(error)}</span>
           </div>
         ` : ""}
         <label class="form-group">${escapeHtml(t("trialCompany"))}<input type="text" name="company" autocomplete="organization" required /></label>
