@@ -83,6 +83,7 @@ import {
   renderResetPasswordPage,
   renderSettingsPage,
   renderSignupPage,
+  renderTrialRequestPage,
   previewCompanyInvite,
   setStoredPendingInviteToken,
   shouldPreserveInviteForRoute,
@@ -134,6 +135,7 @@ let state = {
   invitePreviewErrorToken: "",
   invitePreviewDebug: null,
   inviteAccepting: false,
+  trialRequestSubmitted: false,
   user: null,
   currentUser: null,
   isAdmin: false,
@@ -1003,6 +1005,14 @@ document.addEventListener("submit", async (event) => {
     return;
   }
 
+  if (event.target.id === "trial-request-form") {
+    event.preventDefault();
+    state.trialRequestSubmitted = true;
+    render();
+    scrollToPageTop();
+    return;
+  }
+
   if (event.target.id === "forgot-password-form") {
     event.preventDefault();
     const form = new FormData(event.target);
@@ -1198,7 +1208,7 @@ function getPostAuthRoute() {
 }
 
 function getTrialAccessHref() {
-  if (!state.user && !state.currentUser) return "/signup";
+  if (!state.user && !state.currentUser) return "/trial";
   return state.profile ? "/dashboard" : "/onboarding";
 }
 
@@ -5829,6 +5839,7 @@ function render() {
   else if (route === "/dashboard") html = state.user ? renderDashboard() : requireAuthPage();
   else if (route === "/report") html = state.user ? renderReport() : requireAuthPage();
   else if (route === "/pricing") html = renderPricing();
+  else if (route === "/trial") html = renderTrialRequest();
   else if (route === "/privacy") html = renderPrivacyPolicy();
   else if (route === "/terms") html = renderTermsOfService();
   else if (route === "/data-sources") html = renderDataSourcesPage();
@@ -6100,7 +6111,7 @@ function renderMobileAccountSection(headerCta, isLoggedIn) {
 }
 
 function getHeaderCta(isLoggedIn, hasProfile) {
-  if (!isLoggedIn) return { href: "/signup", label: t("getStarted") };
+  if (!isLoggedIn) return { href: "/trial", label: t("getStarted") };
   if (!hasProfile) return { href: "/onboarding", label: t("createProfile") };
   return null;
 }
@@ -6172,7 +6183,8 @@ function renderLogin() {
     authForm: state.authForm,
     authSubmitting: state.authSubmitting,
     authMessage: state.authMessage,
-    signupHref: getInviteAwareAuthHref("/signup"),
+    signupHref: state.pendingInviteToken ? getInviteAwareAuthHref("/signup") : "/trial",
+    signupLabel: state.pendingInviteToken ? t("createAccount") : t("createFreeDemoProfile"),
     forgotPasswordHref: getInviteAwareAuthHref("/forgot-password")
   }));
 }
@@ -10028,7 +10040,15 @@ function renderPricing() {
   return renderShell(renderPricingPage({
     t,
     escapeHtml,
-    trialHref: "/signup"
+    trialHref: "/trial"
+  }));
+}
+
+function renderTrialRequest() {
+  return renderShell(renderTrialRequestPage({
+    t,
+    escapeHtml,
+    submitted: state.trialRequestSubmitted
   }));
 }
 

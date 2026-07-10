@@ -17,7 +17,8 @@ function renderAuthFormMessage({ authMessage, escapeHtml }) {
   `;
 }
 
-export function renderLoginPage({ t, escapeHtml, authForm, authSubmitting, authMessage, signupHref = "/signup", forgotPasswordHref = "/forgot-password" }) {
+export function renderLoginPage({ t, escapeHtml, authForm, authSubmitting, authMessage, signupHref = "/signup", signupLabel = "", forgotPasswordHref = "/forgot-password" }) {
+  const secondaryCta = signupLabel || t("createAccount");
   return `
     <section class="auth-page">
       <div class="auth-layout">
@@ -38,7 +39,7 @@ export function renderLoginPage({ t, escapeHtml, authForm, authSubmitting, authM
                 ${authSubmitting ? escapeHtml(t("loggingIn")) : escapeHtml(t("login"))}
               </button>
             </div>
-            <p class="auth-switch">${escapeHtml(t("newToVerkRadar"))} <button type="button" data-action="go" data-href="${escapeHtml(signupHref)}">${escapeHtml(t("createAccount"))}</button></p>
+            <p class="auth-switch">${escapeHtml(t("newToVerkRadar"))} <button type="button" data-action="go" data-href="${escapeHtml(signupHref)}">${escapeHtml(secondaryCta)}</button></p>
           </form>
         </div>
       </div>

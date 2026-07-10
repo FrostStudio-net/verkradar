@@ -13,7 +13,7 @@ export { renderForgotPasswordPage, renderLoginPage, renderResetPasswordPage, ren
 export { renderAdminAutomaticAiReviewPanel, renderAdminCompanyAiReviewPanel, renderAdminCompanyMatchList } from "./pages/adminAiReviews.js";
 export { renderDashboardEmptyStatePage, renderDashboardPage, renderOpportunityCardPage, renderOpportunityModalPage } from "./pages/dashboard.js";
 export { renderLegalPageContent } from "./pages/legal.js";
-export { renderLandingPage, renderPricingPage } from "./pages/public.js";
+export { renderLandingPage, renderPricingPage, renderTrialRequestPage } from "./pages/public.js";
 export { renderProfileFormPage } from "./pages/profile.js";
 export {
   renderReportArchiveRowPage,

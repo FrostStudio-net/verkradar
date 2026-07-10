@@ -640,6 +640,15 @@ h3 {
   text-wrap: balance;
 }
 
+.shot-metric small {
+  display: block;
+  margin-top: 5px;
+  color: #525252;
+  font-size: 13px;
+  line-height: 1.2;
+  text-align: right;
+}
+
 .shot-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -3567,6 +3576,27 @@ body.modal-open {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.35;
+}
+
+.pricing-subtext {
+  margin: -8px 0 14px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.trial-request-layout {
+  width: min(760px, 100%);
+  margin: 0 auto 90px;
+}
+
+.trial-request-card {
+  display: grid;
+  gap: 16px;
+  padding: 28px;
+}
+
+.trial-request-card textarea {
+  resize: vertical;
 }
 
 .auth-message-actions {

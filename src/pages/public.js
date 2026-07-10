@@ -2,9 +2,9 @@ export function renderLandingPage({ t, escapeHtml, language, trialHref }) {
   const isIcelandic = language === "is";
   const heroSamples = isIcelandic
     ? [
-        { title: "Gatnagerð og lagnir við nýtt hverfi", type: "1", score: "Sterk samsvörun · Skilafrestur eftir 10 daga" },
+        { title: "Gatnagerð og lagnir við nýtt hverfi", type: "1", score: "Mælt með · Skilafrestur eftir 10 daga" },
         { title: "Lóðarframkvæmdir við skóla", type: "2", score: "Passar við lóðarvinnu · Staðfesta gögn" },
-        { title: "Bílastæði og yfirborðsfrágangur", type: "3", score: "Möguleg samsvörun · Opna heimild" }
+        { title: "Bílastæði og yfirborðsfrágangur", type: "3", score: "Mögulegt tækifæri · Opna heimild" }
       ]
     : [
         { title: "Roadworks and utilities for a new neighborhood", type: "1", score: "Strong match · Deadline in 10 days" },
@@ -52,7 +52,10 @@ export function renderLandingPage({ t, escapeHtml, language, trialHref }) {
         </div>
         <div class="shot-metric">
           <span>${escapeHtml(t("bestOpenMatch"))}</span>
-          <strong>${escapeHtml(isIcelandic ? "3 verkefni sem passa" : "3 matching projects")}</strong>
+          <div>
+            <strong>${escapeHtml(isIcelandic ? "3 tækifæri" : "3 opportunities")}</strong>
+            <small>${escapeHtml(isIcelandic ? "sem gætu passað" : "that may fit")}</small>
+          </div>
         </div>
         <div class="shot-row is-active">
           <div>
@@ -139,7 +142,7 @@ export function renderLandingPage({ t, escapeHtml, language, trialHref }) {
         <article class="report-item">
           <h3>${escapeHtml(isIcelandic ? "Gatnagerð og lagnir á Akranesi" : "Roadworks and utilities in Akranes")}</h3>
           <p><strong>${escapeHtml(t("buyer"))}:</strong> ${escapeHtml(isIcelandic ? "Akraneskaupstaður" : "Akranes Municipality")}</p>
-          <p><strong>${escapeHtml(t("deadline"))}:</strong> ${escapeHtml(t("daysLeft", { count: 18 }))} · <strong>${escapeHtml(t("possibleMatch"))}:</strong> 92/100</p>
+          <p><strong>${escapeHtml(t("deadline"))}:</strong> ${escapeHtml(t("daysLeft", { count: 18 }))} · <strong>${escapeHtml(isIcelandic ? "Mögulegt tækifæri" : t("possibleMatch"))}:</strong> 92/100</p>
           <ul>
             <li>${escapeHtml(isIcelandic ? "Nefnir gatnagerð og lagnir sem passa við verkflokka fyrirtækisins." : "Mentions roadworks and utilities that match the company profile.")}</li>
             <li>${escapeHtml(isIcelandic ? "Svæðið er innan valins þjónustusvæðis." : "The area is inside the selected service region.")}</li>
@@ -150,7 +153,7 @@ export function renderLandingPage({ t, escapeHtml, language, trialHref }) {
         <article class="report-item">
           <h3>${escapeHtml(isIcelandic ? "Lóðarframkvæmdir við Myllubakkaskóla" : "Site works at Myllubakkaskóli")}</h3>
           <p><strong>${escapeHtml(t("buyer"))}:</strong> ${escapeHtml(isIcelandic ? "Reykjanesbær" : "Reykjanesbær Municipality")}</p>
-          <p><strong>${escapeHtml(t("deadline"))}:</strong> ${escapeHtml(t("daysLeft", { count: 24 }))} · <strong>${escapeHtml(t("possibleMatch"))}:</strong> 86/100</p>
+          <p><strong>${escapeHtml(t("deadline"))}:</strong> ${escapeHtml(t("daysLeft", { count: 24 }))} · <strong>${escapeHtml(isIcelandic ? "Mögulegt tækifæri" : t("possibleMatch"))}:</strong> 86/100</p>
           <ul>
             <li>${escapeHtml(isIcelandic ? "Inniheldur leitarorð: lóðarframkvæmdir, yfirborðsfrágangur." : "Contains keywords: site works, surface finishing.")}</li>
             <li>${escapeHtml(isIcelandic ? "Passar við jarðvinnu, frágang og verk á lóðum." : "Fits earthworks, finishing and site work services.")}</li>
@@ -159,7 +162,7 @@ export function renderLandingPage({ t, escapeHtml, language, trialHref }) {
         <article class="report-item">
           <h3>${escapeHtml(isIcelandic ? "Verðfyrirspurn - Sandbakki - gatnagerð" : "Quote request - Sandbakki roadworks")}</h3>
           <p><strong>${escapeHtml(t("buyer"))}:</strong> ${escapeHtml(isIcelandic ? "Opinber verkkaupi" : "Public buyer")}</p>
-          <p><strong>${escapeHtml(t("deadline"))}:</strong> ${escapeHtml(t("daysLeft", { count: 11 }))} · <strong>${escapeHtml(t("possibleMatch"))}:</strong> 83/100</p>
+          <p><strong>${escapeHtml(t("deadline"))}:</strong> ${escapeHtml(t("daysLeft", { count: 11 }))} · <strong>${escapeHtml(isIcelandic ? "Mögulegt tækifæri" : t("possibleMatch"))}:</strong> 83/100</p>
           <ul>
             <li>${escapeHtml(isIcelandic ? "Skýr verðfyrirspurn með gatnagerð í titli." : "Clear quote request with roadworks in the title.")}</li>
             <li>${escapeHtml(isIcelandic ? "Stuttur frestur, því þarf að bregðast hratt við." : "Short deadline, so it needs quick review.")}</li>
@@ -180,43 +183,47 @@ export function renderLandingPage({ t, escapeHtml, language, trialHref }) {
 export function renderPricingPage({ t, escapeHtml, trialHref }) {
   const plans = [
     {
-      key: "basic",
-      name: t("pricingStarter"),
-      price: "9.900 kr",
+      key: "trial",
+      name: t("pricingTrialPlan"),
+      price: t("pricingTrialPrice"),
+      subtext: t("pricingTrialSubtext"),
       items: [
-        t("pricingWeeklyReport"),
-        t("pricingFiveMatches"),
-        t("pricingBasicMatching"),
-        t("pricingDeadlineReminders"),
-        t("pricingOneProfile")
-      ]
+        t("pricingTrialManualProfile"),
+        t("pricingTrialFiltering"),
+        t("pricingTrialReportIfRelevant"),
+        t("pricingTrialNoCommitment"),
+        t("pricingTrialNoCard")
+      ],
+      cta: t("pricingTrialCta")
     },
     {
-      key: "pro",
-      name: t("pricingGrowth"),
-      price: "19.900 kr",
+      key: "monitoring",
+      name: t("pricingMonitoringPlan"),
+      price: t("pricingMonitoringPrice"),
+      subtext: t("pricingMonitoringSubtext"),
       highlighted: true,
       items: [
-        t("pricingEverythingStarter"),
-        t("pricingMoreSources"),
-        t("pricingSummaries"),
-        t("pricingLabels"),
-        t("pricingSaved"),
-        t("pricingArchive")
-      ]
+        t("pricingMonitoringSources"),
+        t("pricingMonitoringEmail"),
+        t("pricingMonitoringFilters"),
+        t("pricingMonitoringReminders"),
+        t("pricingMonitoringFeedback"),
+        t("pricingOneProfile")
+      ],
+      cta: t("pricingMonitoringCta")
     },
     {
-      key: "priority",
-      name: t("pricingPro"),
-      price: "29.900 kr",
+      key: "custom",
+      name: t("pricingCustomPlan"),
+      price: t("pricingCustomPrice"),
       items: [
-        t("pricingEverythingGrowth"),
-        t("pricingDocumentSummaries"),
-        t("pricingRequirements"),
-        t("pricingRiskWarnings"),
-        t("pricingBidChecklist"),
-        t("pricingPrioritySupport")
-      ]
+        t("pricingCustomProfiles"),
+        t("pricingCustomServices"),
+        t("pricingCustomMonitoring"),
+        t("pricingCustomPriorityReview"),
+        t("pricingCustomAudience")
+      ],
+      cta: t("pricingCustomCta")
     }
   ];
   return `
@@ -234,17 +241,46 @@ export function renderPricingPage({ t, escapeHtml, trialHref }) {
 
 function pricingCard(plan, { t, escapeHtml, trialHref }) {
   const highlighted = Boolean(plan.highlighted);
-  const href = `${trialHref}${String(trialHref).includes("?") ? "&" : "?"}plan=${encodeURIComponent(plan.key || "basic")}`;
+  const href = `${trialHref}${String(trialHref).includes("?") ? "&" : "?"}plan=${encodeURIComponent(plan.key || "trial")}`;
   return `
     <div class="pricing-card ${highlighted ? "highlighted" : ""}">
       ${highlighted ? `<span class="popular">${escapeHtml(t("pricingBadge"))}</span>` : ""}
       <h2>${escapeHtml(plan.name)}</h2>
-      <p class="price">${escapeHtml(plan.price)}<span>${escapeHtml(t("pricingMonth"))}</span></p>
+      <p class="price">${escapeHtml(plan.price)}</p>
+      ${plan.subtext ? `<p class="pricing-subtext">${escapeHtml(plan.subtext)}</p>` : ""}
       <ul class="check-list">
         ${plan.items.map((i) => `<li>${escapeHtml(i)}</li>`).join("")}
       </ul>
-      <button class="btn pricing-cta ${highlighted ? "btn-primary" : "btn-secondary"}" data-action="go" data-href="${escapeHtml(href)}">${escapeHtml(t("pricingCta"))}</button>
-      <p class="pricing-trial-note">${escapeHtml(t("pricingTrialNoCard"))}</p>
+      <button class="btn pricing-cta ${highlighted ? "btn-primary" : "btn-secondary"}" data-action="go" data-href="${escapeHtml(href)}">${escapeHtml(plan.cta || t("pricingTrialCta"))}</button>
     </div>
+  `;
+}
+
+export function renderTrialRequestPage({ t, escapeHtml, submitted = false }) {
+  return `
+    <section class="page-head pricing-head">
+      <p class="eyebrow">${escapeHtml(t("trialRequestEyebrow"))}</p>
+      <h1>${escapeHtml(t("trialRequestTitle"))}</h1>
+      <p>${escapeHtml(t("trialRequestSubtitle"))}</p>
+    </section>
+
+    <section class="trial-request-layout">
+      <form id="trial-request-form" class="form-card trial-request-card">
+        ${submitted ? `
+          <div class="admin-message is-success">
+            <span>${escapeHtml(t("trialRequestSuccess"))}</span>
+          </div>
+        ` : ""}
+        <label class="form-group">${escapeHtml(t("trialCompany"))}<input type="text" name="company" autocomplete="organization" required /></label>
+        <label class="form-group">${escapeHtml(t("trialContact"))}<input type="text" name="contact" autocomplete="name" required /></label>
+        <label class="form-group">${escapeHtml(t("trialEmail"))}<input type="email" name="email" autocomplete="email" required /></label>
+        <label class="form-group">${escapeHtml(t("trialPhone"))}<input type="tel" name="phone" autocomplete="tel" /></label>
+        <label class="form-group">${escapeHtml(t("trialServices"))}<textarea name="services" rows="4" required></textarea></label>
+        <label class="form-group">${escapeHtml(t("trialRegions"))}<textarea name="regions" rows="3" required></textarea></label>
+        <label class="form-group">${escapeHtml(t("trialNotes"))}<textarea name="notes" rows="3"></textarea></label>
+        <p class="muted-text">${escapeHtml(t("trialRequestHelper"))}</p>
+        <button class="btn btn-primary btn-large" type="submit">${escapeHtml(t("trialRequestSubmit"))}</button>
+      </form>
+    </section>
   `;
 }
