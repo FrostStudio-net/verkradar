@@ -2218,6 +2218,163 @@ select option:checked {
   color: var(--text);
 }
 
+.daily-pipeline-result {
+  display: grid;
+  gap: 18px;
+  margin-top: 16px;
+}
+
+.daily-pipeline-section {
+  display: grid;
+  gap: 12px;
+}
+
+.daily-pipeline-section h3,
+.daily-pipeline-section h4 {
+  margin: 0;
+}
+
+.daily-pipeline-heading,
+.daily-company-header,
+.daily-match-top,
+.daily-match-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.daily-pipeline-heading span,
+.daily-company-skips,
+.daily-match-meta,
+.daily-match-top p {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.daily-pipeline-kpis,
+.daily-company-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+}
+
+.daily-kpi,
+.daily-company-card,
+.daily-match-card,
+.daily-pipeline-diagnostics {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.035);
+}
+
+.daily-kpi {
+  padding: 12px;
+  display: grid;
+  gap: 4px;
+}
+
+.daily-kpi strong {
+  font-size: 1.45rem;
+  line-height: 1;
+}
+
+.daily-kpi span,
+.daily-company-stats span {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.daily-company-card,
+.daily-match-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.daily-company-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.daily-company-stats span {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+}
+
+.daily-company-stats strong {
+  color: var(--text);
+}
+
+.daily-company-skips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.daily-company-match-titles,
+.daily-match-reasons ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+}
+
+.daily-match-list {
+  display: grid;
+  gap: 12px;
+}
+
+.daily-match-badges,
+.daily-match-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.daily-match-badges span {
+  border: 1px solid rgba(215,255,63,0.18);
+  background: rgba(215,255,63,0.07);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 0.78rem;
+  padding: 5px 8px;
+}
+
+.daily-match-badges .is-warning {
+  border-color: rgba(255,198,92,0.35);
+  background: rgba(255,198,92,0.1);
+}
+
+.daily-match-reasons,
+.daily-match-risk {
+  display: grid;
+  gap: 5px;
+  font-size: 0.9rem;
+}
+
+.daily-match-risk {
+  border-left: 3px solid rgba(255,198,92,0.65);
+  padding-left: 10px;
+  color: var(--muted);
+}
+
+.daily-pipeline-diagnostics {
+  padding: 12px;
+}
+
+.daily-pipeline-diagnostics pre {
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--muted);
+}
+
 .admin-ai-match-list span {
   overflow-wrap: anywhere;
 }
