@@ -1294,8 +1294,13 @@ function navigate(route) {
 
 function getPostAuthRoute() {
   if (!state.user && !state.currentUser) return "/";
-  if (state.pendingInviteToken && shouldPreserveInviteForRoute(state.route)) return `/accept-invite?token=${encodeURIComponent(state.pendingInviteToken)}`;
+  const inviteToken = getPendingInviteToken();
+  if (inviteToken) return `/accept-invite?token=${encodeURIComponent(inviteToken)}`;
   return state.profile ? "/dashboard" : "/onboarding";
+}
+
+function getPendingInviteToken() {
+  return sanitizeInviteToken(getInviteTokenFromRoute(state.route) || state.pendingInviteToken || getStoredPendingInviteToken());
 }
 
 function getTrialAccessHref() {
@@ -1339,6 +1344,18 @@ function redirectAuthenticatedPublicRoute({ replace = false } = {}) {
 }
 
 function afterRouteRender() {
+  const inviteToken = getPendingInviteToken();
+  if (state.user && inviteToken && getRoutePath(state.route) !== "/accept-invite") {
+    state.pendingInviteToken = setStoredPendingInviteToken(inviteToken);
+    updateInviteDebug({
+      pending_invite_present: true,
+      onboarding_redirect_blocked: true,
+      final_route: `/accept-invite?token=${encodeURIComponent(inviteToken)}`,
+    });
+    replaceHashRoute(`/accept-invite?token=${encodeURIComponent(inviteToken)}`);
+    render();
+    return;
+  }
   if (getRoutePath(state.route) === "/accept-invite") {
     loadCompanyInvitePreview();
     if (state.user && !state.inviteAccepting && !state.invitePreviewError) acceptPendingCompanyInvite();
@@ -3712,7 +3729,20 @@ async function bootApp() {
     await loadCurrentSession();
     state.authLoaded = true;
 
-    if (state.currentUser) {
+    if (state.currentUser && getPendingInviteToken()) {
+      const inviteToken = getPendingInviteToken();
+      state.pendingInviteToken = setStoredPendingInviteToken(inviteToken);
+      state.adminLoaded = true;
+      state.profileLoaded = true;
+      replaceHashRoute(`/accept-invite?token=${encodeURIComponent(inviteToken)}`);
+      await updateInviteDebug({
+        callback_invite_present: Boolean(getInviteTokenFromRoute(state.route)),
+        pending_invite_present: true,
+        onboarding_redirect_blocked: true,
+        accept_started_from_callback: true,
+        final_route: `/accept-invite?token=${encodeURIComponent(inviteToken)}`,
+      });
+    } else if (state.currentUser) {
       await checkAdminStatus();
       await loadProfileFromSupabase({ overwriteDraft: true, showGlobalLoading: true });
     } else {
@@ -6397,7 +6427,12 @@ async function acceptPendingCompanyInvite() {
     state.pendingInviteToken = "";
     state.invitePreview = null;
     state.invitePreviewError = null;
+    await updateInviteDebug({ membership_refresh_attempted: true });
     await loadProfileFromSupabase({ overwriteDraft: true });
+    await updateInviteDebug({
+      membership_refresh_succeeded: Boolean(state.companyId),
+      final_route: "/dashboard",
+    });
     navigate("/dashboard");
   } catch (error) {
     console.error("Failed to accept company invite:", error);

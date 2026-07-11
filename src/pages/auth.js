@@ -105,13 +105,14 @@ export function renderResetPasswordPage({ t, escapeHtml, authForm, authSubmittin
 
 export function renderSignupPage({ t, escapeHtml, authForm, authSubmitting, authMessage, loginHref = "/login", inviteEmail = "", isInviteSignup = false }) {
   const emailValue = inviteEmail || authForm.email;
+  const subtitle = isInviteSignup ? t("inviteCreateAccountSubtitle") : t("createAccountSubtitle");
   return `
     <section class="auth-page">
       <div class="auth-layout">
         <div class="auth-copy">
           <p class="eyebrow">${escapeHtml(t("createAccount"))}</p>
           <h1>${escapeHtml(t("createAccountTitle"))}</h1>
-          <p>${escapeHtml(t("createAccountSubtitle"))}</p>
+          <p>${escapeHtml(subtitle)}</p>
         </div>
 
         <div class="auth-form-column">
