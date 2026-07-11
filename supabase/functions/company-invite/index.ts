@@ -92,33 +92,43 @@ Deno.serve(async (req) => {
           diagnostics,
         }, 410);
       }
-      const authHeader = req.headers.get("authorization") || "";
-      if (!authHeader) {
+      const authHeader = req.headers.get("Authorization") || req.headers.get("authorization") || "";
+      const accessToken = authHeader.replace(/^Bearer\s+/i, "").trim();
+      if (!authHeader || !/^Bearer\s+/i.test(authHeader) || !accessToken) {
         const diagnostics = await buildAcceptDiagnostics(token, invite, {
           lookupDiagnostics: lookup.diagnostics,
           invalidReason: "no_session",
           updateAttempted: false,
           updateSucceeded: false,
-          authorizationHeaderPresent: false,
+          authorizationHeaderPresent: Boolean(authHeader),
+          bearerTokenPresent: Boolean(accessToken),
+          bearerTokenLength: accessToken.length,
+          getUserAttempted: false,
+          getUserSucceeded: false,
         });
         console.info("company_invite_accept_failed", diagnostics);
         return json({ error: "Log in to accept this invite.", code: "no_session", diagnostics }, 401);
       }
-      const userClient = createClient(supabaseUrl, anonKey, {
-        global: { headers: { Authorization: authHeader } },
+      const authClient = createClient(supabaseUrl, anonKey, {
         auth: { persistSession: false },
       });
-      const { data: userData, error: userError } = await userClient.auth.getUser();
+      const { data: userData, error: userError } = await authClient.auth.getUser(accessToken);
       if (userError || !userData.user) {
         const diagnostics = await buildAcceptDiagnostics(token, invite, {
           lookupDiagnostics: lookup.diagnostics,
-          invalidReason: "no_session",
+          invalidReason: "invalid_session",
           updateAttempted: false,
           updateSucceeded: false,
           authorizationHeaderPresent: true,
+          bearerTokenPresent: true,
+          bearerTokenLength: accessToken.length,
+          getUserAttempted: true,
+          getUserSucceeded: false,
+          getUserErrorCode: userError?.code || "",
+          getUserErrorMessage: userError?.message || "",
         });
         console.info("company_invite_accept_failed", diagnostics);
-        return json({ error: "Log in to accept this invite.", code: "no_session", diagnostics }, 401);
+        return json({ error: "Log in to accept this invite.", code: "invalid_session", diagnostics }, 401);
       }
 
       const userEmail = normalizeEmail(userData.user.email);
@@ -131,6 +141,10 @@ Deno.serve(async (req) => {
           updateAttempted: false,
           updateSucceeded: false,
           authorizationHeaderPresent: true,
+          bearerTokenPresent: true,
+          bearerTokenLength: accessToken.length,
+          getUserAttempted: true,
+          getUserSucceeded: true,
         });
         console.info("company_invite_accept_failed", diagnostics);
         return json({
@@ -151,6 +165,10 @@ Deno.serve(async (req) => {
             updateAttempted: false,
             updateSucceeded: true,
             authorizationHeaderPresent: true,
+            bearerTokenPresent: true,
+            bearerTokenLength: accessToken.length,
+            getUserAttempted: true,
+            getUserSucceeded: true,
           });
           console.info("company_invite_accept_already_active", diagnostics);
           return json({
@@ -176,6 +194,10 @@ Deno.serve(async (req) => {
           updateAttempted: false,
           updateSucceeded: false,
           authorizationHeaderPresent: true,
+          bearerTokenPresent: true,
+          bearerTokenLength: accessToken.length,
+          getUserAttempted: true,
+          getUserSucceeded: true,
         });
         console.info("company_invite_accept_failed", diagnostics);
         return json({
@@ -208,6 +230,10 @@ Deno.serve(async (req) => {
         updateAttempted: true,
         updateSucceeded: true,
         authorizationHeaderPresent: true,
+        bearerTokenPresent: true,
+        bearerTokenLength: accessToken.length,
+        getUserAttempted: true,
+        getUserSucceeded: true,
       });
       console.info("company_invite_accept_success", diagnostics);
 
@@ -343,6 +369,12 @@ async function buildAcceptDiagnostics(token: string, invite: Record<string, unkn
   updateAttempted?: boolean;
   updateSucceeded?: boolean;
   authorizationHeaderPresent?: boolean;
+  bearerTokenPresent?: boolean;
+  bearerTokenLength?: number;
+  getUserAttempted?: boolean;
+  getUserSucceeded?: boolean;
+  getUserErrorCode?: string;
+  getUserErrorMessage?: string;
 }) {
   const tokenHash = token ? await sha256Hex(token) : "";
   const userEmail = normalizeEmail(options.userEmail || options.userData?.email);
@@ -362,6 +394,12 @@ async function buildAcceptDiagnostics(token: string, invite: Record<string, unkn
     auth_user_email: userEmail,
     email_match: Boolean(userEmail && normalizeEmail(invitedEmail) === userEmail),
     authorization_header_present: Boolean(options.authorizationHeaderPresent),
+    bearer_token_present: Boolean(options.bearerTokenPresent),
+    bearer_token_length: Number(options.bearerTokenLength || 0),
+    get_user_attempted: Boolean(options.getUserAttempted),
+    get_user_succeeded: Boolean(options.getUserSucceeded),
+    get_user_error_code: options.getUserErrorCode || "",
+    get_user_error_message: options.getUserErrorMessage || "",
     invalid_reason: options.invalidReason || "",
     accept_error_reason: options.invalidReason || "",
     update_attempted: Boolean(options.updateAttempted),
