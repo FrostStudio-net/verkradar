@@ -38,9 +38,13 @@ import {
   getAiReportPlacement,
   getCleanOpportunityBuyer,
   getInitialPendingInviteToken,
+  getInviteAuthDiagnostics,
+  getInviteRouteDiagnostics,
   getInviteTokenFromRoute,
   getStoredPendingInviteToken,
+  getStoredPendingInviteTokenSource,
   inferLocationFromSourceName,
+  isInviteDebugEnabled,
   isUuid,
   localizeLegacyReportContent,
   loadActiveCompanyMemberships,
@@ -137,6 +141,7 @@ let state = {
   invitePreviewErrorToken: "",
   invitePreviewDebug: null,
   inviteAccepting: false,
+  inviteAuthEvent: "",
   trialRequestSubmitted: false,
   trialRequestError: "",
   user: null,
@@ -354,6 +359,21 @@ function clearPendingInviteState() {
   state.invitePreviewErrorToken = "";
   state.invitePreviewDebug = null;
   state.inviteAccepting = false;
+}
+
+async function updateInviteDebug(extra = {}) {
+  if (!isInviteDebugEnabled()) return;
+  const authDiagnostics = await getInviteAuthDiagnostics(state.inviteAuthEvent);
+  state.invitePreviewDebug = {
+    ...getInviteRouteDiagnostics(state.route),
+    ...authDiagnostics,
+    ...(state.invitePreviewDebug || {}),
+    ...extra,
+  };
+}
+
+function shouldClearInviteTokenForReason(reason) {
+  return ["expired", "revoked"].includes(String(reason || ""));
 }
 
 function getInviteAwareAuthHref(path) {
@@ -3566,6 +3586,7 @@ function registerAuthListener() {
   supabaseClient.auth.onAuthStateChange(async (event, session) => {
     if (!hasBooted) return;
 
+    state.inviteAuthEvent = event || "";
     state.user = session?.user || null;
     state.currentUser = state.user;
 
@@ -6226,7 +6247,7 @@ function renderResetPassword() {
 
 function renderAcceptInvite() {
   const routeToken = getInviteTokenFromRoute(state.route);
-  const token = state.pendingInviteToken || (state.invitePreviewErrorToken === routeToken ? "" : routeToken);
+  const token = routeToken || (state.invitePreviewErrorToken === routeToken ? "" : state.pendingInviteToken);
   if (token && token !== state.pendingInviteToken && state.invitePreviewErrorToken !== token) {
     state.pendingInviteToken = setStoredPendingInviteToken(token);
   }
@@ -6236,7 +6257,7 @@ function renderAcceptInvite() {
     loading: state.invitePreviewLoading,
     error: state.invitePreviewError,
     debugInfo: state.invitePreviewDebug,
-    showDebug: state.isAdmin || ["localhost", "127.0.0.1"].includes(window.location.hostname),
+    showDebug: isInviteDebugEnabled(),
     user: state.user,
     accepting: state.inviteAccepting,
     signupHref: getInviteAwareAuthHref("/signup"),
@@ -6246,15 +6267,20 @@ function renderAcceptInvite() {
 }
 
 async function loadCompanyInvitePreview() {
-  const token = state.pendingInviteToken || getInviteTokenFromRoute(state.route);
+  const token = getInviteTokenFromRoute(state.route) || state.pendingInviteToken || getStoredPendingInviteToken();
   if (!token || state.invitePreviewLoading) return;
   if (state.invitePreview?.token === token || state.invitePreviewErrorToken === token) return;
   state.pendingInviteToken = setStoredPendingInviteToken(token);
   state.invitePreviewLoading = true;
   state.invitePreviewError = null;
+  await updateInviteDebug({ preview_request_sent: true });
   render();
   try {
     const payload = await previewCompanyInvite(token);
+    await updateInviteDebug({
+      ...(payload.__debug || {}),
+      ...(payload.diagnostics || {}),
+    });
     if (payload.status && payload.status !== "valid") {
       const error = new Error("Invite is not valid.");
       error.details = payload;
@@ -6265,14 +6291,19 @@ async function loadCompanyInvitePreview() {
   } catch (error) {
     console.error("Failed to preview company invite:", error);
     if (error?.details?.diagnostics) console.warn("Invite preview diagnostics:", error.details.diagnostics);
+    const diagnostics = {
+      ...(error?.details?.__debug || {}),
+      ...(error?.details?.diagnostics || {}),
+    };
     state.invitePreview = null;
-    state.invitePreviewDebug = error?.details?.diagnostics || null;
-    clearStoredPendingInviteToken();
-    state.pendingInviteToken = "";
+    await updateInviteDebug(diagnostics);
+    const invalidReason = diagnostics.invalid_reason || error?.details?.status || error?.details?.code;
+    if (shouldClearInviteTokenForReason(invalidReason)) {
+      clearStoredPendingInviteToken();
+      state.pendingInviteToken = "";
+    }
     state.invitePreviewErrorToken = token;
-    state.invitePreviewError = state.language === "is"
-      ? "Aðgangsboðið fannst ekki, er útrunnið eða hefur verið afturkallað."
-      : "The invite was not found, has expired, or has been revoked.";
+    state.invitePreviewError = formatInvitePreviewError(invalidReason);
   } finally {
     state.invitePreviewLoading = false;
     render();
@@ -6283,7 +6314,7 @@ async function acceptPendingCompanyInvite() {
   const routeToken = getInviteTokenFromRoute(state.route);
   const storedToken = getStoredPendingInviteToken();
   const token = routeToken || state.pendingInviteToken || storedToken;
-  const tokenSource = routeToken ? "url" : state.pendingInviteToken || storedToken ? "localStorage" : "missing";
+  const tokenSource = getStoredPendingInviteTokenSource(state.route);
   if (!token) return;
   if (!state.user) {
     navigate(getInviteAwareAuthHref("/login"));
@@ -6291,9 +6322,18 @@ async function acceptPendingCompanyInvite() {
   }
   state.inviteAccepting = true;
   state.invitePreviewError = null;
+  await updateInviteDebug({
+    accept_request_sent: true,
+    token_source: tokenSource,
+  });
   render();
   try {
-    await acceptCompanyInvite(token);
+    const payload = await acceptCompanyInvite(token);
+    await updateInviteDebug({
+      ...(payload.__debug || {}),
+      ...(payload.diagnostics || {}),
+      token_source: tokenSource,
+    });
     clearStoredPendingInviteToken();
     state.pendingInviteToken = "";
     state.invitePreview = null;
@@ -6303,24 +6343,55 @@ async function acceptPendingCompanyInvite() {
   } catch (error) {
     console.error("Failed to accept company invite:", error);
     const invitedEmail = error?.details?.invited_email || state.invitePreview?.invited_email || state.invitePreview?.email || "";
-    state.invitePreviewDebug = {
-      ...(state.invitePreviewDebug || {}),
+    const diagnostics = {
+      ...(error?.details?.__debug || {}),
       ...(error?.details?.diagnostics || {}),
       token_source: tokenSource,
       user_email: state.user?.email || "",
       invited_email: invitedEmail,
       accept_error_reason: error?.details?.code || error?.details?.diagnostics?.accept_error_reason || errorMessage(error)
     };
+    await updateInviteDebug(diagnostics);
     console.warn("Invite accept diagnostics:", state.invitePreviewDebug);
-    state.invitePreviewError = error?.details?.code === "email_mismatch" && invitedEmail
-      ? (state.language === "is"
-        ? `Þessi aðgangsboð var sent á ${invitedEmail}. Skráðu þig inn með því netfangi.`
-        : `This invite was sent to ${invitedEmail}. Log in with that email address.`)
-      : formatSupabaseError(error);
+    state.invitePreviewError = formatInviteAcceptError(error, invitedEmail);
   } finally {
     state.inviteAccepting = false;
     render();
   }
+}
+
+function formatInvitePreviewError(reason) {
+  const normalized = String(reason || "").toLowerCase();
+  if (normalized === "expired") return state.language === "is" ? "Aðgangsboðið er útrunnið." : "This invite has expired.";
+  if (normalized === "revoked") return state.language === "is" ? "Aðgangsboðið hefur verið afturkallað." : "This invite has been revoked.";
+  if (normalized === "already_accepted") return state.language === "is" ? "Aðgangsboðið hefur þegar verið samþykkt. Skráðu þig inn með rétta netfanginu." : "This invite has already been accepted. Log in with the correct email address.";
+  if (normalized === "no_hash_match" || normalized === "invite_invalid") return state.language === "is" ? "Aðgangsboðið fannst ekki." : "The invite was not found.";
+  if (normalized === "query_error") return state.language === "is" ? "Villa kom upp við að staðfesta aðgangsboðið. Reyndu aftur eða hafðu samband." : "There was a problem validating the invite. Try again or contact support.";
+  return state.language === "is"
+    ? "Aðgangsboðið fannst ekki, er útrunnið eða hefur verið afturkallað."
+    : "The invite was not found, has expired, or has been revoked.";
+}
+
+function formatInviteAcceptError(error, invitedEmail = "") {
+  const code = String(error?.details?.code || "").toLowerCase();
+  const reason = String(error?.details?.diagnostics?.invalid_reason || error?.details?.diagnostics?.accept_error_reason || "").toLowerCase();
+  const normalized = code || reason;
+  if (normalized === "no_session") {
+    return state.language === "is"
+      ? "Bíð eftir innskráningu til að virkja aðganginn. Ef þú varst að staðfesta netfangið skaltu skrá þig inn og opna boðið aftur."
+      : "Waiting for login to activate the invite. If you just confirmed your email, log in and open the invite again.";
+  }
+  if ((normalized === "email_mismatch" || code === "email_mismatch") && invitedEmail) {
+    return state.language === "is"
+      ? `Þetta boð var sent á ${invitedEmail}. Skráðu þig inn með því netfangi.`
+      : `This invite was sent to ${invitedEmail}. Log in with that email address.`;
+  }
+  if (reason === "expired") return state.language === "is" ? "Aðgangsboðið er útrunnið." : "This invite has expired.";
+  if (reason === "revoked") return state.language === "is" ? "Aðgangsboðið hefur verið afturkallað." : "This invite has been revoked.";
+  if (code === "invite_already_accepted" || reason === "already_accepted") {
+    return state.language === "is" ? "Aðgangsboðið hefur þegar verið samþykkt." : "This invite has already been accepted.";
+  }
+  return formatSupabaseError(error);
 }
 
 function renderSignup() {

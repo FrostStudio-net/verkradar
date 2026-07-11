@@ -2687,12 +2687,37 @@ select option:checked {
 }
 
 .admin-invite-debug {
-  display: grid;
-  gap: 4px;
   color: var(--muted);
   font-size: 0.76rem;
   line-height: 1.35;
   overflow-wrap: anywhere;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+}
+
+.admin-invite-debug summary {
+  cursor: pointer;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.admin-invite-debug-group {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.admin-invite-debug-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.36fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.admin-invite-debug code {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
 }
 
 .admin-filters input,

@@ -3,6 +3,7 @@ import { SUPABASE_ANON_KEY, SUPABASE_URL, supabaseClient } from "../supabaseClie
 const PENDING_INVITE_TOKEN_KEY = "verkradar_pending_invite_token";
 const PERSISTED_INVITE_FLOW_KEY = "verkradar_pending_invite_flow";
 const LEGACY_PENDING_INVITE_TOKEN_KEY = "verkradar_legacy_pending_invite_token";
+const INVITE_DEBUG_KEY = "vr_debug_invite";
 const INVITE_FLOW_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 
 export function normalizeAccessEmail(email) {
@@ -20,6 +21,63 @@ export function getInviteTokenFromRoute(route) {
   const raw = String(route || "");
   const query = raw.includes("?") ? raw.slice(raw.indexOf("?") + 1) : "";
   return new URLSearchParams(query).get("token") || new URLSearchParams(query).get("invite") || "";
+}
+
+export function isInviteDebugEnabled() {
+  try {
+    return localStorage.getItem(INVITE_DEBUG_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function getInviteRouteDiagnostics(route) {
+  const routeToken = getInviteTokenFromRoute(route);
+  const storage = readStoredInviteTokens();
+  const tokenSource = routeToken
+    ? "url"
+    : storage.sessionToken
+      ? "sessionStorage"
+      : storage.localToken
+        ? "localStorage"
+        : "missing";
+  const token = routeToken || storage.sessionToken || storage.localToken || "";
+  return {
+    current_url: maskInviteTokenInText(window.location.href),
+    current_hash: maskInviteTokenInText(window.location.hash || ""),
+    token_source: tokenSource,
+    token_present: Boolean(token),
+    token_length: token.length,
+    localStorage_pending_token_present: Boolean(storage.localToken),
+    sessionStorage_pending_token_present: Boolean(storage.sessionToken),
+  };
+}
+
+export async function getInviteAuthDiagnostics(authEvent = "") {
+  try {
+    const { data, error } = supabaseClient
+      ? await supabaseClient.auth.getSession()
+      : { data: { session: null }, error: null };
+    const user = data?.session?.user || null;
+    return {
+      auth_session_present: Boolean(data?.session && !error),
+      auth_user_id_present: Boolean(user?.id),
+      auth_user_email: user?.email || "",
+      email_confirmed_at_present: Boolean(user?.email_confirmed_at || user?.confirmed_at),
+      auth_event_received: authEvent || "",
+      access_token_present: Boolean(data?.session?.access_token),
+    };
+  } catch (error) {
+    return {
+      auth_session_present: false,
+      auth_user_id_present: false,
+      auth_user_email: "",
+      email_confirmed_at_present: false,
+      auth_event_received: authEvent || "",
+      access_token_present: false,
+      auth_error: error instanceof Error ? error.message : String(error || "Unknown auth error"),
+    };
+  }
 }
 
 export function isAcceptInviteRoute(route) {
@@ -59,6 +117,14 @@ export function getStoredPendingInviteToken() {
   } catch {
     return "";
   }
+}
+
+export function getStoredPendingInviteTokenSource(route) {
+  if (getInviteTokenFromRoute(route)) return "url";
+  const storage = readStoredInviteTokens();
+  if (storage.sessionToken) return "sessionStorage";
+  if (storage.localToken) return "localStorage";
+  return "missing";
 }
 
 export function setStoredPendingInviteToken(token) {
@@ -103,29 +169,55 @@ export async function previewCompanyInvite(token) {
     body: JSON.stringify({ action: "preview", token }),
   });
   const payload = await readJsonResponse(response);
+  const debug = {
+    preview_request_sent: true,
+    preview_status: response.status,
+    preview_response_body: sanitizeInvitePayload(payload),
+  };
   if (!response.ok) {
     const error = new Error(payload.error || payload.message || `Invite preview failed with status ${response.status}`);
-    error.details = payload;
+    error.details = { ...payload, __http_status: response.status, __debug: debug };
     throw error;
   }
-  return payload;
+  return { ...payload, __debug: debug };
 }
 
 export async function acceptCompanyInvite(token) {
   const endpoint = getCompanyInviteEndpoint();
   if (!endpoint) throw new Error("Company invite function is not configured.");
+  let headers;
+  try {
+    headers = await getAuthenticatedHeaders();
+  } catch (error) {
+    const wrapped = new Error(error instanceof Error ? error.message : "You must be logged in to accept this invite.");
+    wrapped.details = {
+      code: "no_session",
+      diagnostics: {
+        accept_request_sent: false,
+        authorization_header_included: false,
+        accept_error_reason: "no_session",
+      },
+    };
+    throw wrapped;
+  }
   const response = await fetch(endpoint, {
     method: "POST",
-    headers: await getAuthenticatedHeaders(),
+    headers,
     body: JSON.stringify({ action: "accept", token }),
   });
   const payload = await readJsonResponse(response);
+  const debug = {
+    accept_request_sent: true,
+    authorization_header_included: Boolean(headers.authorization),
+    accept_http_status: response.status,
+    accept_response_body: sanitizeInvitePayload(payload),
+  };
   if (!response.ok) {
     const error = new Error(payload.error || payload.message || `Invite acceptance failed with status ${response.status}`);
-    error.details = payload;
+    error.details = { ...payload, __http_status: response.status, __debug: debug };
     throw error;
   }
-  return payload;
+  return { ...payload, __debug: debug };
 }
 
 export async function claimInvitedCompanyMemberships(supabaseClient, user, options = {}) {
@@ -183,6 +275,46 @@ function getAnonHeaders() {
   const anonKey = window.VERKRADAR_SUPABASE_ANON_KEY || SUPABASE_ANON_KEY;
   if (anonKey) headers.apikey = anonKey;
   return headers;
+}
+
+function readStoredInviteTokens() {
+  const result = { sessionToken: "", localToken: "" };
+  try {
+    result.sessionToken = String(sessionStorage.getItem(PENDING_INVITE_TOKEN_KEY) || "").trim();
+  } catch {
+    // Ignore storage failures.
+  }
+  try {
+    const flow = JSON.parse(localStorage.getItem(PERSISTED_INVITE_FLOW_KEY) || "null");
+    if (flow?.token && flow?.expires_at && new Date(flow.expires_at).getTime() >= Date.now()) {
+      result.localToken = String(flow.token || "").trim();
+    }
+  } catch {
+    // Ignore storage failures.
+  }
+  return result;
+}
+
+function maskInviteTokenInText(value) {
+  return String(value || "").replace(/([?&](?:token|invite)=)[^&#]+/gi, "$1[redacted]");
+}
+
+function sanitizeInvitePayload(payload) {
+  if (!payload || typeof payload !== "object") return payload || null;
+  const { diagnostics, ok, status, code, error, message, company_name, invited_email, role, expires_at, company_id } = payload;
+  return {
+    ok,
+    status,
+    code,
+    error,
+    message,
+    company_name,
+    invited_email,
+    role,
+    expires_at,
+    company_id,
+    diagnostics,
+  };
 }
 
 async function getAuthenticatedHeaders() {

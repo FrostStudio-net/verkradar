@@ -77,34 +77,82 @@ Deno.serve(async (req) => {
 
     if (action === "accept") {
       if (inviteStatus === "expired" || inviteStatus === "revoked") {
+        const diagnostics = await buildAcceptDiagnostics(token, invite, {
+          lookupDiagnostics: lookup.diagnostics,
+          invalidReason: inviteStatus,
+          updateAttempted: false,
+          updateSucceeded: false,
+          authorizationHeaderPresent: Boolean(req.headers.get("authorization")),
+        });
+        console.info("company_invite_accept_failed", diagnostics);
         return json({
           error: "Invite not found, expired, or revoked.",
           code: "invite_invalid",
           status: inviteStatus,
-          diagnostics: await buildAcceptDiagnostics(token, invite, "", "invalid_status"),
+          diagnostics,
         }, 410);
       }
       const authHeader = req.headers.get("authorization") || "";
-      if (!authHeader) return json({ error: "Log in to accept this invite." }, 401);
+      if (!authHeader) {
+        const diagnostics = await buildAcceptDiagnostics(token, invite, {
+          lookupDiagnostics: lookup.diagnostics,
+          invalidReason: "no_session",
+          updateAttempted: false,
+          updateSucceeded: false,
+          authorizationHeaderPresent: false,
+        });
+        console.info("company_invite_accept_failed", diagnostics);
+        return json({ error: "Log in to accept this invite.", code: "no_session", diagnostics }, 401);
+      }
       const userClient = createClient(supabaseUrl, anonKey, {
         global: { headers: { Authorization: authHeader } },
         auth: { persistSession: false },
       });
       const { data: userData, error: userError } = await userClient.auth.getUser();
-      if (userError || !userData.user) return json({ error: "Log in to accept this invite." }, 401);
+      if (userError || !userData.user) {
+        const diagnostics = await buildAcceptDiagnostics(token, invite, {
+          lookupDiagnostics: lookup.diagnostics,
+          invalidReason: "no_session",
+          updateAttempted: false,
+          updateSucceeded: false,
+          authorizationHeaderPresent: true,
+        });
+        console.info("company_invite_accept_failed", diagnostics);
+        return json({ error: "Log in to accept this invite.", code: "no_session", diagnostics }, 401);
+      }
 
       const userEmail = normalizeEmail(userData.user.email);
       if (userEmail !== normalizeEmail(invite.email)) {
+        const diagnostics = await buildAcceptDiagnostics(token, invite, {
+          lookupDiagnostics: lookup.diagnostics,
+          userData: userData.user,
+          userEmail,
+          invalidReason: "email_mismatch",
+          updateAttempted: false,
+          updateSucceeded: false,
+          authorizationHeaderPresent: true,
+        });
+        console.info("company_invite_accept_failed", diagnostics);
         return json({
           error: `This invite was sent to ${invite.email}. Log in with that email address.`,
           code: "email_mismatch",
           invited_email: invite.email,
-          diagnostics: await buildAcceptDiagnostics(token, invite, userEmail, "email_mismatch"),
+          diagnostics,
         }, 403);
       }
 
       if (invite.status === "active") {
         if (invite.user_id === userData.user.id) {
+          const diagnostics = await buildAcceptDiagnostics(token, invite, {
+            lookupDiagnostics: lookup.diagnostics,
+            userData: userData.user,
+            userEmail,
+            invalidReason: "already_active",
+            updateAttempted: false,
+            updateSucceeded: true,
+            authorizationHeaderPresent: true,
+          });
+          console.info("company_invite_accept_already_active", diagnostics);
           return json({
             ok: true,
             company_id: invite.company_id,
@@ -117,13 +165,24 @@ Deno.serve(async (req) => {
               status: invite.status,
               accepted_at: invite.accepted_at,
             },
+            diagnostics,
           });
         }
+        const diagnostics = await buildAcceptDiagnostics(token, invite, {
+          lookupDiagnostics: lookup.diagnostics,
+          userData: userData.user,
+          userEmail,
+          invalidReason: "already_accepted",
+          updateAttempted: false,
+          updateSucceeded: false,
+          authorizationHeaderPresent: true,
+        });
+        console.info("company_invite_accept_failed", diagnostics);
         return json({
           error: "This invite has already been accepted.",
           code: "invite_already_accepted",
           status: "active",
-          diagnostics: await buildAcceptDiagnostics(token, invite, userEmail, "already_accepted"),
+          diagnostics,
         }, 409);
       }
 
@@ -141,12 +200,23 @@ Deno.serve(async (req) => {
         .select("id, company_id, email, role, status, accepted_at")
         .single();
       if (error) throw error;
+      const diagnostics = await buildAcceptDiagnostics(token, invite, {
+        lookupDiagnostics: lookup.diagnostics,
+        userData: userData.user,
+        userEmail,
+        invalidReason: "",
+        updateAttempted: true,
+        updateSucceeded: true,
+        authorizationHeaderPresent: true,
+      });
+      console.info("company_invite_accept_success", diagnostics);
 
       return json({
         ok: true,
         company_id: data.company_id,
         company_name: invite.company_name || "Company",
         member: data,
+        diagnostics,
       });
     }
   } catch (error) {
@@ -179,18 +249,17 @@ async function loadInviteByToken(supabase: ReturnType<typeof createClient>, toke
       lookup_table: "company_members",
       lookup_column: "token_hash",
     };
-  const validInvite = rows.find((row) => getInviteStatus(row) === "valid");
-  if (validInvite) {
-    const invite = await attachCompanyName(supabase, validInvite);
+  const selectedInvite = rows.find((row) => getInviteStatus(row) === "valid") || rows[0] || null;
+  if (selectedInvite) {
+    const invite = await attachCompanyName(supabase, selectedInvite);
     return {
       invite,
       diagnostics: buildPreviewDiagnostics(token, true, diagnosticRow(invite)),
     };
   }
-  const latest = rows[0] || null;
   return {
     invite: null,
-    diagnostics: buildPreviewDiagnostics(token, rows.length > 0, diagnosticRow(latest)),
+    diagnostics: buildPreviewDiagnostics(token, false, diagnosticRow(null)),
   };
 }
 
@@ -266,17 +335,37 @@ async function buildQueryErrorDiagnostics(token: string) {
   };
 }
 
-async function buildAcceptDiagnostics(token: string, invite: Record<string, unknown>, userEmail: string, reason: string) {
+async function buildAcceptDiagnostics(token: string, invite: Record<string, unknown>, options: {
+  lookupDiagnostics?: Record<string, unknown>;
+  userData?: { id?: unknown; email?: unknown };
+  userEmail?: string;
+  invalidReason?: string;
+  updateAttempted?: boolean;
+  updateSucceeded?: boolean;
+  authorizationHeaderPresent?: boolean;
+}) {
   const tokenHash = token ? await sha256Hex(token) : "";
+  const userEmail = normalizeEmail(options.userEmail || options.userData?.email);
+  const invitedEmail = String(invite.email || "");
+  const lookupDiagnostics = options.lookupDiagnostics || {};
   return {
+    action: "accept",
     token_received: Boolean(token),
     token_length: token.length,
     computed_hash_prefix: tokenHash.slice(0, 8),
-    user_email: userEmail,
-    invited_email: String(invite.email || ""),
-    accept_error_reason: reason,
+    lookup_found: Boolean(lookupDiagnostics.lookup_found ?? invite?.id),
+    matching_rows_count: Number(lookupDiagnostics.matching_rows_count || 0),
     invite_status: getInviteStatus(invite),
-    expires_at: String(invite.expires_at || ""),
+    invite_expires_at: String(invite.expires_at || ""),
+    invited_email: invitedEmail,
+    auth_user_id_present: Boolean(options.userData?.id),
+    auth_user_email: userEmail,
+    email_match: Boolean(userEmail && normalizeEmail(invitedEmail) === userEmail),
+    authorization_header_present: Boolean(options.authorizationHeaderPresent),
+    invalid_reason: options.invalidReason || "",
+    accept_error_reason: options.invalidReason || "",
+    update_attempted: Boolean(options.updateAttempted),
+    update_succeeded: Boolean(options.updateSucceeded),
   };
 }
 

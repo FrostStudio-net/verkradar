@@ -76,23 +76,94 @@ export function renderAcceptInvitePage(options) {
 }
 
 function renderInviteDebug(debugInfo, escapeHtml) {
+  const groups = [
+    {
+      title: "Route/token",
+      fields: [
+        "current_url",
+        "current_hash",
+        "token_source",
+        "token_present",
+        "token_length",
+        "localStorage_pending_token_present",
+        "sessionStorage_pending_token_present",
+      ],
+    },
+    {
+      title: "Auth",
+      fields: [
+        "auth_session_present",
+        "auth_user_id_present",
+        "auth_user_email",
+        "email_confirmed_at_present",
+        "auth_event_received",
+        "access_token_present",
+      ],
+    },
+    {
+      title: "Preview",
+      fields: [
+        "preview_request_sent",
+        "preview_status",
+        "preview_response_body",
+      ],
+    },
+    {
+      title: "Accept",
+      fields: [
+        "accept_request_sent",
+        "authorization_header_included",
+        "accept_http_status",
+        "accept_response_body",
+        "accept_error_reason",
+      ],
+    },
+    {
+      title: "Backend lookup",
+      fields: [
+        "action",
+        "token_received",
+        "token_length",
+        "computed_hash_prefix",
+        "lookup_found",
+        "matching_rows_count",
+        "invite_status",
+        "invite_expires_at",
+        "latest_invite_status",
+        "latest_invite_expires_at",
+        "invited_email",
+        "auth_user_id_present",
+        "auth_user_email",
+        "email_match",
+        "authorization_header_present",
+        "invalid_reason",
+        "update_attempted",
+        "update_succeeded",
+      ],
+    },
+  ];
+
   return `
-    <div class="admin-invite-debug">
-      <span>invalid_reason: ${escapeHtml(debugInfo.invalid_reason || debugInfo.reason || "unknown")}</span>
-      <span>token_received: ${debugInfo.token_received ? "true" : "false"}</span>
-      <span>token_length: ${Number(debugInfo.token_length || 0)}</span>
-      <span>computed_hash_prefix: ${escapeHtml(debugInfo.computed_hash_prefix || "missing")}</span>
-      <span>lookup_found: ${debugInfo.lookup_found ? "true" : "false"}</span>
-      <span>matching_rows_count: ${Number(debugInfo.matching_rows_count || 0)}</span>
-      <span>latest_invite_status: ${escapeHtml(debugInfo.latest_invite_status || "none")}</span>
-      <span>latest_invite_expires_at: ${escapeHtml(debugInfo.latest_invite_expires_at || "none")}</span>
-      <span>lookup_table: ${escapeHtml(debugInfo.lookup_table || "unknown")}</span>
-      <span>lookup_column: ${escapeHtml(debugInfo.lookup_column || "unknown")}</span>
-      <span>token_source: ${escapeHtml(debugInfo.token_source || "unknown")}</span>
-      <span>user_email: ${escapeHtml(debugInfo.user_email || "none")}</span>
-      <span>invited_email: ${escapeHtml(debugInfo.invited_email || "none")}</span>
-      <span>accept_error_reason: ${escapeHtml(debugInfo.accept_error_reason || "none")}</span>
-      <span>invite_status: ${escapeHtml(debugInfo.invite_status || "none")}</span>
+    <details class="admin-invite-debug">
+      <summary>Invite diagnostics</summary>
+      ${groups.map((group) => `
+        <div class="admin-invite-debug-group">
+          <strong>${escapeHtml(group.title)}</strong>
+          ${group.fields.map((field) => renderDebugField(field, debugInfo[field], escapeHtml)).join("")}
+        </div>
+      `).join("")}
+    </details>
+  `;
+}
+
+function renderDebugField(label, value, escapeHtml) {
+  const formatted = typeof value === "object" && value !== null
+    ? JSON.stringify(value, null, 2)
+    : String(value ?? "");
+  return `
+    <div class="admin-invite-debug-row">
+      <span>${escapeHtml(label)}</span>
+      <code>${escapeHtml(formatted || "—")}</code>
     </div>
   `;
 }
