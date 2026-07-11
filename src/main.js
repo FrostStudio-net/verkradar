@@ -2,7 +2,7 @@ export { STORAGE_KEYS } from "./state.js";
 export { getInitialLanguage, translate, translations } from "./i18n.js";
 export { createEmptyProfile, DEFAULT_PROFILE, PROFILE_SUGGESTIONS } from "./services/companies.js";
 export { getLegalPageData } from "./services/legal.js";
-export { acceptCompanyInvite, buildCompanyInviteLink, claimInvitedCompanyMemberships, clearStoredPendingInviteToken, getInitialPendingInviteToken, getInviteAuthDiagnostics, getInviteRouteDiagnostics, getInviteTokenFromRoute, getStoredPendingInviteToken, getStoredPendingInviteTokenSource, isInviteDebugEnabled, loadActiveCompanyMemberships, normalizeAccessEmail, previewCompanyInvite, setStoredPendingInviteToken, shouldPreserveInviteForRoute } from "./services/companyAccess.js";
+export { acceptCompanyInvite, buildCompanyInviteLink, claimInvitedCompanyMemberships, clearStoredPendingInviteToken, getAuthCallbackInfo, getAuthCallbackRedirectUrl, getInitialPendingInviteToken, getInviteAuthDiagnostics, getInviteRouteDiagnostics, getInviteTokenFromRoute, getStoredPendingInviteToken, getStoredPendingInviteTokenSource, isInviteDebugEnabled, loadActiveCompanyMemberships, normalizeAccessEmail, previewCompanyInvite, replaceUrlWithInviteRoute, sanitizeInviteToken, setStoredPendingInviteToken, shouldPreserveInviteForRoute } from "./services/companyAccess.js";
 export { requestDailyPipelineRun } from "./services/adminAutomation.js";
 export { formatAiUsageCost, loadTodayAiUsageSummary, requestAiMatchReview, requestAutomaticAiReviewRun, requestCompanyAiReviewBatch, updateCompanyAutoAiReviewEnabled } from "./services/aiReviews.js";
 export { mergeAiReviewsIntoAdminMatches } from "./services/matchDisplay.js";

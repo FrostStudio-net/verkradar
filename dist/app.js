@@ -25,6 +25,8 @@ import {
   formatReportQualityLabel as formatReportQualityLabelBase,
   formatReportReason as formatReportReasonBase,
   formatReportRisk as formatReportRiskBase,
+  getAuthCallbackInfo,
+  getAuthCallbackRedirectUrl,
   formatShortDate,
   getReportEmailStatus,
   getReportScoreLabel,
@@ -90,6 +92,8 @@ import {
   renderSignupPage,
   renderTrialRequestPage,
   previewCompanyInvite,
+  replaceUrlWithInviteRoute,
+  sanitizeInviteToken,
   setStoredPendingInviteToken,
   shouldPreserveInviteForRoute,
   sortAiReportMatches,
@@ -142,6 +146,7 @@ let state = {
   invitePreviewDebug: null,
   inviteAccepting: false,
   inviteAuthEvent: "",
+  inviteCallbackHandled: false,
   trialRequestSubmitted: false,
   trialRequestError: "",
   user: null,
@@ -374,6 +379,59 @@ async function updateInviteDebug(extra = {}) {
 
 function shouldClearInviteTokenForReason(reason) {
   return ["expired", "revoked"].includes(String(reason || ""));
+}
+
+function isAuthCallbackPath() {
+  return window.location.pathname === "/auth/callback";
+}
+
+async function handleAuthCallbackIfPresent() {
+  const callback = getAuthCallbackInfo();
+  if (!supabaseClient || state.inviteCallbackHandled || (!isAuthCallbackPath() && !callback.hasImplicitTokens)) return false;
+  state.inviteCallbackHandled = true;
+  const inviteToken = sanitizeInviteToken(callback.invite || getStoredPendingInviteToken());
+  if (inviteToken) state.pendingInviteToken = setStoredPendingInviteToken(inviteToken);
+  await updateInviteDebug({
+    auth_flow: callback.code ? "pkce" : callback.hasImplicitTokens ? "implicit_fallback" : "unknown",
+    raw_token_had_fragment: callback.rawTokenHadFragment,
+    sanitized_token_length: inviteToken.length,
+    code_present: Boolean(callback.code),
+    exchange_code_attempted: false,
+    exchange_code_succeeded: false,
+    session_present: false,
+  });
+
+  try {
+    if (callback.code) {
+      await updateInviteDebug({ exchange_code_attempted: true });
+      const { data, error } = await supabaseClient.auth.exchangeCodeForSession(callback.code);
+      if (error) throw error;
+      await updateInviteDebug({
+        exchange_code_succeeded: true,
+        session_present: Boolean(data?.session),
+      });
+    } else if (callback.hasImplicitTokens) {
+      const { data, error } = await supabaseClient.auth.setSession({
+        access_token: callback.accessToken,
+        refresh_token: callback.refreshToken,
+      });
+      if (error) throw error;
+      await updateInviteDebug({
+        auth_flow: "implicit_fallback",
+        session_present: Boolean(data?.session),
+      });
+    }
+  } catch (error) {
+    console.error("Auth callback handling failed:", error);
+    await updateInviteDebug({
+      auth_callback_error: errorMessage(error),
+      exchange_code_succeeded: false,
+    });
+  }
+
+  const nextRoute = replaceUrlWithInviteRoute(inviteToken);
+  state.route = nextRoute;
+  return true;
 }
 
 function getInviteAwareAuthHref(path) {
@@ -3243,7 +3301,7 @@ async function getTedImportHeaders() {
 function getAuthRedirectUrl() {
   const inviteToken = state.pendingInviteToken || getStoredPendingInviteToken();
   if (inviteToken && shouldPreserveInviteForRoute(state.route)) {
-    return `${window.location.origin}/#/accept-invite?token=${encodeURIComponent(inviteToken)}`;
+    return getAuthCallbackRedirectUrl(inviteToken);
   }
   return `${window.location.origin}/#/onboarding`;
 }
@@ -3650,6 +3708,7 @@ async function bootApp() {
 
   try {
     registerAuthListener();
+    await handleAuthCallbackIfPresent();
     await loadCurrentSession();
     state.authLoaded = true;
 
