@@ -20,7 +20,52 @@ export function getCompanyInviteEndpoint() {
 export function getInviteTokenFromRoute(route) {
   const raw = String(route || "");
   const query = raw.includes("?") ? raw.slice(raw.indexOf("?") + 1) : "";
-  return new URLSearchParams(query).get("token") || new URLSearchParams(query).get("invite") || "";
+  const params = new URLSearchParams(query);
+  return sanitizeInviteToken(params.get("token") || params.get("invite") || "");
+}
+
+export function sanitizeInviteToken(value) {
+  return String(value || "").split("#")[0].trim();
+}
+
+export function getAuthCallbackInfo() {
+  const url = new URL(window.location.href);
+  const searchParams = url.searchParams;
+  const firstHash = window.location.hash || "";
+  const secondHashIndex = firstHash.indexOf("#", 1);
+  const secondFragment = secondHashIndex >= 0 ? firstHash.slice(secondHashIndex + 1) : "";
+  const hashParams = new URLSearchParams(secondFragment || firstHash.replace(/^#/, ""));
+  const rawHashRoute = firstHash.replace(/^#/, "") || "";
+  const rawHashQuery = rawHashRoute.includes("?") ? rawHashRoute.slice(rawHashRoute.indexOf("?") + 1) : "";
+  const rawHashParams = new URLSearchParams(rawHashQuery);
+  const rawInvite = searchParams.get("invite") || searchParams.get("token") || rawHashParams.get("token") || rawHashParams.get("invite") || "";
+  const invite = sanitizeInviteToken(rawInvite || getStoredPendingInviteToken());
+  const code = searchParams.get("code") || "";
+  const accessToken = hashParams.get("access_token") || "";
+  const refreshToken = hashParams.get("refresh_token") || "";
+  return {
+    isCallbackPath: url.pathname === "/auth/callback",
+    invite,
+    code,
+    accessToken,
+    refreshToken,
+    hasImplicitTokens: Boolean(accessToken && refreshToken),
+    rawTokenHadFragment: String(rawInvite || "").includes("#"),
+  };
+}
+
+export function getAuthCallbackRedirectUrl(inviteToken = "") {
+  const url = new URL("/auth/callback", window.location.origin);
+  const cleanToken = sanitizeInviteToken(inviteToken);
+  if (cleanToken) url.searchParams.set("invite", cleanToken);
+  return url.toString();
+}
+
+export function replaceUrlWithInviteRoute(inviteToken = "") {
+  const cleanToken = sanitizeInviteToken(inviteToken);
+  const route = cleanToken ? `/#/accept-invite?token=${encodeURIComponent(cleanToken)}` : "/#/";
+  window.history.replaceState(null, "", `${window.location.origin}${route}`);
+  return cleanToken ? `/accept-invite?token=${encodeURIComponent(cleanToken)}` : "/";
 }
 
 export function isInviteDebugEnabled() {
@@ -113,7 +158,7 @@ export function getStoredPendingInviteToken() {
       localStorage.removeItem(PERSISTED_INVITE_FLOW_KEY);
       return "";
     }
-    return String(flow.token || "").trim();
+    return sanitizeInviteToken(flow.token || "");
   } catch {
     return "";
   }
@@ -128,7 +173,7 @@ export function getStoredPendingInviteTokenSource(route) {
 }
 
 export function setStoredPendingInviteToken(token) {
-  const cleanToken = String(token || "").trim();
+  const cleanToken = sanitizeInviteToken(token);
   try {
     if (cleanToken) {
       sessionStorage.setItem(PENDING_INVITE_TOKEN_KEY, cleanToken);
@@ -155,7 +200,7 @@ export function clearStoredPendingInviteToken() {
 }
 
 export function buildCompanyInviteLink(token) {
-  const cleanToken = String(token || "").trim();
+  const cleanToken = sanitizeInviteToken(token);
   if (!cleanToken) return "";
   return `${window.location.origin}/#/accept-invite?token=${encodeURIComponent(cleanToken)}`;
 }
@@ -280,14 +325,14 @@ function getAnonHeaders() {
 function readStoredInviteTokens() {
   const result = { sessionToken: "", localToken: "" };
   try {
-    result.sessionToken = String(sessionStorage.getItem(PENDING_INVITE_TOKEN_KEY) || "").trim();
+    result.sessionToken = sanitizeInviteToken(sessionStorage.getItem(PENDING_INVITE_TOKEN_KEY) || "");
   } catch {
     // Ignore storage failures.
   }
   try {
     const flow = JSON.parse(localStorage.getItem(PERSISTED_INVITE_FLOW_KEY) || "null");
     if (flow?.token && flow?.expires_at && new Date(flow.expires_at).getTime() >= Date.now()) {
-      result.localToken = String(flow.token || "").trim();
+      result.localToken = sanitizeInviteToken(flow.token || "");
     }
   } catch {
     // Ignore storage failures.
