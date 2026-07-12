@@ -204,8 +204,9 @@ function renderProfileFormActions(ctx) {
 }
 
 export function renderProfileFormPage(ctx) {
+  const formId = ctx.formId || "profile-form";
   return `
-    <form id="profile-form" class="form-card settings-profile-form">
+    <form id="${ctx.escapeHtml(formId)}" class="form-card settings-profile-form">
       ${renderAccountAccessSection(ctx)}
       ${renderProfileBasicsSection(ctx)}
       ${renderProfileServicesSection(ctx)}

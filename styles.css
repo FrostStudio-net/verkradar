@@ -1902,6 +1902,64 @@ select option:checked {
   background: rgba(215,255,63,0.012);
 }
 
+.ops-table tr.is-selected td {
+  background: rgba(215,255,63,0.08);
+}
+
+.admin-trial-detail-card {
+  margin-top: 18px;
+}
+
+.admin-trial-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.admin-trial-detail-field {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.04);
+  padding: 12px;
+  min-width: 0;
+}
+
+.admin-trial-detail-field.is-wide {
+  grid-column: 1 / -1;
+}
+
+.admin-trial-detail-field span {
+  color: var(--muted);
+  display: block;
+  font-size: 12px;
+  font-weight: 800;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
+
+.admin-trial-detail-field strong {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.admin-trial-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.admin-trial-company-form-wrap {
+  border-top: 1px solid var(--line);
+  margin-top: 22px;
+  padding-top: 22px;
+}
+
+.admin-trial-company-form-wrap .settings-profile-form {
+  margin-top: 16px;
+}
+
 .missing-deadline-source-group {
   min-width: 0;
   margin-top: 16px;

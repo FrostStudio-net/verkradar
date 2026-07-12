@@ -30,6 +30,8 @@ type CompanyProfile = {
 
 type ReportMode = "new_only" | "all_current";
 
+type AdminCompanyInput = Record<string, unknown>;
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -66,6 +68,14 @@ Deno.serve(async (req) => {
     const companyId = String(body.companyId || "").trim();
     const action = String(body.action || "refresh_matches").trim();
     const reportMode: ReportMode = body.reportMode === "all_current" ? "all_current" : "new_only";
+    if (action === "create_company_from_trial_request") {
+      const trialRequestId = String(body.trialRequestId || "").trim();
+      const result = await createCompanyFromTrialRequest(adminClient, {
+        trialRequestId,
+        company: body.company || {},
+      });
+      return json({ ok: true, action, ...result });
+    }
     if (!isUuid(companyId)) return json({ error: "A valid companyId is required." }, 400);
     if (!["refresh_matches", "generate_report", "review_match", "mark_report_sent", "invite_customer", "revoke_customer_access"].includes(action)) {
       return json({ error: "Unsupported action." }, 400);
@@ -142,6 +152,102 @@ Deno.serve(async (req) => {
     return json({ error: errorMessage(error) }, 500);
   }
 });
+
+async function createCompanyFromTrialRequest(
+  supabase: ReturnType<typeof createClient>,
+  options: { trialRequestId: string; company: AdminCompanyInput },
+) {
+  if (!isUuid(options.trialRequestId)) throw new Error("A valid trialRequestId is required.");
+  const { data: request, error: requestError } = await supabase
+    .from("trial_requests")
+    .select("id, status, converted_company_id")
+    .eq("id", options.trialRequestId)
+    .maybeSingle();
+  if (requestError) throw requestError;
+  if (!request) throw new Error("Trial request not found.");
+  if (request.converted_company_id || request.status === "converted") {
+    throw new Error("This trial request has already been converted.");
+  }
+
+  const cleanProfile = normalizeAdminCompanyInput(options.company);
+  if (!cleanProfile.companyName || !cleanProfile.kennitala || !cleanProfile.contactEmail || !cleanProfile.billingEmail || !cleanProfile.contactName || !cleanProfile.phone || !cleanProfile.address || !cleanProfile.industry) {
+    throw new Error("Company name, kennitala, contact email, billing email, contact name, phone, address and industry are required.");
+  }
+
+  const now = new Date().toISOString();
+  const companyPayload = {
+    company_name: cleanProfile.companyName,
+    contact_email: cleanProfile.contactEmail,
+    kennitala: cleanProfile.kennitala,
+    billing_email: cleanProfile.billingEmail,
+    contact_name: cleanProfile.contactName,
+    phone: cleanProfile.phone,
+    address: cleanProfile.address,
+    website: cleanProfile.website || null,
+    industry: cleanProfile.industry,
+    plan: cleanProfile.selectedPlan,
+    selected_plan: cleanProfile.selectedPlan,
+    billing_status: cleanProfile.billingStatus,
+    trial_started_at: cleanProfile.trialStartedAt || now,
+    trial_ends_at: cleanProfile.trialEndsAt || new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+    base_location: cleanProfile.baseLocation || null,
+    service_areas: cleanProfile.serviceAreas,
+    willing_to_travel: cleanProfile.willingToTravel,
+    national_projects: cleanProfile.nationalProjects,
+    remote_projects: cleanProfile.remoteProjects,
+    minimum_project_value_for_travel: cleanProfile.minimumProjectValueForTravel,
+    min_project_value: cleanProfile.minProjectValue,
+    max_project_value: cleanProfile.maxProjectValue,
+    allow_unknown_value: cleanProfile.allowUnknownValue,
+    report_frequency: cleanProfile.reportFrequency,
+    report_day: cleanProfile.reportDay,
+    deadline_reminders: cleanProfile.deadlineReminders,
+    include_low_confidence: cleanProfile.includeLowConfidence,
+    auto_alert_mode: cleanProfile.autoAlertMode,
+  };
+  const { data: company, error: companyError } = await supabase
+    .from("companies")
+    .insert(companyPayload)
+    .select("id, company_name")
+    .single();
+  if (companyError) throw companyError;
+
+  const serviceRows = cleanProfile.services.map((service) => ({ company_id: company.id, service }));
+  const locationRows = cleanProfile.locations.map((location) => ({ company_id: company.id, location }));
+  const keywordRows = [
+    ...cleanProfile.includeKeywords.map((keyword) => ({ company_id: company.id, keyword, type: "include" })),
+    ...cleanProfile.excludeKeywords.map((keyword) => ({ company_id: company.id, keyword, type: "exclude" })),
+  ];
+  if (serviceRows.length) {
+    const { error } = await supabase.from("company_services").insert(serviceRows);
+    if (error) throw error;
+  }
+  if (locationRows.length) {
+    const { error } = await supabase.from("company_locations").insert(locationRows);
+    if (error) throw error;
+  }
+  if (keywordRows.length) {
+    const { error } = await supabase.from("company_keywords").insert(keywordRows);
+    if (error) throw error;
+  }
+
+  const { error: updateError } = await supabase
+    .from("trial_requests")
+    .update({
+      status: "converted",
+      converted_company_id: company.id,
+    })
+    .eq("id", options.trialRequestId)
+    .is("converted_company_id", null);
+  if (updateError) throw updateError;
+
+  return {
+    trial_request_id: options.trialRequestId,
+    company_id: company.id,
+    company_name: company.company_name,
+    trial_request_status: "converted",
+  };
+}
 
 async function markReportSent(
   supabase: ReturnType<typeof createClient>,
@@ -1956,6 +2062,52 @@ function getMatchLabel(score: number) {
   return "Weak match";
 }
 
+function normalizeAdminCompanyInput(input: AdminCompanyInput) {
+  return {
+    companyName: String(input.companyName || "").trim(),
+    kennitala: String(input.kennitala || "").trim(),
+    contactEmail: String(input.contactEmail || "").trim(),
+    billingEmail: String(input.billingEmail || input.contactEmail || "").trim(),
+    contactName: String(input.contactName || "").trim(),
+    phone: String(input.phone || "").trim(),
+    address: String(input.address || "").trim(),
+    website: String(input.website || "").trim(),
+    industry: String(input.industry || "").trim(),
+    selectedPlan: normalizePlan(String(input.selectedPlan || "basic")),
+    billingStatus: String(input.billingStatus || "trial").trim() || "trial",
+    trialStartedAt: String(input.trialStartedAt || "").trim(),
+    trialEndsAt: String(input.trialEndsAt || "").trim(),
+    services: cleanStringArray(input.services as unknown[]),
+    locations: cleanStringArray(input.locations as unknown[]),
+    includeKeywords: cleanStringArray(input.includeKeywords as unknown[]),
+    excludeKeywords: cleanStringArray(input.excludeKeywords as unknown[]),
+    baseLocation: String(input.baseLocation || "").trim(),
+    serviceAreas: cleanStringArray(input.serviceAreas as unknown[]),
+    willingToTravel: Boolean(input.willingToTravel),
+    nationalProjects: Boolean(input.nationalProjects),
+    remoteProjects: Boolean(input.remoteProjects),
+    minimumProjectValueForTravel: nullableNumber(input.minimumProjectValueForTravel),
+    minProjectValue: nullableNumber(input.minProjectValue),
+    maxProjectValue: nullableNumber(input.maxProjectValue),
+    allowUnknownValue: Boolean(input.allowUnknownValue),
+    reportFrequency: String(input.reportFrequency || "weekly").trim() || "weekly",
+    reportDay: String(input.reportDay || "monday").trim() || "monday",
+    deadlineReminders: Boolean(input.deadlineReminders),
+    includeLowConfidence: Boolean(input.includeLowConfidence),
+    autoAlertMode: String(input.autoAlertMode || "auto_safe_only").trim() || "auto_safe_only",
+  };
+}
+
+function normalizePlan(value: string) {
+  return ["basic", "pro", "priority"].includes(value) ? value : "basic";
+}
+
+function nullableNumber(value: unknown) {
+  if (value == null || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 function normalizeReportIntent(value: string) {
   const normalized = String(value || "").toLowerCase().trim();
   const aliases: Record<string, string> = {
@@ -1980,8 +2132,11 @@ function normalizeReportIntent(value: string) {
   return aliases[normalized] || "";
 }
 
-function cleanStringArray(values: unknown[]) {
-  return uniqueStrings(values.map((value) => String(value || "").trim()).filter(Boolean));
+function cleanStringArray(values: unknown) {
+  const items = Array.isArray(values)
+    ? values
+    : String(values || "").split(/[\n,;]+/);
+  return uniqueStrings(items.map((value) => String(value || "").trim()).filter(Boolean));
 }
 
 function uniqueStrings(values: string[]) {

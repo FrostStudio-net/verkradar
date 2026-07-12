@@ -24,7 +24,14 @@ export {
   renderReportSummaryCardPage
 } from "./pages/reports.js";
 export { renderSettingsPage } from "./pages/settings.js";
-export { loadAdminTrialRequests, submitTrialRequest } from "./services/trialRequests.js";
+export {
+  buildCompanyDraftFromTrialRequest,
+  createCompanyFromTrialRequest,
+  getTrialRequestStatusLabel,
+  loadAdminTrialRequests,
+  submitTrialRequest,
+  updateTrialRequestStatus
+} from "./services/trialRequests.js";
 export { localizeLegacyReportContent } from "./services/reports.js";
 export { buildReportEmail } from "./services/reportDelivery.js";
 export { cleanReportReasons, getReportEmailStatus, getReportScoreLabel, getReportStatusBadge, getReportUiLabel, getReportVerificationSentence, normalizeReportRisk } from "./services/reportLocalization.js";

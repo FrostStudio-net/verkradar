@@ -28,11 +28,14 @@ import {
   getAuthCallbackInfo,
   getAuthCallbackRedirectUrl,
   formatShortDate,
+  buildCompanyDraftFromTrialRequest,
+  createCompanyFromTrialRequest,
   getReportEmailStatus,
   getReportScoreLabel,
   getReportStatusBadge,
   getReportUiLabel,
   getReportVerificationSentence,
+  getTrialRequestStatusLabel,
   hasFutureDeadline,
   getInitialLanguage as getInitialLanguageBase,
   getLegalPageData,
@@ -103,6 +106,7 @@ import {
   submitTrialRequest,
   supabaseClient,
   translate,
+  updateTrialRequestStatus,
   uniqueStrings
 } from "./src/main.js";
 
@@ -217,6 +221,12 @@ let state = {
   adminTrialRequestsLoading: false,
   adminTrialRequestsLoaded: false,
   adminTrialRequestsError: null,
+  selectedAdminTrialRequestId: null,
+  adminTrialRequestActions: {},
+  adminTrialCompanyDraft: null,
+  adminTrialCompanySaving: false,
+  adminTrialCompanyMessage: "",
+  adminTrialCompanyError: "",
   selectedAdminReport: null,
   selectedAdminReportLoading: false,
   selectedAdminReportError: null,
@@ -653,9 +663,14 @@ document.addEventListener("click", (event) => {
     const key = action.dataset.key;
     const value = action.dataset.value;
     if (action.dataset.profileField) {
-      initializeProfileDraft();
-      state.profileDraft[action.dataset.profileField] = value;
-      markProfileDraftDirty();
+      if (action.closest?.("#admin-trial-company-form")) {
+        initializeAdminTrialCompanyDraft();
+        state.adminTrialCompanyDraft[action.dataset.profileField] = value;
+      } else {
+        initializeProfileDraft();
+        state.profileDraft[action.dataset.profileField] = value;
+        markProfileDraftDirty();
+      }
     } else {
       state.filters[key] = value;
     }
@@ -667,7 +682,11 @@ document.addEventListener("click", (event) => {
 
   if (name === "toggle-profile-suggestion") {
     event.preventDefault();
-    toggleProfileSuggestion(action.dataset.field, action.dataset.value);
+    if (action.closest?.("#admin-trial-company-form")) {
+      toggleAdminTrialCompanySuggestion(action.dataset.field, action.dataset.value);
+    } else {
+      toggleProfileSuggestion(action.dataset.field, action.dataset.value);
+    }
     return;
   }
 
@@ -755,6 +774,8 @@ document.addEventListener("click", (event) => {
     state.adminActiveTab = action.dataset.tab || "overview";
     state.selectedAdminCompanyId = null;
     state.selectedAdminReportId = null;
+    state.selectedAdminTrialRequestId = null;
+    state.adminTrialCompanyDraft = null;
     render();
   }
   if (name === "view-admin-company") {
@@ -764,6 +785,30 @@ document.addEventListener("click", (event) => {
   if (name === "close-admin-company") {
     state.selectedAdminCompanyId = null;
     render();
+  }
+  if (name === "view-admin-trial-request") {
+    state.selectedAdminTrialRequestId = id;
+    state.adminTrialCompanyDraft = null;
+    state.adminTrialCompanyMessage = "";
+    state.adminTrialCompanyError = "";
+    render();
+    return;
+  }
+  if (name === "close-admin-trial-request") {
+    state.selectedAdminTrialRequestId = null;
+    state.adminTrialCompanyDraft = null;
+    state.adminTrialCompanyMessage = "";
+    state.adminTrialCompanyError = "";
+    render();
+    return;
+  }
+  if (name === "admin-trial-request-status") {
+    updateAdminTrialRequestStatus(id, action.dataset.status || "");
+    return;
+  }
+  if (name === "admin-start-trial-company") {
+    startAdminTrialCompanyCreation(id);
+    return;
   }
   if (name === "admin-refresh-company-matches") {
     refreshAdminCompanyMatches(id);
@@ -957,6 +1002,11 @@ document.addEventListener("input", (event) => {
 
   const field = event.target.closest?.("[data-profile-field]");
   if (field) {
+    const adminTrialForm = event.target.closest?.("#admin-trial-company-form");
+    if (adminTrialForm) {
+      updateAdminTrialCompanyDraftFromForm(adminTrialForm);
+      return;
+    }
     initializeProfileDraft();
     const key = field.dataset.profileField;
     if (field.type === "checkbox") {
@@ -1061,6 +1111,11 @@ document.addEventListener("change", (event) => {
   }
 
   if (event.target.matches("[data-profile-location]")) {
+    const adminTrialForm = event.target.closest?.("#admin-trial-company-form");
+    if (adminTrialForm) {
+      updateAdminTrialCompanyDraftFromForm(adminTrialForm);
+      return;
+    }
     initializeProfileDraft();
     state.profileDraft.locations = Array.from(document.querySelectorAll("[data-profile-location]:checked"))
       .map((input) => input.value);
@@ -1070,6 +1125,11 @@ document.addEventListener("change", (event) => {
 
   const field = event.target.closest?.("[data-profile-field]");
   if (!field) return;
+  const adminTrialForm = event.target.closest?.("#admin-trial-company-form");
+  if (adminTrialForm) {
+    updateAdminTrialCompanyDraftFromForm(adminTrialForm);
+    return;
+  }
   initializeProfileDraft();
   const key = field.dataset.profileField;
   state.profileDraft[key] = field.type === "checkbox" ? field.checked : field.value;
@@ -1128,6 +1188,12 @@ document.addEventListener("submit", async (event) => {
     const form = new FormData(event.target);
     updateAdminOpportunityDraftFromForm(form);
     addOpportunity(form, event.target);
+    return;
+  }
+
+  if (event.target.id === "admin-trial-company-form") {
+    event.preventDefault();
+    await submitAdminTrialCompanyForm(event.target);
     return;
   }
 
@@ -1545,6 +1611,77 @@ async function loadTrialRequestsForAdmin() {
   } finally {
     state.adminTrialRequestsLoading = false;
     state.adminTrialRequestsLoaded = true;
+    render();
+  }
+}
+
+async function updateAdminTrialRequestStatus(requestId, status) {
+  if (!requestId) return;
+  state.adminTrialRequestActions = {
+    ...(state.adminTrialRequestActions || {}),
+    [requestId]: status
+  };
+  state.adminTrialCompanyError = "";
+  state.adminTrialCompanyMessage = "";
+  render();
+  try {
+    await updateTrialRequestStatus(requestId, status);
+    await loadTrialRequestsForAdmin();
+    showToast(status === "contacted" ? "Beiðni merkt sem haft samband." : "Beiðni hafnað.", "success");
+  } catch (error) {
+    console.error("Failed to update trial request:", error);
+    state.adminTrialCompanyError = formatSupabaseError(error);
+    showToast(state.adminTrialCompanyError, "error");
+    render();
+  } finally {
+    state.adminTrialRequestActions = {
+      ...(state.adminTrialRequestActions || {}),
+      [requestId]: null
+    };
+    render();
+  }
+}
+
+async function submitAdminTrialCompanyForm(formElement) {
+  const request = getSelectedAdminTrialRequest();
+  if (!request) return;
+  if (request.converted_company_id || request.status === "converted") {
+    state.adminTrialCompanyError = "Þessi beiðni hefur þegar verið umbreytt.";
+    render();
+    return;
+  }
+
+  updateAdminTrialCompanyDraftFromForm(formElement);
+  const profile = normalizeAdminTrialCompanyDraftForSave();
+  if (!profile.companyName || !profile.kennitala || !profile.contactEmail || !profile.billingEmail || !profile.contactName || !profile.phone || !profile.address || !profile.industry) {
+    state.adminTrialCompanyError = "Fylltu út fyrirtækisnafn, kennitölu, tengilið, reikningsnetfang, síma, heimilisfang og atvinnugrein áður en fyrirtæki er stofnað.";
+    state.adminTrialCompanyMessage = "";
+    render();
+    showToast(state.adminTrialCompanyError, "error");
+    return;
+  }
+
+  state.adminTrialCompanySaving = true;
+  state.adminTrialCompanyError = "";
+  state.adminTrialCompanyMessage = "";
+  render();
+
+  try {
+    const result = await createCompanyFromTrialRequest(request.id, profile);
+    state.adminTrialCompanyMessage = `Fyrirtæki stofnað: ${result.company_name || profile.companyName}`;
+    state.adminTrialCompanyDraft = null;
+    state.selectedAdminCompanyId = result.company_id || null;
+    await Promise.all([
+      loadTrialRequestsForAdmin(),
+      loadAdminCompanies()
+    ]);
+    showToast("Fyrirtæki stofnað úr prufubeiðni.", "success");
+  } catch (error) {
+    console.error("Failed to create company from trial request:", error);
+    state.adminTrialCompanyError = formatSupabaseError(error);
+    showToast(state.adminTrialCompanyError, "error");
+  } finally {
+    state.adminTrialCompanySaving = false;
     render();
   }
 }
@@ -4801,6 +4938,34 @@ function toggleProfileSuggestion(field, value) {
   render();
 }
 
+function initializeAdminTrialCompanyDraft() {
+  if (state.adminTrialCompanyDraft) return;
+  const request = getSelectedAdminTrialRequest();
+  state.adminTrialCompanyDraft = buildCompanyDraftFromTrialRequest(request, () => createEmptyProfile(""));
+}
+
+function startAdminTrialCompanyCreation(requestId) {
+  const request = getAdminTrialRequestById(requestId);
+  if (!request || request.converted_company_id || request.status === "converted") return;
+  state.selectedAdminTrialRequestId = request.id;
+  state.adminTrialCompanyDraft = buildCompanyDraftFromTrialRequest(request, () => createEmptyProfile(""));
+  state.adminTrialCompanyMessage = "";
+  state.adminTrialCompanyError = "";
+  render();
+}
+
+function toggleAdminTrialCompanySuggestion(field, value) {
+  if (!["services", "includeKeywords", "excludeKeywords"].includes(field) || !value) return;
+  initializeAdminTrialCompanyDraft();
+  const currentValues = Array.isArray(state.adminTrialCompanyDraft[field]) ? state.adminTrialCompanyDraft[field] : [];
+  const normalized = normalizeSuggestionValue(value);
+  const exists = currentValues.some((item) => normalizeSuggestionValue(item) === normalized);
+  state.adminTrialCompanyDraft[field] = exists
+    ? currentValues.filter((item) => normalizeSuggestionValue(item) !== normalized)
+    : [...currentValues, value];
+  render();
+}
+
 function renderSuggestionChips({ field, title, values, selectedValues }) {
   if (!values.length) return "";
   const selected = Array.isArray(selectedValues) ? selectedValues : [];
@@ -4898,6 +5063,44 @@ function updateProfileDraftFromForm(formElement) {
   markProfileDraftDirty();
 }
 
+function updateAdminTrialCompanyDraftFromForm(formElement) {
+  initializeAdminTrialCompanyDraft();
+  state.adminTrialCompanyDraft = readProfileDraftFromForm(formElement, state.adminTrialCompanyDraft);
+}
+
+function readProfileDraftFromForm(formElement, currentDraft = {}) {
+  const form = new FormData(formElement);
+  const nextDraft = { ...currentDraft };
+  if (hasFormControl(formElement, "companyName")) nextDraft.companyName = String(form.get("companyName") || "").trim();
+  if (hasFormControl(formElement, "kennitala")) nextDraft.kennitala = String(form.get("kennitala") || "").trim();
+  if (hasFormControl(formElement, "contactEmail")) nextDraft.contactEmail = String(form.get("contactEmail") || "").trim();
+  if (hasFormControl(formElement, "billingEmail")) nextDraft.billingEmail = String(form.get("billingEmail") || "").trim();
+  if (hasFormControl(formElement, "contactName")) nextDraft.contactName = String(form.get("contactName") || "").trim();
+  if (hasFormControl(formElement, "phone")) nextDraft.phone = String(form.get("phone") || "").trim();
+  if (hasFormControl(formElement, "address")) nextDraft.address = String(form.get("address") || "").trim();
+  if (hasFormControl(formElement, "website")) nextDraft.website = String(form.get("website") || "").trim();
+  if (hasFormControl(formElement, "selectedPlan")) nextDraft.selectedPlan = normalizeSelectedPlan(form.get("selectedPlan")) || "basic";
+  if (hasFormControl(formElement, "industry")) nextDraft.industry = String(form.get("industry") || "");
+  if (hasFormControl(formElement, "services")) nextDraft.services = splitInput(form.get("services"));
+  if (hasFormControl(formElement, "includeKeywords")) nextDraft.includeKeywords = splitInput(form.get("includeKeywords"));
+  if (hasFormControl(formElement, "excludeKeywords")) nextDraft.excludeKeywords = splitInput(form.get("excludeKeywords"));
+  if (hasFormControl(formElement, "locations")) nextDraft.locations = form.getAll("locations");
+  if (hasFormControl(formElement, "baseLocation")) nextDraft.baseLocation = String(form.get("baseLocation") || "");
+  if (hasFormControl(formElement, "serviceAreas")) nextDraft.serviceAreas = splitInput(form.get("serviceAreas"));
+  if (hasFormControl(formElement, "willingToTravel")) nextDraft.willingToTravel = form.get("willingToTravel") === "on";
+  if (hasFormControl(formElement, "nationalProjects")) nextDraft.nationalProjects = form.get("nationalProjects") === "on";
+  if (hasFormControl(formElement, "remoteProjects")) nextDraft.remoteProjects = form.get("remoteProjects") === "on";
+  if (hasFormControl(formElement, "minimumProjectValueForTravel")) nextDraft.minimumProjectValueForTravel = String(form.get("minimumProjectValueForTravel") || "");
+  if (hasFormControl(formElement, "minProjectValue")) nextDraft.minProjectValue = String(form.get("minProjectValue") || "");
+  if (hasFormControl(formElement, "maxProjectValue")) nextDraft.maxProjectValue = String(form.get("maxProjectValue") || "");
+  if (hasFormControl(formElement, "allowUnknownValue")) nextDraft.allowUnknownValue = form.get("allowUnknownValue") === "on";
+  if (hasFormControl(formElement, "reportFrequency")) nextDraft.reportFrequency = String(form.get("reportFrequency") || "weekly");
+  if (hasFormControl(formElement, "reportDay")) nextDraft.reportDay = String(form.get("reportDay") || "monday");
+  if (hasFormControl(formElement, "deadlineReminders")) nextDraft.deadlineReminders = form.get("deadlineReminders") === "on";
+  if (hasFormControl(formElement, "includeLowConfidence")) nextDraft.includeLowConfidence = form.get("includeLowConfidence") === "on";
+  return nextDraft;
+}
+
 function hasFormControl(formElement, name) {
   return Boolean(formElement.querySelector(`[name="${CSS.escape(name)}"]`));
 }
@@ -4928,6 +5131,45 @@ function normalizeProfileDraftForSave() {
     minimumProjectValueForTravel: nullableNumber(state.profileDraft.minimumProjectValueForTravel),
     minProjectValue: nullableNumber(state.profileDraft.minProjectValue),
     maxProjectValue: nullableNumber(state.profileDraft.maxProjectValue)
+  };
+}
+
+function normalizeAdminTrialCompanyDraftForSave() {
+  initializeAdminTrialCompanyDraft();
+  const draft = state.adminTrialCompanyDraft || {};
+  return {
+    ...draft,
+    companyName: String(draft.companyName || "").trim(),
+    kennitala: String(draft.kennitala || "").trim(),
+    contactEmail: String(draft.contactEmail || "").trim(),
+    billingEmail: String(draft.billingEmail || "").trim(),
+    contactName: String(draft.contactName || "").trim(),
+    phone: String(draft.phone || "").trim(),
+    address: String(draft.address || "").trim(),
+    website: String(draft.website || "").trim(),
+    selectedPlan: normalizeSelectedPlan(draft.selectedPlan) || "basic",
+    billingStatus: draft.billingStatus || "trial",
+    trialStartedAt: draft.trialStartedAt || new Date().toISOString(),
+    trialEndsAt: draft.trialEndsAt || new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+    industry: String(draft.industry || ""),
+    services: cleanStringArray(draft.services),
+    includeKeywords: cleanStringArray(draft.includeKeywords),
+    excludeKeywords: cleanStringArray(draft.excludeKeywords),
+    locations: cleanStringArray(draft.locations),
+    baseLocation: String(draft.baseLocation || ""),
+    serviceAreas: cleanStringArray(draft.serviceAreas),
+    willingToTravel: Boolean(draft.willingToTravel),
+    nationalProjects: Boolean(draft.nationalProjects),
+    remoteProjects: Boolean(draft.remoteProjects),
+    minimumProjectValueForTravel: nullableNumber(draft.minimumProjectValueForTravel),
+    minProjectValue: nullableNumber(draft.minProjectValue),
+    maxProjectValue: nullableNumber(draft.maxProjectValue),
+    allowUnknownValue: Boolean(draft.allowUnknownValue),
+    reportFrequency: draft.reportFrequency || "weekly",
+    reportDay: draft.reportDay || "monday",
+    deadlineReminders: Boolean(draft.deadlineReminders),
+    includeLowConfidence: Boolean(draft.includeLowConfidence),
+    autoAlertMode: draft.autoAlertMode || "auto_safe_only"
   };
 }
 
@@ -8445,6 +8687,7 @@ function renderAdminReviewQueue() {
 
 function renderAdminTrialRequestsSection() {
   const rows = state.adminTrialRequests || [];
+  const selected = getSelectedAdminTrialRequest();
   return `
     <section class="ops-card">
       <div class="card-header">
@@ -8468,6 +8711,7 @@ function renderAdminTrialRequestsSection() {
                 <th>Locations</th>
                 <th>Status</th>
                 <th>Created at</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -8477,22 +8721,117 @@ function renderAdminTrialRequestsSection() {
         </div>
       ` : `<div class="empty-card">No trial requests yet.</div>`}
     </section>
+    ${selected ? renderAdminTrialRequestDetail(selected) : ""}
   `;
 }
 
 function renderAdminTrialRequestRow(row) {
+  const isSelected = state.selectedAdminTrialRequestId === row.id;
   return `
-    <tr>
+    <tr class="${isSelected ? "is-selected" : ""}">
       <td><strong>${escapeHtml(row.company_name || "—")}</strong></td>
       <td>${escapeHtml(row.contact_name || "—")}</td>
       <td>${escapeHtml(row.email || "—")}</td>
       <td>${escapeHtml(row.phone || "—")}</td>
       <td>${escapeHtml(row.services || "—")}</td>
       <td>${escapeHtml(row.locations || "—")}</td>
-      <td><span class="status-pill ${row.status === "new" ? "is-running" : "is-success"}">${escapeHtml(row.status || "new")}</span></td>
+      <td>${renderTrialRequestStatus(row.status)}</td>
       <td>${escapeHtml(row.created_at ? formatDateTime(row.created_at) : "—")}</td>
+      <td>
+        <button class="btn btn-secondary btn-small" type="button" data-action="view-admin-trial-request" data-id="${escapeHtml(row.id)}">Opna</button>
+      </td>
     </tr>
   `;
+}
+
+function renderAdminTrialRequestDetail(row) {
+  const busy = state.adminTrialRequestActions?.[row.id];
+  const converted = row.status === "converted" || Boolean(row.converted_company_id);
+  return `
+    <section class="ops-card admin-trial-detail-card">
+      <div class="card-header">
+        <div>
+          <h2>${escapeHtml(row.company_name || "Trial request")}</h2>
+          <p>${renderTrialRequestStatus(row.status)} · ${escapeHtml(row.created_at ? formatDateTime(row.created_at) : "—")}</p>
+        </div>
+        <button class="btn btn-ghost btn-small" type="button" data-action="close-admin-trial-request">Close</button>
+      </div>
+      ${state.adminTrialCompanyError ? `<div class="admin-message is-error">${escapeHtml(state.adminTrialCompanyError)}</div>` : ""}
+      ${state.adminTrialCompanyMessage ? `<div class="admin-message is-success">${escapeHtml(state.adminTrialCompanyMessage)}</div>` : ""}
+      <div class="admin-trial-detail-grid">
+        ${renderAdminTrialDetailField("Fyrirtæki", row.company_name)}
+        ${renderAdminTrialDetailField("Tengiliður", row.contact_name)}
+        ${renderAdminTrialDetailField("Netfang", row.email)}
+        ${renderAdminTrialDetailField("Sími", row.phone)}
+        ${renderAdminTrialDetailField("Þjónusta", row.services, true)}
+        ${renderAdminTrialDetailField("Svæði", row.locations, true)}
+        ${renderAdminTrialDetailField("Athugasemd", row.message, true)}
+        ${renderAdminTrialDetailField("Staða", getTrialRequestStatusLabel(row.status))}
+        ${renderAdminTrialDetailField("Stofnað", row.created_at ? formatDateTime(row.created_at) : "")}
+      </div>
+      <div class="admin-trial-actions">
+        <button class="btn btn-secondary" type="button" data-action="admin-trial-request-status" data-id="${escapeHtml(row.id)}" data-status="contacted" ${busy || converted ? "disabled" : ""}>${busy === "contacted" ? "Vista..." : "Merkja haft samband"}</button>
+        <button class="btn btn-ghost" type="button" data-action="admin-trial-request-status" data-id="${escapeHtml(row.id)}" data-status="rejected" ${busy || converted ? "disabled" : ""}>${busy === "rejected" ? "Vista..." : "Hafna"}</button>
+        <button class="btn btn-primary" type="button" data-action="admin-start-trial-company" data-id="${escapeHtml(row.id)}" ${converted ? "disabled" : ""}>Stofna fyrirtæki</button>
+        ${row.converted_company_id ? `<button class="btn btn-secondary" type="button" data-action="view-admin-company" data-id="${escapeHtml(row.converted_company_id)}">Opna fyrirtæki</button>` : ""}
+      </div>
+      ${state.adminTrialCompanyDraft ? renderAdminTrialCompanyForm(row) : ""}
+    </section>
+  `;
+}
+
+function renderAdminTrialCompanyForm(row) {
+  return `
+    <div class="admin-trial-company-form-wrap">
+      <div class="section-heading">
+        <p class="eyebrow">Company profile</p>
+        <h3>Stofna fyrirtæki úr prufubeiðni</h3>
+        <p>Yfirfarðu og kláraðu venjulega fyrirtækjaprófílinn áður en hann er vistaður. Enginn innskráningaraðgangur eða boð er stofnað sjálfkrafa.</p>
+      </div>
+      ${renderProfileFormPage({
+        t,
+        escapeHtml,
+        capitalize,
+        arrayFieldText,
+        formatCustomerLocation,
+        getFilterOptions,
+        getProfileSuggestions,
+        renderCustomDropdown,
+        renderSuggestionChips,
+        formId: "admin-trial-company-form",
+        profileDraft: state.adminTrialCompanyDraft || buildCompanyDraftFromTrialRequest(row, () => createEmptyProfile("")),
+        accountEmail: "",
+        hasProfile: false,
+        isSavingProfile: state.adminTrialCompanySaving,
+        profileSaved: false,
+        profileSaveMessage: null,
+        profileSaveError: state.adminTrialCompanyError
+      })}
+    </div>
+  `;
+}
+
+function renderAdminTrialDetailField(label, value, wide = false) {
+  return `
+    <div class="admin-trial-detail-field ${wide ? "is-wide" : ""}">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value || "—")}</strong>
+    </div>
+  `;
+}
+
+function renderTrialRequestStatus(status) {
+  const normalized = String(status || "new").toLowerCase();
+  const className = normalized === "converted" ? "is-success" : normalized === "rejected" ? "is-danger" : normalized === "contacted" ? "is-warning" : "is-running";
+  return `<span class="status-pill ${className}">${escapeHtml(getTrialRequestStatusLabel(status))}</span>`;
+}
+
+function getAdminTrialRequestById(requestId) {
+  return (state.adminTrialRequests || []).find((row) => row.id === requestId) || null;
+}
+
+function getSelectedAdminTrialRequest() {
+  return getAdminTrialRequestById(state.selectedAdminTrialRequestId);
 }
 
 function getAdminReviewLabels() {
