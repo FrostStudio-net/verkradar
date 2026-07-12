@@ -45,6 +45,21 @@ function renderProfileBasicsSection(ctx) {
   `;
 }
 
+function renderAccountAccessSection(ctx) {
+  const { t, escapeHtml, accountEmail } = ctx;
+  if (!accountEmail) return "";
+  return `
+    <div class="form-section account-access-section">
+      <h2>${escapeHtml(t("accountAccess"))}</h2>
+      <div class="readonly-field">
+        <span>${escapeHtml(t("loginEmail"))}</span>
+        <strong>${escapeHtml(accountEmail)}</strong>
+      </div>
+      <p class="field-helper">${escapeHtml(t("loginEmailHelper"))}</p>
+    </div>
+  `;
+}
+
 function renderProfileServicesSection(ctx) {
   const { t, escapeHtml, profileDraft: p, arrayFieldText, getProfileSuggestions, renderSuggestionChips } = ctx;
   const selectedIndustry = p.industry || "";
@@ -191,6 +206,7 @@ function renderProfileFormActions(ctx) {
 export function renderProfileFormPage(ctx) {
   return `
     <form id="profile-form" class="form-card settings-profile-form">
+      ${renderAccountAccessSection(ctx)}
       ${renderProfileBasicsSection(ctx)}
       ${renderProfileServicesSection(ctx)}
       ${renderProfileLocationsSection(ctx)}

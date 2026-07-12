@@ -6045,7 +6045,7 @@ function renderShell(content) {
     <header class="site-header ${state.isMobileMenuOpen ? "is-menu-open" : ""}">
       <div class="header-top">
         <button class="brand" data-action="go" data-href="/">
-          <img class="brand-logo" src="./logo.png" alt="VerkRadar" />
+          <img class="brand-logo" src="/logo.png" alt="VerkRadar" />
         </button>
         <div class="mobile-header-actions">
           <button class="language-toggle mobile-header-language-toggle" type="button" data-action="toggle-language" aria-label="Switch language">
@@ -7667,6 +7667,7 @@ function renderProfileForm() {
     renderCustomDropdown,
     renderSuggestionChips,
     profileDraft: state.profileDraft || getEmptyProfile(),
+    accountEmail: state.user?.email || "",
     hasProfile: Boolean(state.profile),
     isSavingProfile: state.isSavingProfile,
     profileSaved: state.profileSaved,

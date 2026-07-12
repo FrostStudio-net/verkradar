@@ -1153,6 +1153,24 @@ h3 {
   line-height: 1.45;
 }
 
+.readonly-field {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.readonly-field span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.readonly-field strong {
+  overflow-wrap: anywhere;
+}
+
 .inline-helper {
   display: block;
   margin-bottom: 0;
