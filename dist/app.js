@@ -273,7 +273,8 @@ let state = {
     debugCompanyId: "",
     tedOnly: false,
     manualOnly: false,
-    showDemoTest: false
+    showDemoTest: false,
+    ...getStoredAdminOpportunityViewPrefs()
   },
   adminOpportunityDraft: createEmptyAdminOpportunityDraft(),
   matchStatus: null,
@@ -336,6 +337,33 @@ function clearStoredSelectedPlan() {
     localStorage.removeItem(STORAGE_KEYS.selectedPlan);
   } catch {
     // Ignore storage failures.
+  }
+}
+
+function getStoredAdminOpportunityViewPrefs() {
+  try {
+    const raw = sessionStorage.getItem("verkradar_admin_opportunity_view");
+    const parsed = raw ? JSON.parse(raw) : {};
+    return {
+      sortBy: normalizeAdminOpportunitySort(parsed.sortBy),
+      addedWindow: normalizeAdminOpportunityAddedWindow(parsed.addedWindow)
+    };
+  } catch {
+    return {
+      sortBy: "created_desc",
+      addedWindow: "all"
+    };
+  }
+}
+
+function persistAdminOpportunityViewPrefs() {
+  try {
+    sessionStorage.setItem("verkradar_admin_opportunity_view", JSON.stringify({
+      sortBy: normalizeAdminOpportunitySort(state.adminOpportunityFilters?.sortBy),
+      addedWindow: normalizeAdminOpportunityAddedWindow(state.adminOpportunityFilters?.addedWindow)
+    }));
+  } catch {
+    // Session persistence is only a convenience for the admin view.
   }
 }
 
@@ -1041,6 +1069,7 @@ document.addEventListener("input", (event) => {
     } else {
       state.adminOpportunityFilters[key] = event.target.value;
     }
+    if (key === "sortBy" || key === "addedWindow") persistAdminOpportunityViewPrefs();
     renderPreservingInputAndScroll(event.target);
     return;
   }
@@ -1094,6 +1123,7 @@ document.addEventListener("change", (event) => {
     } else {
       state.adminOpportunityFilters[key] = event.target.value;
     }
+    if (key === "sortBy" || key === "addedWindow") persistAdminOpportunityViewPrefs();
     renderPreservingInputAndScroll(event.target);
     return;
   }
@@ -2648,6 +2678,7 @@ function mapSupabaseOpportunity(row) {
     deadlineAt: rawPayload.deadline_at || "",
     publishedDate: row.published_date,
     createdAt: row.created_at,
+    updatedAt: row.updated_at || "",
     location: sanitizeOpportunityLocation(row.location || "Unknown", rawPayload, sourceName, row.title || "", row.description || ""),
     estimatedValue: row.estimated_value,
     currency: row.currency || "ISK",
@@ -7674,11 +7705,12 @@ async function markAdminReportSent(reportId) {
 
 function getFilteredAdminOpportunities() {
   const filters = state.adminOpportunityFilters;
-  return (state.opportunities || []).filter((opp) => {
+  const filtered = (state.opportunities || []).filter((opp) => {
     const isTed = isTedOpportunity(opp);
     if (filters.tedOnly && !isTed) return false;
     if (filters.manualOnly && isTed) return false;
     if (!filters.showDemoTest && isDemoTestOpportunity(opp)) return false;
+    if (!isOpportunityInAddedWindow(opp, filters.addedWindow)) return false;
     if (filters.source !== "all" && opp.source !== filters.source) return false;
     if (filters.status !== "all" && opp.status !== filters.status) return false;
     const country = getOpportunityCountryCode(opp) || opp.countryCode || "Unknown";
@@ -7690,6 +7722,85 @@ function getFilteredAdminOpportunities() {
     }
     return true;
   });
+  return sortAdminOpportunities(filtered, filters.sortBy);
+}
+
+function normalizeAdminOpportunitySort(value) {
+  return ["created_desc", "created_asc", "deadline_asc", "deadline_desc", "updated_desc"].includes(value)
+    ? value
+    : "created_desc";
+}
+
+function normalizeAdminOpportunityAddedWindow(value) {
+  return ["today", "3d", "7d", "all"].includes(value) ? value : "all";
+}
+
+function getAdminOpportunitySortOptions() {
+  return [
+    ["created_desc", "Nýjast bætt við"],
+    ["created_asc", "Elst bætt við"],
+    ["deadline_asc", "Skilafrestur næst"],
+    ["deadline_desc", "Skilafrestur lengst frá"],
+    ["updated_desc", "Nýjast uppfært"]
+  ];
+}
+
+function getAdminOpportunityAddedWindowOptions() {
+  return [
+    ["today", "Bætt við í dag"],
+    ["3d", "Síðustu 3 dagar"],
+    ["7d", "Síðustu 7 dagar"],
+    ["all", "Allt"]
+  ];
+}
+
+function isOpportunityInAddedWindow(opp, windowValue) {
+  const windowKey = normalizeAdminOpportunityAddedWindow(windowValue);
+  if (windowKey === "all") return true;
+  const createdTime = getDateTimeValue(opp.createdAt);
+  if (!Number.isFinite(createdTime)) return false;
+  const now = new Date();
+  if (windowKey === "today") {
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    return createdTime >= start;
+  }
+  const days = windowKey === "3d" ? 3 : 7;
+  return createdTime >= now.getTime() - days * 24 * 60 * 60 * 1000;
+}
+
+function sortAdminOpportunities(opportunities, sortBy) {
+  const sortKey = normalizeAdminOpportunitySort(sortBy);
+  return [...opportunities].sort((a, b) => {
+    if (sortKey === "created_asc") return compareDateValues(a.createdAt, b.createdAt, "asc");
+    if (sortKey === "deadline_asc") return compareDateValues(getAdminOpportunityDeadlineSortValue(a), getAdminOpportunityDeadlineSortValue(b), "asc", { nullsLast: true });
+    if (sortKey === "deadline_desc") return compareDateValues(getAdminOpportunityDeadlineSortValue(a), getAdminOpportunityDeadlineSortValue(b), "desc", { nullsLast: true });
+    if (sortKey === "updated_desc") return compareDateValues(a.updatedAt || a.createdAt, b.updatedAt || b.createdAt, "desc");
+    return compareDateValues(a.createdAt, b.createdAt, "desc");
+  });
+}
+
+function getAdminOpportunityDeadlineSortValue(opp) {
+  return opp.deadlineAt || opp.rawPayload?.deadline_at || opp.deadline || "";
+}
+
+function compareDateValues(a, b, direction = "desc", options = {}) {
+  const aTime = getDateTimeValue(a);
+  const bTime = getDateTimeValue(b);
+  const aValid = Number.isFinite(aTime);
+  const bValid = Number.isFinite(bTime);
+  if (!aValid && !bValid) return 0;
+  if (!aValid) return options.nullsLast ? 1 : direction === "asc" ? -1 : 1;
+  if (!bValid) return options.nullsLast ? -1 : direction === "asc" ? 1 : -1;
+  return direction === "asc" ? aTime - bTime : bTime - aTime;
+}
+
+function getDateTimeValue(value) {
+  if (!value) return Number.NaN;
+  const parsed = new Date(value).getTime();
+  if (!Number.isNaN(parsed)) return parsed;
+  const isoDate = String(value).match(/^(\d{4}-\d{2}-\d{2})$/);
+  if (isoDate) return new Date(`${isoDate[1]}T00:00:00Z`).getTime();
+  return Number.NaN;
 }
 
 function getAdminFilterOptions(items, getter) {
@@ -7716,6 +7827,12 @@ function renderAdminOpportunityFilters(opportunities) {
       <select data-admin-filter="country">
         <option value="all">All countries</option>
         ${countries.map((country) => `<option value="${escapeHtml(country)}" ${filters.country === country ? "selected" : ""}>${escapeHtml(country)}</option>`).join("")}
+      </select>
+      <select data-admin-filter="sortBy" aria-label="Röðun">
+        ${getAdminOpportunitySortOptions().map(([value, label]) => `<option value="${escapeHtml(value)}" ${normalizeAdminOpportunitySort(filters.sortBy) === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
+      </select>
+      <select data-admin-filter="addedWindow" aria-label="Bætt við">
+        ${getAdminOpportunityAddedWindowOptions().map(([value, label]) => `<option value="${escapeHtml(value)}" ${normalizeAdminOpportunityAddedWindow(filters.addedWindow) === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
       </select>
       <select data-admin-filter="debugCompanyId">
         <option value="">Match debug company...</option>
@@ -9313,6 +9430,7 @@ function renderAdminTagList(values, emptyText) {
 function renderAdminOpportunityRow(opp) {
   const isUpdating = state.adminUpdatingId === opp.id;
   const intent = getOpportunityIntent(opp);
+  const deadline = getOpportunityDeadlineDisplay(opp);
   const hiddenFromReports = opp.rawPayload?.hidden_from_reports === true ||
     ["hidden", "noise", "deleted"].includes(String(opp.rawPayload?.admin_report_status || "").toLowerCase());
   const duplicateReason = isSecondaryDuplicateOpportunity(opp)
@@ -9334,6 +9452,14 @@ function renderAdminOpportunityRow(opp) {
     <div class="admin-row">
       <div>
         <h3>${escapeHtml(opp.title)}</h3>
+        <div class="admin-opportunity-review-meta">
+          ${renderAdminOpportunityChangeBadge(opp)}
+          <span><strong>Bætt við:</strong> ${escapeHtml(formatAdminOpportunityDateTime(opp.createdAt))}</span>
+          <span><strong>Síðast uppfært:</strong> ${escapeHtml(formatAdminOpportunityDateTime(opp.updatedAt))}</span>
+          <span><strong>Source:</strong> ${escapeHtml(opp.source || "Unknown source")}</span>
+          <span><strong>Deadline:</strong> ${escapeHtml(deadline.label || "Not listed")}</span>
+          <span><strong>External ID:</strong> ${escapeHtml(opp.externalId || "Not listed")}</span>
+        </div>
         <p><strong>Source:</strong> ${escapeHtml(opp.source || "Unknown source")} · <strong>Buyer:</strong> ${escapeHtml(formatAdminBuyer(opp))} · <strong>Region:</strong> ${escapeHtml(formatAdminLocation(opp))} · <strong>Status:</strong> ${escapeHtml(opp.status)}</p>
         <p><strong>Source URL:</strong> ${adminSourceUrl ? `<a href="${escapeHtml(adminSourceUrl)}" target="_blank" rel="noreferrer">${escapeHtml(adminSourceUrl)}</a>` : "Not listed"} · <strong>External ID:</strong> ${escapeHtml(opp.externalId || "Not listed")}</p>
         <p>Quality: ${escapeHtml(getOpportunityQualityLabel(opp))} · Intent: ${escapeHtml(formatOpportunityIntent(intent))}${hiddenFromReports ? " · Hidden from reports" : ""}${duplicateReason ? ` · Duplicate: ${escapeHtml(duplicateReason)}` : ""}${staleReason ? ` · Stale / expired: ${escapeHtml(staleReason)}` : ""}</p>
@@ -9357,6 +9483,29 @@ function renderAdminOpportunityRow(opp) {
       </div>
     </div>
   `;
+}
+
+function renderAdminOpportunityChangeBadge(opp) {
+  const status = getAdminOpportunityChangeStatus(opp);
+  if (!status) return "";
+  const className = status === "new" ? "is-success" : "is-warning";
+  const label = status === "new" ? "Nýtt" : "Uppfært";
+  return `<span class="status-pill ${className}">${escapeHtml(label)}</span>`;
+}
+
+function getAdminOpportunityChangeStatus(opp) {
+  const created = getDateTimeValue(opp.createdAt);
+  const updated = getDateTimeValue(opp.updatedAt);
+  if (!Number.isFinite(created)) return "";
+  if (!Number.isFinite(updated)) return "new";
+  const differenceMs = Math.abs(updated - created);
+  if (differenceMs <= 2 * 60 * 1000) return "new";
+  if (updated > created) return "updated";
+  return "";
+}
+
+function formatAdminOpportunityDateTime(value) {
+  return value ? formatDateTime(value) : "Not listed";
 }
 
 function renderAdminOpportunityMatchDebug(opp) {

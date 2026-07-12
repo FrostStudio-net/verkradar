@@ -1960,6 +1960,31 @@ select option:checked {
   margin-top: 16px;
 }
 
+.admin-opportunity-review-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 10px;
+}
+
+.admin-opportunity-review-meta span {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.04);
+  color: var(--muted);
+  padding: 6px 8px;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.admin-opportunity-review-meta span strong {
+  color: var(--text);
+}
+
+.admin-opportunity-review-meta .status-pill {
+  align-self: center;
+}
+
 .missing-deadline-source-group {
   min-width: 0;
   margin-top: 16px;
