@@ -24,7 +24,7 @@ export {
   renderReportSummaryCardPage
 } from "./pages/reports.js";
 export { renderSettingsPage } from "./pages/settings.js";
-export { submitTrialRequest } from "./services/trialRequests.js";
+export { loadAdminTrialRequests, submitTrialRequest } from "./services/trialRequests.js";
 export { localizeLegacyReportContent } from "./services/reports.js";
 export { buildReportEmail } from "./services/reportDelivery.js";
 export { cleanReportReasons, getReportEmailStatus, getReportScoreLabel, getReportStatusBadge, getReportUiLabel, getReportVerificationSentence, normalizeReportRisk } from "./services/reportLocalization.js";

@@ -50,6 +50,7 @@ import {
   isUuid,
   localizeLegacyReportContent,
   loadActiveCompanyMemberships,
+  loadAdminTrialRequests,
   mergeAiReviewsIntoReportMatches,
   normalizeLocationText,
   normalizeAccessEmail,
@@ -212,6 +213,10 @@ let state = {
   adminReportsLoading: false,
   adminReportsLoaded: false,
   adminReportsError: null,
+  adminTrialRequests: [],
+  adminTrialRequestsLoading: false,
+  adminTrialRequestsLoaded: false,
+  adminTrialRequestsError: null,
   selectedAdminReport: null,
   selectedAdminReportLoading: false,
   selectedAdminReportError: null,
@@ -1366,6 +1371,7 @@ function afterRouteRender() {
   if (state.route === "/admin" && state.isAdmin) {
     if (!state.importRunsLoaded && !state.importRunsLoading) loadImportRunsForAdmin();
     if (!state.adminReportsLoaded && !state.adminReportsLoading) loadAdminReports();
+    if (!state.adminTrialRequestsLoaded && !state.adminTrialRequestsLoading) loadTrialRequestsForAdmin();
     if (!state.sourceCoverageLoaded && !state.sourceCoverageLoading) loadSourceCoverageForAdmin();
     if (!state.adminCompaniesLoaded && !state.adminCompaniesLoading) loadAdminCompanies();
     if (!state.adminReviewLoaded && !state.adminReviewLoading) loadAdminReviewQueue();
@@ -1515,6 +1521,30 @@ async function loadAdminReports() {
   } finally {
     state.adminReportsLoading = false;
     state.adminReportsLoaded = true;
+    render();
+  }
+}
+
+async function loadTrialRequestsForAdmin() {
+  if (!supabaseClient || !state.isAdmin) {
+    state.adminTrialRequests = [];
+    state.adminTrialRequestsLoaded = true;
+    return;
+  }
+
+  state.adminTrialRequestsLoading = true;
+  state.adminTrialRequestsError = null;
+  render();
+
+  try {
+    state.adminTrialRequests = await loadAdminTrialRequests();
+  } catch (error) {
+    console.error("Failed to load trial requests:", error);
+    state.adminTrialRequests = [];
+    state.adminTrialRequestsError = formatSupabaseError(error);
+  } finally {
+    state.adminTrialRequestsLoading = false;
+    state.adminTrialRequestsLoaded = true;
     render();
   }
 }
@@ -2437,6 +2467,7 @@ async function refreshAdminOperationsData() {
     loadImportRunsForAdmin(),
     loadNewestImportedTedOpportunities(),
     loadAdminReports(),
+    loadTrialRequestsForAdmin(),
     loadSourceCoverageForAdmin(),
     loadAdminCompanies(),
     loadAdminReviewQueue()
@@ -8312,6 +8343,7 @@ function renderAdminTabs() {
     ["overview", "Overview"],
     ["companies", "Companies"],
     ["review", "Review Queue"],
+    ["trial-requests", "Trial Requests"],
     ["sources", "Sources/imports"],
     ["opportunities", "Opportunities"],
     ["reports", "Reports"]
@@ -8330,6 +8362,7 @@ function renderAdminTabs() {
 function renderAdminActiveTab(opportunities) {
   if (state.adminActiveTab === "companies") return renderAdminCompaniesSection();
   if (state.adminActiveTab === "review") return renderAdminReviewQueue();
+  if (state.adminActiveTab === "trial-requests") return renderAdminTrialRequestsSection();
   if (state.adminActiveTab === "sources") {
     return `
       ${renderAutomationStatusCard()}
@@ -8407,6 +8440,58 @@ function renderAdminReviewQueue() {
         </div>
       ` : `<div class="empty-card">${escapeHtml(labels.empty)}</div>`}
     </section>
+  `;
+}
+
+function renderAdminTrialRequestsSection() {
+  const rows = state.adminTrialRequests || [];
+  return `
+    <section class="ops-card">
+      <div class="card-header">
+        <div>
+          <h2>Trial Requests</h2>
+          <p>${state.adminTrialRequestsLoading ? "Loading trial requests..." : `${rows.length} request${rows.length === 1 ? "" : "s"} received.`}</p>
+        </div>
+        <button class="btn btn-ghost btn-small" type="button" data-action="refresh-admin-status">Refresh</button>
+      </div>
+      ${state.adminTrialRequestsError ? `<div class="admin-message is-error">${escapeHtml(state.adminTrialRequestsError)}</div>` : ""}
+      ${state.adminTrialRequestsLoading && !rows.length ? `<div class="empty-card">Loading trial requests...</div>` : rows.length ? `
+        <div class="ops-table-wrap">
+          <table class="ops-table">
+            <thead>
+              <tr>
+                <th>Company</th>
+                <th>Contact</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>Services</th>
+                <th>Locations</th>
+                <th>Status</th>
+                <th>Created at</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(renderAdminTrialRequestRow).join("")}
+            </tbody>
+          </table>
+        </div>
+      ` : `<div class="empty-card">No trial requests yet.</div>`}
+    </section>
+  `;
+}
+
+function renderAdminTrialRequestRow(row) {
+  return `
+    <tr>
+      <td><strong>${escapeHtml(row.company_name || "—")}</strong></td>
+      <td>${escapeHtml(row.contact_name || "—")}</td>
+      <td>${escapeHtml(row.email || "—")}</td>
+      <td>${escapeHtml(row.phone || "—")}</td>
+      <td>${escapeHtml(row.services || "—")}</td>
+      <td>${escapeHtml(row.locations || "—")}</td>
+      <td><span class="status-pill ${row.status === "new" ? "is-running" : "is-success"}">${escapeHtml(row.status || "new")}</span></td>
+      <td>${escapeHtml(row.created_at ? formatDateTime(row.created_at) : "—")}</td>
+    </tr>
   `;
 }
 
