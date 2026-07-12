@@ -8884,6 +8884,7 @@ function renderAdminTrialRequestDetail(row) {
         ${renderAdminTrialDetailField("Svæði", row.locations, true)}
         ${renderAdminTrialDetailField("Athugasemd", row.message, true)}
         ${renderAdminTrialDetailField("Staða", getTrialRequestStatusLabel(row.status))}
+        ${renderAdminTrialDetailField("Tilkynning", getTrialRequestNotificationLabel(row), true)}
         ${renderAdminTrialDetailField("Stofnað", row.created_at ? formatDateTime(row.created_at) : "")}
       </div>
       <div class="admin-trial-actions">
@@ -8941,6 +8942,13 @@ function renderTrialRequestStatus(status) {
   const normalized = String(status || "new").toLowerCase();
   const className = normalized === "converted" ? "is-success" : normalized === "rejected" ? "is-danger" : normalized === "contacted" ? "is-warning" : "is-running";
   return `<span class="status-pill ${className}">${escapeHtml(getTrialRequestStatusLabel(status))}</span>`;
+}
+
+function getTrialRequestNotificationLabel(row) {
+  if (row.notification_sent_at) return `Tilkynning send ${formatDateTime(row.notification_sent_at)}`;
+  if (row.notification_started_at) return "Tilkynning í vinnslu";
+  if (row.notification_error) return `Tilkynning mistókst: ${row.notification_error}`;
+  return "Tilkynning ekki send";
 }
 
 function getAdminTrialRequestById(requestId) {
