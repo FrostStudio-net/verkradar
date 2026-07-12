@@ -5,6 +5,9 @@ import {
   acceptCompanyInvite,
   capitalize,
   buildCompanyInviteLink,
+  buildEvaluationLabelPayload,
+  buildMatchDecisionPayload,
+  buildMatchingProfilePayload,
   buildReportEmail,
   claimInvitedCompanyMemberships,
   clearStoredPendingInviteToken,
@@ -70,6 +73,8 @@ import {
   normalizeReportRisk,
   renderAdminDailyPipelinePanel,
   renderAdminCompanyAccessPanel,
+  renderAdminMatchingProfilePanel,
+  renderMatchDecisionControls,
   renderAcceptInvitePage,
   renderAdminAutomaticAiReviewPanel,
   renderAdminCompanyAiReviewPanel,
@@ -1227,6 +1232,24 @@ document.addEventListener("submit", async (event) => {
     return;
   }
 
+  if (event.target.matches("[data-admin-matching-profile-form]")) {
+    event.preventDefault();
+    await saveAdminCompanyMatchingProfile(event.target.dataset.companyId || "", event.target);
+    return;
+  }
+
+  if (event.target.matches("[data-admin-match-decision-form]")) {
+    event.preventDefault();
+    await saveAdminMatchDecision(event.target.dataset.companyId || "", event.target);
+    return;
+  }
+
+  if (event.target.matches("[data-admin-evaluation-label-form]")) {
+    event.preventDefault();
+    await saveAdminEvaluationLabel(event.target.dataset.companyId || "", event.target);
+    return;
+  }
+
   if (event.target.id === "profile-form") {
     event.preventDefault();
     state.profileSaved = false;
@@ -1925,9 +1948,11 @@ async function loadAdminCompanies() {
     let reports = [];
     let aiReviews = [];
     let members = [];
+    let decisions = [];
+    let evaluationLabels = [];
 
     if (companyIds.length) {
-      const [servicesResult, locationsResult, keywordsResult, matchesResult, reportsResult, aiReviewsResult, membersResult] = await Promise.all([
+      const [servicesResult, locationsResult, keywordsResult, matchesResult, reportsResult, aiReviewsResult, membersResult, decisionsResult, evaluationLabelsResult] = await Promise.all([
         supabaseClient.from("company_services").select("company_id, service").in("company_id", companyIds),
         supabaseClient.from("company_locations").select("company_id, location").in("company_id", companyIds),
         supabaseClient.from("company_keywords").select("company_id, keyword, type").in("company_id", companyIds),
@@ -1937,7 +1962,9 @@ async function loadAdminCompanies() {
           .in("company_id", companyIds),
         supabaseClient.from("reports").select("id, company_id, title, created_at, period_start, period_end, status").in("company_id", companyIds).order("created_at", { ascending: false }),
         supabaseClient.from("ai_match_reviews").select("id, company_id, opportunity_id, match_id, fit, confidence, send_to_client, reason, reviewed_profile_hash, profile_updated_at, company_services_snapshot, company_locations_snapshot, created_at, updated_at").in("company_id", companyIds),
-        supabaseClient.from("company_members").select("id, company_id, user_id, email, role, status, invited_at, accepted_at, revoked_at, expires_at").in("company_id", companyIds).order("created_at", { ascending: false })
+        supabaseClient.from("company_members").select("id, company_id, user_id, email, role, status, invited_at, accepted_at, revoked_at, expires_at").in("company_id", companyIds).order("created_at", { ascending: false }),
+        supabaseClient.from("admin_match_decisions").select("id, company_id, opportunity_id, decision, reason, comment, decided_at, decided_by").in("company_id", companyIds),
+        supabaseClient.from("match_evaluation_labels").select("id, company_id, opportunity_id, label, reason, notes, labeled_at, labeled_by").in("company_id", companyIds)
       ]);
 
       services = servicesResult.error ? [] : servicesResult.data || [];
@@ -1947,6 +1974,8 @@ async function loadAdminCompanies() {
       reports = reportsResult.error ? [] : reportsResult.data || [];
       aiReviews = aiReviewsResult.error ? [] : aiReviewsResult.data || [];
       members = membersResult.error ? [] : membersResult.data || [];
+      decisions = decisionsResult.error ? [] : decisionsResult.data || [];
+      evaluationLabels = evaluationLabelsResult.error ? [] : evaluationLabelsResult.data || [];
     }
 
     state.adminCompanies = companyRows.map((company) => {
@@ -1973,7 +2002,9 @@ async function loadAdminCompanies() {
           companyProfileForAi
         ),
         reports: reports.filter((row) => row.company_id === company.id),
-        members: members.filter((row) => row.company_id === company.id)
+        members: members.filter((row) => row.company_id === company.id),
+        decisions: decisions.filter((row) => row.company_id === company.id),
+        evaluationLabels: evaluationLabels.filter((row) => row.company_id === company.id)
       });
     });
     state.adminCompaniesLoaded = true;
@@ -2102,7 +2133,15 @@ function mapAdminCompany(company, related) {
   const includeKeywords = cleanStringArray((related.keywords || []).filter((row) => row.type === "include").map((row) => row.keyword));
   const excludeKeywords = cleanStringArray((related.keywords || []).filter((row) => row.type === "exclude").map((row) => row.keyword));
   const reports = related.reports || [];
-  const matches = (related.matches || []).filter((match) => match.safety_status !== "hidden");
+  const decisionMap = new Map((related.decisions || []).map((row) => [String(row.opportunity_id), row]));
+  const evaluationMap = new Map((related.evaluationLabels || []).map((row) => [String(row.opportunity_id), row]));
+  const matches = (related.matches || [])
+    .filter((match) => match.safety_status !== "hidden")
+    .map((match) => ({
+      ...match,
+      adminDecision: decisionMap.get(String(match.opportunity_id)) || null,
+      evaluationLabel: evaluationMap.get(String(match.opportunity_id)) || null
+    }));
   const members = (related.members || []).map((member) => ({
     id: member.id,
     company_id: member.company_id,
@@ -2155,6 +2194,19 @@ function mapAdminCompany(company, related) {
     reportDay: company.report_day || "monday",
     deadlineReminders: Boolean(company.deadline_reminders),
     autoAiReviewEnabled: Boolean(company.auto_ai_review_enabled),
+    coreServices: cleanStringArray(company.core_services),
+    secondaryServices: cleanStringArray(company.secondary_services),
+    excludedServices: cleanStringArray(company.excluded_services),
+    preferredProjectTypes: cleanStringArray(company.preferred_project_types),
+    excludedProjectTypes: cleanStringArray(company.excluded_project_types),
+    equipment: cleanStringArray(company.equipment),
+    certifications: cleanStringArray(company.certifications),
+    preferredBuyers: cleanStringArray(company.preferred_buyers),
+    maxTravelDistanceKm: company.max_travel_distance_km,
+    typicalProjectSize: company.typical_project_size || "",
+    profileNotesForAi: company.profile_notes_for_ai || "",
+    matchingProfileUpdatedAt: company.matching_profile_updated_at || "",
+    matchingProfileHash: company.matching_profile_hash || "",
     members,
     matchCount: matches.length,
     savedCount: 0,
@@ -2264,6 +2316,53 @@ async function revokeAdminCompanyAccess(companyId, memberId) {
   } finally {
     clearAdminCompanyAccessAction(companyId);
     render();
+  }
+}
+
+async function saveAdminCompanyMatchingProfile(companyId, formElement) {
+  if (!state.isAdmin || !companyId) return;
+  setAdminCompanyAction(companyId, "matching_profile");
+  state.adminMessage = null;
+  render();
+  try {
+    await runAdminCompanyAction(companyId, "update_company_matching_profile", {
+      matchingProfile: buildMatchingProfilePayload(formElement)
+    });
+    await loadAdminCompanies();
+    state.adminMessage = { type: "success", text: "Matching profile saved. Production matching is unchanged." };
+    showToast("Matching profile saved", "success");
+  } catch (error) {
+    console.error("Failed to save matching profile:", error);
+    state.adminMessage = { type: "error", text: `Failed to save matching profile. ${formatSupabaseError(error)}` };
+  } finally {
+    clearAdminCompanyAction(companyId);
+    render();
+  }
+}
+
+async function saveAdminMatchDecision(companyId, formElement) {
+  if (!state.isAdmin || !companyId) return;
+  try {
+    const payload = buildMatchDecisionPayload(formElement);
+    await runAdminCompanyAction(companyId, "upsert_match_decision", payload);
+    await loadAdminCompanies();
+    showToast("Match decision saved", "success");
+  } catch (error) {
+    console.error("Failed to save match decision:", error);
+    showToast(`Could not save decision. ${formatSupabaseError(error)}`, "error");
+  }
+}
+
+async function saveAdminEvaluationLabel(companyId, formElement) {
+  if (!state.isAdmin || !companyId) return;
+  try {
+    const payload = buildEvaluationLabelPayload(formElement);
+    await runAdminCompanyAction(companyId, "upsert_evaluation_label", payload);
+    await loadAdminCompanies();
+    showToast("Evaluation label saved", "success");
+  } catch (error) {
+    console.error("Failed to save evaluation label:", error);
+    showToast(`Could not save evaluation label. ${formatSupabaseError(error)}`, "error");
   }
 }
 
@@ -9397,9 +9496,14 @@ function renderAdminCompanyDetails(company) {
               actionState: state.adminCompanyAccessActions?.[company.id] || ""
             })}
 
+            ${renderAdminMatchingProfilePanel(company, {
+              escapeHtml,
+              actionState: actionState
+            })}
+
             <section class="side-panel">
               <h3>Latest matches</h3>
-              ${renderAdminCompanyMatchList(company, { escapeHtml })}
+              ${renderAdminCompanyMatchList(company, { escapeHtml, renderMatchDecisionControls })}
               <h3>Latest reports</h3>
               ${company.latestReports.length ? `
                 <ul class="admin-detail-list">

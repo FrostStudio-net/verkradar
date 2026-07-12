@@ -77,8 +77,40 @@ Deno.serve(async (req) => {
       return json({ ok: true, action, ...result });
     }
     if (!isUuid(companyId)) return json({ error: "A valid companyId is required." }, 400);
-    if (!["refresh_matches", "generate_report", "review_match", "mark_report_sent", "invite_customer", "revoke_customer_access"].includes(action)) {
+    if (!["refresh_matches", "generate_report", "review_match", "mark_report_sent", "invite_customer", "revoke_customer_access", "update_company_matching_profile", "upsert_match_decision", "upsert_evaluation_label"].includes(action)) {
       return json({ error: "Unsupported action." }, 400);
+    }
+
+    if (action === "update_company_matching_profile") {
+      const result = await updateCompanyMatchingProfile(adminClient, {
+        companyId,
+        matchingProfile: body.matchingProfile || {},
+      });
+      return json({ ok: true, action, ...result });
+    }
+
+    if (action === "upsert_match_decision") {
+      const result = await upsertMatchDecision(adminClient, {
+        companyId,
+        opportunityId: String(body.opportunityId || "").trim(),
+        decision: String(body.decision || "").trim(),
+        reason: String(body.reason || "").trim(),
+        comment: String(body.comment || "").trim(),
+        userId: userData.user.id,
+      });
+      return json({ ok: true, action, ...result });
+    }
+
+    if (action === "upsert_evaluation_label") {
+      const result = await upsertEvaluationLabel(adminClient, {
+        companyId,
+        opportunityId: String(body.opportunityId || "").trim(),
+        label: String(body.label || "").trim(),
+        reason: String(body.reason || "").trim(),
+        notes: String(body.notes || "").trim(),
+        userId: userData.user.id,
+      });
+      return json({ ok: true, action, ...result });
     }
 
     if (action === "invite_customer") {
@@ -152,6 +184,91 @@ Deno.serve(async (req) => {
     return json({ error: errorMessage(error) }, 500);
   }
 });
+
+async function updateCompanyMatchingProfile(
+  supabase: ReturnType<typeof createClient>,
+  options: { companyId: string; matchingProfile: Record<string, unknown> },
+) {
+  const profile = normalizeMatchingProfileInput(options.matchingProfile || {});
+  const { data, error } = await supabase
+    .from("companies")
+    .update({
+      core_services: profile.coreServices,
+      secondary_services: profile.secondaryServices,
+      excluded_services: profile.excludedServices,
+      preferred_project_types: profile.preferredProjectTypes,
+      excluded_project_types: profile.excludedProjectTypes,
+      equipment: profile.equipment,
+      certifications: profile.certifications,
+      preferred_buyers: profile.preferredBuyers,
+      max_travel_distance_km: profile.maxTravelDistanceKm,
+      typical_project_size: profile.typicalProjectSize || null,
+      profile_notes_for_ai: profile.profileNotesForAi || null,
+      matching_profile_updated_at: new Date().toISOString(),
+      matching_profile_hash: await sha256Hex(JSON.stringify(profile)),
+    })
+    .eq("id", options.companyId)
+    .select("id, company_name, matching_profile_updated_at")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("Company not found.");
+  return {
+    company_id: data.id,
+    company_name: data.company_name,
+    matching_profile_updated_at: data.matching_profile_updated_at,
+  };
+}
+
+async function upsertMatchDecision(
+  supabase: ReturnType<typeof createClient>,
+  options: { companyId: string; opportunityId: string; decision: string; reason: string; comment: string; userId: string },
+) {
+  if (!isUuid(options.opportunityId)) throw new Error("A valid opportunityId is required.");
+  if (!["send", "possible", "reject"].includes(options.decision)) throw new Error("Decision must be send, possible or reject.");
+  const reason = normalizeDecisionReason(options.reason);
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("admin_match_decisions")
+    .upsert({
+      company_id: options.companyId,
+      opportunity_id: options.opportunityId,
+      decision: options.decision,
+      reason: reason || null,
+      comment: options.comment || null,
+      decided_by: options.userId,
+      decided_at: now,
+      updated_at: now,
+    }, { onConflict: "company_id,opportunity_id" })
+    .select("id, company_id, opportunity_id, decision, reason, comment, decided_at")
+    .single();
+  if (error) throw error;
+  return { decision: data };
+}
+
+async function upsertEvaluationLabel(
+  supabase: ReturnType<typeof createClient>,
+  options: { companyId: string; opportunityId: string; label: string; reason: string; notes: string; userId: string },
+) {
+  if (!isUuid(options.opportunityId)) throw new Error("A valid opportunityId is required.");
+  if (!["strong", "possible", "no_fit"].includes(options.label)) throw new Error("Evaluation label must be strong, possible or no_fit.");
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("match_evaluation_labels")
+    .upsert({
+      company_id: options.companyId,
+      opportunity_id: options.opportunityId,
+      label: options.label,
+      reason: options.reason || null,
+      notes: options.notes || null,
+      labeled_by: options.userId,
+      labeled_at: now,
+      updated_at: now,
+    }, { onConflict: "company_id,opportunity_id" })
+    .select("id, company_id, opportunity_id, label, reason, notes, labeled_at")
+    .single();
+  if (error) throw error;
+  return { evaluation_label: data };
+}
 
 async function createCompanyFromTrialRequest(
   supabase: ReturnType<typeof createClient>,
@@ -2096,6 +2213,37 @@ function normalizeAdminCompanyInput(input: AdminCompanyInput) {
     includeLowConfidence: Boolean(input.includeLowConfidence),
     autoAlertMode: String(input.autoAlertMode || "auto_safe_only").trim() || "auto_safe_only",
   };
+}
+
+function normalizeMatchingProfileInput(input: Record<string, unknown>) {
+  return {
+    coreServices: cleanStringArray(input.coreServices),
+    secondaryServices: cleanStringArray(input.secondaryServices),
+    excludedServices: cleanStringArray(input.excludedServices),
+    preferredProjectTypes: cleanStringArray(input.preferredProjectTypes),
+    excludedProjectTypes: cleanStringArray(input.excludedProjectTypes),
+    equipment: cleanStringArray(input.equipment),
+    certifications: cleanStringArray(input.certifications),
+    preferredBuyers: cleanStringArray(input.preferredBuyers),
+    maxTravelDistanceKm: nullableNumber(input.maxTravelDistanceKm),
+    typicalProjectSize: String(input.typicalProjectSize || "").trim(),
+    profileNotesForAi: String(input.profileNotesForAi || "").trim(),
+  };
+}
+
+function normalizeDecisionReason(value: string) {
+  const normalized = String(value || "").trim();
+  return [
+    "wrong_service",
+    "wrong_location",
+    "too_large",
+    "too_small",
+    "missing_equipment_or_certification",
+    "consultancy_not_execution",
+    "not_interested",
+    "duplicate_or_already_known",
+    "other",
+  ].includes(normalized) ? normalized : "";
 }
 
 function normalizePlan(value: string) {

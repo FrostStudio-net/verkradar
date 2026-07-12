@@ -30,12 +30,12 @@ export function renderAdminAutomaticAiReviewPanel(options) {
 }
 
 export function renderAdminCompanyMatchList(company, options) {
-  const { escapeHtml } = options;
+  const { escapeHtml, renderMatchDecisionControls = null } = options;
   const matches = company.latestMatches || [];
   if (!matches.length) return `<p>No stored matches yet.</p>`;
   return `
     <ul class="admin-detail-list admin-ai-aware-match-list">
-      ${matches.map((match) => renderCompactMatchRow(match, { escapeHtml, company })).join("")}
+      ${matches.map((match) => renderCompactMatchRow(match, { escapeHtml, company, renderMatchDecisionControls })).join("")}
     </ul>
   `;
 }
@@ -164,7 +164,7 @@ function renderAutoCompanyDiagnostics(rows, escapeHtml) {
   `;
 }
 
-function renderCompactMatchRow(match, { escapeHtml, company }) {
+function renderCompactMatchRow(match, { escapeHtml, company, renderMatchDecisionControls }) {
   const opportunity = match.opportunities || {};
   const display = getAdminMatchAiDisplay(match, company);
   const score = Number(match.match_score || 0);
@@ -179,6 +179,9 @@ function renderCompactMatchRow(match, { escapeHtml, company }) {
       </span>
       ${match.ai_review_skipped_reason ? `<small>Skipped: ${escapeHtml(formatSkippedReason(match.ai_review_skipped_reason))}</small>` : ""}
       ${match.ai_review_profile_stale ? `<small>AI review may be stale because the company profile changed.</small>` : ""}
+      ${match.adminDecision ? `<small>Decision: ${escapeHtml(match.adminDecision.decision || "")}${match.adminDecision.reason ? ` · ${escapeHtml(match.adminDecision.reason)}` : ""}</small>` : ""}
+      ${match.evaluationLabel ? `<small>Evaluation: ${escapeHtml(match.evaluationLabel.label || "")}${match.evaluationLabel.reason ? ` · ${escapeHtml(match.evaluationLabel.reason)}` : ""}</small>` : ""}
+      ${renderMatchDecisionControls ? renderMatchDecisionControls(match, { escapeHtml }) : ""}
     </li>
   `;
 }

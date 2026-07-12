@@ -8,6 +8,8 @@ export { formatAiUsageCost, loadTodayAiUsageSummary, requestAiMatchReview, reque
 export { mergeAiReviewsIntoAdminMatches } from "./services/matchDisplay.js";
 export { renderAdminDailyPipelinePanel } from "./pages/adminAutomation.js";
 export { renderAdminCompanyAccessPanel } from "./pages/adminCompanyAccess.js";
+export { renderAdminMatchingProfilePanel, renderMatchDecisionControls } from "./pages/adminHybridMatching.js";
+export { buildEvaluationLabelPayload, buildMatchDecisionPayload, buildMatchingProfilePayload, isHybridMatchingEnabled } from "./services/hybridMatching.js";
 export { renderAcceptInvitePage } from "./pages/acceptInvite.js";
 export { renderForgotPasswordPage, renderLoginPage, renderPublicSignupUnavailablePage, renderResetPasswordPage, renderSignupPage } from "./pages/auth.js";
 export { renderAdminAutomaticAiReviewPanel, renderAdminCompanyAiReviewPanel, renderAdminCompanyMatchList } from "./pages/adminAiReviews.js";
