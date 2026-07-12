@@ -230,9 +230,9 @@ export async function previewCompanyInvite(token) {
 export async function acceptCompanyInvite(token) {
   const endpoint = getCompanyInviteEndpoint();
   if (!endpoint) throw new Error("Company invite function is not configured.");
-  let headers;
+  let auth;
   try {
-    headers = await getAuthenticatedHeaders();
+    auth = await getAuthenticatedHeaders();
   } catch (error) {
     const wrapped = new Error(error instanceof Error ? error.message : "You must be logged in to accept this invite.");
     wrapped.details = {
@@ -247,13 +247,14 @@ export async function acceptCompanyInvite(token) {
   }
   const response = await fetch(endpoint, {
     method: "POST",
-    headers,
+    headers: auth.headers,
     body: JSON.stringify({ action: "accept", token }),
   });
   const payload = await readJsonResponse(response);
   const debug = {
+    ...auth.diagnostics,
     accept_request_sent: true,
-    authorization_header_included: Boolean(headers.authorization),
+    authorization_header_included: Boolean(auth.headers.authorization),
     accept_http_status: response.status,
     accept_response_body: sanitizeInvitePayload(payload),
   };
@@ -371,7 +372,20 @@ async function getAuthenticatedHeaders() {
   const accessToken = data.session?.access_token;
   if (!accessToken) throw new Error("You must be logged in to accept this invite.");
   headers.authorization = `Bearer ${accessToken}`;
-  return headers;
+  const jwtPayload = decodeJwtPayload(accessToken);
+  return {
+    headers,
+    diagnostics: {
+      session_user_id: data.session?.user?.id || "",
+      session_user_email: data.session?.user?.email || "",
+      bearer_jwt_sub: jwtPayload.sub || "",
+      bearer_jwt_email: jwtPayload.email || "",
+      bearer_jwt_iss: jwtPayload.iss || "",
+      bearer_jwt_exp: jwtPayload.exp || "",
+      session_user_matches_bearer_sub: Boolean(data.session?.user?.id && jwtPayload.sub && data.session.user.id === jwtPayload.sub),
+      session_email_matches_bearer_email: Boolean(data.session?.user?.email && jwtPayload.email && normalizeAccessEmail(data.session.user.email) === normalizeAccessEmail(jwtPayload.email)),
+    },
+  };
 }
 
 async function readJsonResponse(response) {
@@ -381,6 +395,19 @@ async function readJsonResponse(response) {
     return JSON.parse(text);
   } catch {
     return { error: text };
+  }
+}
+
+function decodeJwtPayload(token) {
+  try {
+    const part = String(token || "").split(".")[1] || "";
+    if (!part) return {};
+    const normalized = part.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    const json = decodeURIComponent(Array.from(atob(padded)).map((char) => `%${char.charCodeAt(0).toString(16).padStart(2, "0")}`).join(""));
+    return JSON.parse(json);
+  } catch {
+    return {};
   }
 }
 

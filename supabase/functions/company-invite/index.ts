@@ -94,6 +94,8 @@ Deno.serve(async (req) => {
       }
       const authHeader = req.headers.get("Authorization") || req.headers.get("authorization") || "";
       const accessToken = authHeader.replace(/^Bearer\s+/i, "").trim();
+      const jwtPayload = decodeJwtPayload(accessToken);
+      const expectedProjectRef = getProjectRefFromSupabaseUrl(supabaseUrl);
       if (!authHeader || !/^Bearer\s+/i.test(authHeader) || !accessToken) {
         const diagnostics = await buildAcceptDiagnostics(token, invite, {
           lookupDiagnostics: lookup.diagnostics,
@@ -103,6 +105,8 @@ Deno.serve(async (req) => {
           authorizationHeaderPresent: Boolean(authHeader),
           bearerTokenPresent: Boolean(accessToken),
           bearerTokenLength: accessToken.length,
+          bearerJwt: jwtPayload,
+          expectedProjectRef,
           getUserAttempted: false,
           getUserSucceeded: false,
         });
@@ -113,6 +117,9 @@ Deno.serve(async (req) => {
         auth: { persistSession: false },
       });
       const { data: userData, error: userError } = await authClient.auth.getUser(accessToken);
+      const adminUserLookup = jwtPayload.sub
+        ? await getAuthUserDiagnostic(adminClient, String(jwtPayload.sub))
+        : { attempted: false, exists: false, errorCode: "", errorMessage: "" };
       if (userError || !userData.user) {
         const diagnostics = await buildAcceptDiagnostics(token, invite, {
           lookupDiagnostics: lookup.diagnostics,
@@ -122,10 +129,13 @@ Deno.serve(async (req) => {
           authorizationHeaderPresent: true,
           bearerTokenPresent: true,
           bearerTokenLength: accessToken.length,
+          bearerJwt: jwtPayload,
+          expectedProjectRef,
           getUserAttempted: true,
           getUserSucceeded: false,
           getUserErrorCode: userError?.code || "",
           getUserErrorMessage: userError?.message || "",
+          adminUserLookup,
         });
         console.info("company_invite_accept_failed", diagnostics);
         return json({ error: "Log in to accept this invite.", code: "invalid_session", diagnostics }, 401);
@@ -143,8 +153,11 @@ Deno.serve(async (req) => {
           authorizationHeaderPresent: true,
           bearerTokenPresent: true,
           bearerTokenLength: accessToken.length,
+          bearerJwt: jwtPayload,
+          expectedProjectRef,
           getUserAttempted: true,
           getUserSucceeded: true,
+          adminUserLookup,
         });
         console.info("company_invite_accept_failed", diagnostics);
         return json({
@@ -167,8 +180,11 @@ Deno.serve(async (req) => {
             authorizationHeaderPresent: true,
             bearerTokenPresent: true,
             bearerTokenLength: accessToken.length,
+            bearerJwt: jwtPayload,
+            expectedProjectRef,
             getUserAttempted: true,
             getUserSucceeded: true,
+            adminUserLookup,
           });
           console.info("company_invite_accept_already_active", diagnostics);
           return json({
@@ -196,8 +212,11 @@ Deno.serve(async (req) => {
           authorizationHeaderPresent: true,
           bearerTokenPresent: true,
           bearerTokenLength: accessToken.length,
+          bearerJwt: jwtPayload,
+          expectedProjectRef,
           getUserAttempted: true,
           getUserSucceeded: true,
+          adminUserLookup,
         });
         console.info("company_invite_accept_failed", diagnostics);
         return json({
@@ -232,8 +251,11 @@ Deno.serve(async (req) => {
         authorizationHeaderPresent: true,
         bearerTokenPresent: true,
         bearerTokenLength: accessToken.length,
+        bearerJwt: jwtPayload,
+        expectedProjectRef,
         getUserAttempted: true,
         getUserSucceeded: true,
+        adminUserLookup,
       });
       console.info("company_invite_accept_success", diagnostics);
 
@@ -371,10 +393,18 @@ async function buildAcceptDiagnostics(token: string, invite: Record<string, unkn
   authorizationHeaderPresent?: boolean;
   bearerTokenPresent?: boolean;
   bearerTokenLength?: number;
+  bearerJwt?: Record<string, unknown>;
+  expectedProjectRef?: string;
   getUserAttempted?: boolean;
   getUserSucceeded?: boolean;
   getUserErrorCode?: string;
   getUserErrorMessage?: string;
+  adminUserLookup?: {
+    attempted: boolean;
+    exists: boolean;
+    errorCode?: string;
+    errorMessage?: string;
+  };
 }) {
   const tokenHash = token ? await sha256Hex(token) : "";
   const userEmail = normalizeEmail(options.userEmail || options.userData?.email);
@@ -396,10 +426,19 @@ async function buildAcceptDiagnostics(token: string, invite: Record<string, unkn
     authorization_header_present: Boolean(options.authorizationHeaderPresent),
     bearer_token_present: Boolean(options.bearerTokenPresent),
     bearer_token_length: Number(options.bearerTokenLength || 0),
+    bearer_jwt_sub: String(options.bearerJwt?.sub || ""),
+    bearer_jwt_email: String(options.bearerJwt?.email || ""),
+    bearer_jwt_iss: String(options.bearerJwt?.iss || ""),
+    bearer_jwt_exp: String(options.bearerJwt?.exp || ""),
+    expected_project_ref: options.expectedProjectRef || "",
     get_user_attempted: Boolean(options.getUserAttempted),
     get_user_succeeded: Boolean(options.getUserSucceeded),
     get_user_error_code: options.getUserErrorCode || "",
     get_user_error_message: options.getUserErrorMessage || "",
+    admin_get_user_attempted: Boolean(options.adminUserLookup?.attempted),
+    admin_get_user_exists: Boolean(options.adminUserLookup?.exists),
+    admin_get_user_error_code: options.adminUserLookup?.errorCode || "",
+    admin_get_user_error_message: options.adminUserLookup?.errorMessage || "",
     invalid_reason: options.invalidReason || "",
     accept_error_reason: options.invalidReason || "",
     update_attempted: Boolean(options.updateAttempted),
@@ -410,6 +449,45 @@ async function buildAcceptDiagnostics(token: string, invite: Record<string, unkn
 async function sha256Hex(value: string) {
   const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return Array.from(new Uint8Array(hash)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function decodeJwtPayload(token: string) {
+  try {
+    const part = String(token || "").split(".")[1] || "";
+    if (!part) return {};
+    const normalized = part.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(padded), (char) => char.charCodeAt(0))));
+  } catch {
+    return {};
+  }
+}
+
+function getProjectRefFromSupabaseUrl(value: string) {
+  try {
+    return new URL(value).hostname.split(".")[0] || "";
+  } catch {
+    return "";
+  }
+}
+
+async function getAuthUserDiagnostic(adminClient: ReturnType<typeof createClient>, userId: string) {
+  try {
+    const { data, error } = await adminClient.auth.admin.getUserById(userId);
+    return {
+      attempted: true,
+      exists: Boolean(data?.user && !error),
+      errorCode: error?.code || "",
+      errorMessage: error?.message || "",
+    };
+  } catch (error) {
+    return {
+      attempted: true,
+      exists: false,
+      errorCode: "",
+      errorMessage: errorMessage(error),
+    };
+  }
 }
 
 function normalizeEmail(value: unknown) {
