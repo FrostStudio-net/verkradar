@@ -12,7 +12,7 @@ export function getLegalPageData(key, language = "is") {
         ["Fyrirtækjaprófíll og stillingar", ["Fyrirtækjaprófíllinn er notaður til að bera opinber verkefni saman við þjónustu, svæði, lykilorð og óskir fyrirtækisins. Betri prófíll gefur yfirleitt betri samsvörun."]],
         ["Vistuð og hunsuð tækifæri", ["VerkRadar getur vistað hvaða verkefni notandi vistar, fylgist með eða hunsar. Þetta er notað til að bæta upplifun, síur og yfirlit."]],
         ["Vafrakökur og vafrageymsla", ["VerkRadar notar nauðsynlega vafrageymslu, lotugeymslu og sambærilega virkni fyrir innskráningu, Supabase Auth lotur, tungumál, stillingar og grunnvirkni appsins.", "Við gerum ekki ráð fyrir auglýsinga- eða rekjanlegri markaðssetningargeymslu í þessari útgáfu. Ef greiningar eða auglýsingatól verða síðar bætt við þarf að uppfæra þessa lýsingu."]],
-        ["Hafa samband", ["Spurningar um persónuvernd eða gögn má senda á info@froststudio.net."]]
+        ["Hafa samband", ["Spurningar um persónuvernd eða gögn má senda á info@verkradar.is."]]
       ]
     } : {
       eyebrow: "Legal and trust",
@@ -25,7 +25,7 @@ export function getLegalPageData(key, language = "is") {
         ["Company profile and settings", ["The company profile is used to compare public opportunities against services, locations, keywords, and company preferences. A better profile usually creates better matches."]],
         ["Saved and ignored opportunities", ["VerkRadar may store which opportunities a user saves, watches, or ignores. This is used to improve the experience, filters, and reports."]],
         ["Cookies and browser storage", ["VerkRadar uses essential browser storage, session storage, and similar functionality for login, Supabase Auth sessions, language, preferences, and core app functionality.", "We do not currently claim to use advertising or marketing tracking storage in this version. If analytics or advertising tools are added later, this section should be updated."]],
-        ["Contact", ["Questions about privacy or data can be sent to info@froststudio.net."]]
+        ["Contact", ["Questions about privacy or data can be sent to info@verkradar.is."]]
       ]
     },
     terms: is ? {
@@ -40,7 +40,7 @@ export function getLegalPageData(key, language = "is") {
         ["Prufuaðgangur og verð", ["Prufuaðgangur, verð, greiðslur og uppsagnir ráðast af verðsíðu, pöntunarsíðu eða skriflegu samkomulagi hverju sinni."]],
         ["Uppsögn", ["Notandi getur óskað eftir lokun eða breytingu á aðgangi. VerkRadar getur takmarkað aðgang ef þjónustan er misnotuð, greiðslur vantar eða öryggisáhætta kemur upp."]],
         ["Ábyrgðartakmörkun", ["VerkRadar ber ekki ábyrgð á töpuðum skilafrestum, röngum upplýsingum á upprunalegum heimildum, viðskiptatapi eða ákvörðunum sem teknar eru út frá yfirlitum án staðfestingar á frumgögnum."]],
-        ["Hafa samband", ["Spurningar um skilmála má senda á info@froststudio.net."]]
+        ["Hafa samband", ["Spurningar um skilmála má senda á info@verkradar.is."]]
       ]
     } : {
       eyebrow: "Legal and trust",
@@ -54,7 +54,7 @@ export function getLegalPageData(key, language = "is") {
         ["Trial access and pricing", ["Trial access, pricing, billing, and cancellation are governed by the pricing page, order page, or written agreement in effect at the time."]],
         ["Cancellation", ["A user may request account changes or cancellation. VerkRadar may restrict access if the service is misused, payment is missing, or a security risk arises."]],
         ["Limitation of liability", ["VerkRadar is not responsible for missed deadlines, incorrect information at original sources, business losses, or decisions made from reports without checking source documents."]],
-        ["Contact", ["Questions about these terms can be sent to info@froststudio.net."]]
+        ["Contact", ["Questions about these terms can be sent to info@verkradar.is."]]
       ]
     },
     data: is ? {
@@ -67,7 +67,7 @@ export function getLegalPageData(key, language = "is") {
         ["Sveitarfélög og útboðsvefir", ["VerkRadar getur vaktað sveitarfélög, innkaupa- og útboðsvefi og sértækar síður fyrir framkvæmdir, þjónustu eða innkaup."]],
         ["Evrópsk útboð ef við á", ["Evrópsk útboð geta verið sótt úr TED eða sambærilegum heimildum þegar þau eiga við markaðinn og fyrirtækjaprófíla."]],
         ["Takmarkanir gagna", ["Sumar heimildir veita ekki fulla skilafresti, verðmæti, kaupanda eða útboðsgögn í véllesanlegu formi. Gögn geta verið seinkuð, ófullkomin, tvítekin eða breytt á upprunalegri síðu."]],
-        ["Leiðréttingar", ["Ef þú sérð rangar eða úreltar upplýsingar má senda ábendingu á info@froststudio.net. Opnið alltaf upprunalega heimild áður en brugðist er við."]]
+        ["Leiðréttingar", ["Ef þú sérð rangar eða úreltar upplýsingar má senda ábendingu á info@verkradar.is. Opnið alltaf upprunalega heimild áður en brugðist er við."]]
       ]
     } : {
       eyebrow: "Data sources",
@@ -79,7 +79,7 @@ export function getLegalPageData(key, language = "is") {
         ["Municipalities and procurement portals", ["VerkRadar may monitor municipalities, procurement/tender portals, and specific pages for construction, services, or purchasing."]],
         ["European tenders where applicable", ["European tenders may be imported from TED or similar sources when relevant to the market and company profiles."]],
         ["Data limitations", ["Some sources do not provide full deadlines, values, buyer data, or tender documents in machine-readable form. Data may be delayed, incomplete, duplicated, or changed at the original source."]],
-        ["Corrections", ["If you see incorrect or outdated information, send a correction to info@froststudio.net. Always open the original source before acting."]]
+        ["Corrections", ["If you see incorrect or outdated information, send a correction to info@verkradar.is. Always open the original source before acting."]]
       ]
     },
     security: is ? {
@@ -92,7 +92,7 @@ export function getLegalPageData(key, language = "is") {
         ["Aðgangsstýring", ["Aðgangur að fyrirtækjagögnum, samsvörunum og skýrslum er aðgreindur eftir notanda og fyrirtæki þar sem það á við."]],
         ["Fyrirtækjagögn", ["Fyrirtækjaprófílar, stillingar og vistuð/hunsuð verkefni eru notuð til að veita þjónustuna og ættu ekki að vera sýnileg öðrum viðskiptavinum."]],
         ["Admin aðgangur", ["Admin verkfæri eru takmörkuð við skilgreinda stjórnendur og eru notuð til að fylgjast með heimildum, innflutningi, fyrirtækjum og handvirkri yfirferð."]],
-        ["Tilkynna vandamál", ["Öryggisspurningar eða ábendingar má senda á info@froststudio.net."]]
+        ["Tilkynna vandamál", ["Öryggisspurningar eða ábendingar má senda á info@verkradar.is."]]
       ]
     } : {
       eyebrow: "Security",
@@ -104,7 +104,7 @@ export function getLegalPageData(key, language = "is") {
         ["Access control", ["Access to company data, matches, and reports is separated by user and company where applicable."]],
         ["Company data", ["Company profiles, settings, and saved/ignored opportunities are used to provide the service and should not be visible to other customers."]],
         ["Admin access", ["Admin tools are restricted to defined administrators and are used to monitor sources, imports, companies, and manual review."]],
-        ["Report an issue", ["Security questions or reports can be sent to info@froststudio.net."]]
+        ["Report an issue", ["Security questions or reports can be sent to info@verkradar.is."]]
       ]
     },
     contact: is ? {
@@ -112,14 +112,14 @@ export function getLegalPageData(key, language = "is") {
       title: "Hafa samband",
       intro: "Viltu prófa VerkRadar, spyrja um vöktun eða benda á leiðréttingu?",
       sections: [
-        ["VerkRadar / Frost Studio", ["Netfang: info@froststudio.net", "Tengiliður: Kristján Jakob"]]
+        ["VerkRadar / Frost Studio", ["Netfang: info@verkradar.is", "Tengiliður: Kristján Jakob"]]
       ]
     } : {
       eyebrow: "Contact",
       title: "Contact",
       intro: "Want to try VerkRadar, ask about monitoring, or report a correction?",
       sections: [
-        ["VerkRadar / Frost Studio", ["Email: info@froststudio.net", "Contact person: Kristján Jakob"]]
+        ["VerkRadar / Frost Studio", ["Email: info@verkradar.is", "Contact person: Kristján Jakob"]]
       ]
     }
   };

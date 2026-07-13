@@ -258,6 +258,12 @@ nav button.active::after {
   pointer-events: auto;
 }
 
+.site-header.is-menu-closing .mobile-menu-panel {
+  transform: translateY(-10px);
+  opacity: 0;
+  pointer-events: none;
+}
+
 
 .profile-menu {
   position: relative;
@@ -4105,14 +4111,30 @@ body.modal-open {
     box-shadow: 0 24px 60px rgba(0,0,0,0.35);
   }
 
-  .site-header.is-menu-open::before {
+  .site-header.is-menu-closing .mobile-menu-panel {
+    min-height: 100dvh;
+    max-height: 100dvh;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(18px);
+    box-shadow: 0 24px 60px rgba(0,0,0,0);
+  }
+
+  .site-header.is-menu-open::before,
+  .site-header.is-menu-closing::before {
     content: "";
     position: fixed;
     inset: var(--header-height, 72px) 0 0;
     background: rgba(0,0,0,0.55);
     backdrop-filter: blur(8px);
     pointer-events: none;
+    opacity: 0;
+    transition: opacity 220ms ease;
     z-index: 0;
+  }
+
+  .site-header.is-menu-open::before {
+    opacity: 1;
   }
 
   .header-top {
@@ -4560,12 +4582,17 @@ body.modal-open {
   }
 
   .admin-tabs {
-    display: grid;
-    grid-template-columns: 1fr;
+    display: flex;
+    flex-wrap: nowrap;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .admin-tabs button {
-    width: 100%;
+    flex: 0 0 auto;
+    width: auto;
+    white-space: nowrap;
   }
 
   .imported-opportunity-row {
@@ -5442,6 +5469,14 @@ body.modal-open {
     right: 10px;
     bottom: 10px;
     max-width: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-menu-panel,
+  .site-header::before,
+  .menu-toggle span {
+    transition: none !important;
   }
 }
 

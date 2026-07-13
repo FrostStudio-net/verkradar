@@ -301,6 +301,7 @@ let state = {
   isLoadingOpportunities: false,
   opportunityLoadError: null,
   isMobileMenuOpen: false,
+  isMobileMenuClosing: false,
   profileMenuOpen: false,
   selectedOpportunityId: null,
   toast: null
@@ -497,6 +498,7 @@ function clearLocalProfileState() {
   localStorage.removeItem("verkradar_local_user_id");
   localStorage.removeItem("verkradar_saved_opportunities");
   localStorage.removeItem("verkradar_ignored_opportunities");
+  clearOpportunityDetailsState();
   state.profile = null;
   state.profileDraft = null;
   state.profileDraftDirty = false;
@@ -571,6 +573,8 @@ function updateAdminOpportunityDraftFromForm(formData) {
 }
 
 let suppressNextHashChange = false;
+let mobileMenuCloseTimer = null;
+const MOBILE_MENU_CLOSE_MS = 220;
 
 window.addEventListener("hashchange", () => {
   const nextRoute = location.hash.replace("#", "") || "/";
@@ -591,10 +595,9 @@ window.addEventListener("hashchange", () => {
   state.route = nextRoute;
   syncPendingSignupPlanFromRoute(nextRoute);
   syncPendingInviteTokenFromRoute(nextRoute);
-  state.isMobileMenuOpen = false;
+  resetMobileMenuState();
   state.profileMenuOpen = false;
   if (routeChanged) clearOpportunityDetailsState();
-  document.body.classList.remove("mobile-menu-active");
   render();
   scrollToPageTop();
   afterRouteRender();
@@ -621,7 +624,7 @@ document.addEventListener("click", (event) => {
     return;
   }
 
-  if (state.isMobileMenuOpen && !event.target.closest?.(".site-header")) {
+  if ((state.isMobileMenuOpen || state.isMobileMenuClosing) && !event.target.closest?.(".site-header")) {
     closeMobileMenu();
     return;
   }
@@ -646,8 +649,14 @@ document.addEventListener("click", (event) => {
 
   if (name === "toggle-mobile-menu") {
     event.preventDefault();
-    if (state.isMobileMenuOpen) closeMobileMenu();
+    if (state.isMobileMenuOpen || state.isMobileMenuClosing) closeMobileMenu();
     else openMobileMenu();
+    return;
+  }
+
+  if (name === "close-mobile-menu") {
+    event.preventDefault();
+    closeMobileMenu();
     return;
   }
 
@@ -726,27 +735,27 @@ document.addEventListener("click", (event) => {
 
   if (name === "scroll-to") {
     event.preventDefault();
-    state.isMobileMenuOpen = false;
-    state.profileMenuOpen = false;
-    document.body.classList.remove("mobile-menu-active");
     const targetId = action.dataset.target;
     if (!targetId) return;
-    if (state.route !== "/") {
-      navigate("/");
-      setTimeout(() => scrollToSection(targetId), 50);
-    } else {
-      render();
-      setTimeout(() => scrollToSection(targetId), 0);
-    }
+    const goToTarget = () => {
+      if (state.route !== "/") {
+        navigate("/");
+        setTimeout(() => scrollToSection(targetId), 50);
+      } else {
+        render();
+        setTimeout(() => scrollToSection(targetId), 0);
+      }
+    };
+    if (state.isMobileMenuOpen || state.isMobileMenuClosing) closeMobileMenu(goToTarget);
+    else goToTarget();
     return;
   }
 
   if (name === "go") {
     event.preventDefault();
-    state.isMobileMenuOpen = false;
     state.profileMenuOpen = false;
-    document.body.classList.remove("mobile-menu-active");
-    navigate(action.dataset.href);
+    if (state.isMobileMenuOpen || state.isMobileMenuClosing) closeMobileMenu(() => navigate(action.dataset.href));
+    else navigate(action.dataset.href);
     return;
   }
   if (name === "accept-company-invite") {
@@ -811,6 +820,7 @@ document.addEventListener("click", (event) => {
     state.selectedAdminTrialRequestId = null;
     state.adminTrialCompanyDraft = null;
     render();
+    scrollActiveAdminTabIntoView();
   }
   if (name === "view-admin-company") {
     state.selectedAdminCompanyId = id;
@@ -920,7 +930,8 @@ document.addEventListener("click", (event) => {
   if (name === "delete-opportunity") deleteOpportunity(id);
   if (name === "logout") {
     state.profileMenuOpen = false;
-    if (state.isMobileMenuOpen) {
+    clearOpportunityDetailsState();
+    if (state.isMobileMenuOpen || state.isMobileMenuClosing) {
       closeMobileMenu(() => signOut());
       return;
     }
@@ -948,7 +959,7 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && state.isMobileMenuOpen) {
+  if (event.key === "Escape" && (state.isMobileMenuOpen || state.isMobileMenuClosing)) {
     event.preventDefault();
     closeMobileMenu();
     return;
@@ -1068,6 +1079,7 @@ document.addEventListener("input", (event) => {
 
   if (event.target.matches("[data-admin-filter]")) {
     const key = event.target.dataset.adminFilter;
+    state.adminOpportunityFilters = getAdminOpportunityFilters();
     if (event.target.type === "checkbox") {
       state.adminOpportunityFilters[key] = event.target.checked;
       if (key === "tedOnly" && event.target.checked) state.adminOpportunityFilters.manualOnly = false;
@@ -1122,6 +1134,7 @@ document.addEventListener("input", (event) => {
 document.addEventListener("change", (event) => {
   if (event.target.matches("[data-admin-filter]")) {
     const key = event.target.dataset.adminFilter;
+    state.adminOpportunityFilters = getAdminOpportunityFilters();
     if (event.target.type === "checkbox") {
       state.adminOpportunityFilters[key] = event.target.checked;
       if (key === "tedOnly" && event.target.checked) state.adminOpportunityFilters.manualOnly = false;
@@ -1324,32 +1337,57 @@ function handleAppFocusReturn() {
 }
 
 function openMobileMenu() {
+  if (mobileMenuCloseTimer) {
+    clearTimeout(mobileMenuCloseTimer);
+    mobileMenuCloseTimer = null;
+  }
   updateMobileMenuOffset();
   state.isMobileMenuOpen = true;
+  state.isMobileMenuClosing = false;
   state.profileMenuOpen = false;
   document.body.classList.add("mobile-menu-active");
   render();
 }
 
 function closeMobileMenu(callback) {
-  if (!state.isMobileMenuOpen) {
+  const runCallback = () => {
     if (typeof callback === "function") callback();
+  };
+
+  if (!state.isMobileMenuOpen && !state.isMobileMenuClosing) {
+    runCallback();
     return;
   }
 
   state.isMobileMenuOpen = false;
+  state.isMobileMenuClosing = true;
   state.profileMenuOpen = false;
-  document.body.classList.remove("mobile-menu-active");
   render();
 
-  if (typeof callback === "function") {
-    setTimeout(callback, 260);
+  if (mobileMenuCloseTimer) clearTimeout(mobileMenuCloseTimer);
+  const delay = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? 0 : MOBILE_MENU_CLOSE_MS;
+  mobileMenuCloseTimer = setTimeout(() => {
+    mobileMenuCloseTimer = null;
+    state.isMobileMenuClosing = false;
+    document.body.classList.remove("mobile-menu-active");
+    render();
+    runCallback();
+  }, delay);
+}
+
+function resetMobileMenuState() {
+  if (mobileMenuCloseTimer) {
+    clearTimeout(mobileMenuCloseTimer);
+    mobileMenuCloseTimer = null;
   }
+  state.isMobileMenuOpen = false;
+  state.isMobileMenuClosing = false;
+  document.body.classList.remove("mobile-menu-active");
 }
 
 function mobileNavigate(route) {
   if (!route) return;
-  if (!state.isMobileMenuOpen) {
+  if (!state.isMobileMenuOpen && !state.isMobileMenuClosing) {
     navigate(route);
     return;
   }
@@ -1368,7 +1406,7 @@ function mobileScrollTo(targetId) {
     }
   };
 
-  if (!state.isMobileMenuOpen) {
+  if (!state.isMobileMenuOpen && !state.isMobileMenuClosing) {
     scrollAfterClose();
     return;
   }
@@ -1385,6 +1423,14 @@ function updateMobileMenuOffset() {
   document.documentElement.style.setProperty("--header-height", `${Math.ceil(header.getBoundingClientRect().height)}px`);
 }
 
+window.addEventListener("resize", () => {
+  updateMobileMenuOffset();
+  if (!isMobileViewport() && (state.isMobileMenuOpen || state.isMobileMenuClosing)) {
+    resetMobileMenuState();
+    render();
+  }
+});
+
 function navigate(route) {
   route = route || "/";
   const authRoutes = ["/login", "/signup", "/forgot-password", "/reset-password"];
@@ -1395,9 +1441,8 @@ function navigate(route) {
     state.authSubmitting = false;
   }
 
-  state.isMobileMenuOpen = false;
+  resetMobileMenuState();
   state.profileMenuOpen = false;
-  document.body.classList.remove("mobile-menu-active");
 
   if (state.route === route) {
     render();
@@ -1489,6 +1534,7 @@ function afterRouteRender() {
     loadReportsForCurrentCompany();
   }
   if (state.route === "/admin" && state.isAdmin) {
+    scrollActiveAdminTabIntoView();
     if (!state.importRunsLoaded && !state.importRunsLoading) loadImportRunsForAdmin();
     if (!state.adminReportsLoaded && !state.adminReportsLoading) loadAdminReports();
     if (!state.adminTrialRequestsLoaded && !state.adminTrialRequestsLoading) loadTrialRequestsForAdmin();
@@ -4001,6 +4047,7 @@ function registerAuthListener() {
     state.profileLoadError = null;
     state.companyId = null;
     state.storedMatches = [];
+    clearOpportunityDetailsState();
     state.reports = [];
     state.reportsLoaded = false;
     state.reportsLoadError = null;
@@ -4052,6 +4099,7 @@ async function bootApp() {
       state.profileLoading = false;
       state.profileLoadError = null;
       state.companyId = null;
+      clearOpportunityDetailsState();
       state.isAdmin = false;
       state.adminLoaded = true;
       state.profileLoaded = true;
@@ -4117,6 +4165,7 @@ async function loadCompanyProfile(options = {}) {
       state.companyId = null;
       state.companyMembership = null;
       state.storedMatches = [];
+      clearOpportunityDetailsState();
       state.reports = [];
       state.reportsLoaded = false;
       state.reportsLoadError = null;
@@ -4151,6 +4200,7 @@ async function loadCompanyProfile(options = {}) {
     if (keywordsResult.error) throw keywordsResult.error;
 
     if (state.companyId !== company.id) {
+      clearOpportunityDetailsState();
       state.reports = [];
       state.reportsLoaded = false;
       state.reportsLoadError = null;
@@ -4181,6 +4231,7 @@ async function loadCompanyProfile(options = {}) {
       state.companyId = null;
       state.companyMembership = null;
       state.storedMatches = [];
+      clearOpportunityDetailsState();
       state.reports = [];
       state.reportsLoaded = false;
       state.reportsLoadError = null;
@@ -6392,6 +6443,10 @@ function render() {
 }
 
 function renderPreservingInputAndScroll(input) {
+  if (!input || !document.body.contains(input)) {
+    render();
+    return;
+  }
   const scrollX = window.scrollX;
   const scrollY = window.scrollY;
   const selector = getStableInputSelector(input);
@@ -6414,6 +6469,13 @@ function renderPreservingInputAndScroll(input) {
     ) {
       nextInput.setSelectionRange(selectionStart, selectionEnd);
     }
+  });
+}
+
+function scrollActiveAdminTabIntoView() {
+  requestAnimationFrame(() => {
+    const tab = document.querySelector(".admin-tabs button.is-active");
+    tab?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   });
 }
 
@@ -6446,7 +6508,7 @@ function renderShell(content) {
   const headerCta = getHeaderCta(isLoggedIn, hasProfile);
 
   return `
-    <header class="site-header ${state.isMobileMenuOpen ? "is-menu-open" : ""}">
+    <header class="site-header ${state.isMobileMenuOpen ? "is-menu-open" : ""} ${state.isMobileMenuClosing ? "is-menu-closing" : ""}">
       <div class="header-top">
         <button class="brand" data-action="go" data-href="/">
           <img class="brand-logo" src="/logo.png" alt="VerkRadar" />
@@ -6590,7 +6652,7 @@ function renderMobileMenuPanel(navItems, headerCta, isLoggedIn) {
   ).join("");
 
   return `
-    <nav class="mobile-menu-panel" id="mobile-menu">
+    <nav class="mobile-menu-panel" id="mobile-menu" data-action="close-mobile-menu">
       <div class="mobile-menu-scroll">
       <div class="mobile-menu-links">
         ${linkItems}
@@ -7804,7 +7866,7 @@ async function markAdminReportSent(reportId) {
 }
 
 function getFilteredAdminOpportunities() {
-  const filters = state.adminOpportunityFilters;
+  const filters = getAdminOpportunityFilters();
   const filtered = (state.opportunities || []).filter((opp) => {
     const isTed = isTedOpportunity(opp);
     if (filters.tedOnly && !isTed) return false;
@@ -7823,6 +7885,23 @@ function getFilteredAdminOpportunities() {
     return true;
   });
   return sortAdminOpportunities(filtered, filters.sortBy);
+}
+
+function getAdminOpportunityFilters() {
+  return {
+    source: "all",
+    missingDeadlineSource: "all",
+    status: "all",
+    country: "all",
+    search: "",
+    debugCompanyId: "",
+    tedOnly: false,
+    manualOnly: false,
+    showDemoTest: false,
+    sortBy: "created_desc",
+    addedWindow: "all",
+    ...(state.adminOpportunityFilters || {})
+  };
 }
 
 function normalizeAdminOpportunitySort(value) {
@@ -7908,7 +7987,7 @@ function getAdminFilterOptions(items, getter) {
 }
 
 function renderAdminOpportunityFilters(opportunities) {
-  const filters = state.adminOpportunityFilters;
+  const filters = getAdminOpportunityFilters();
   const sources = getAdminFilterOptions(state.opportunities || [], (opp) => opp.source || "Unknown");
   const statuses = getAdminFilterOptions(state.opportunities || [], (opp) => opp.status || "Unknown");
   const countries = getAdminFilterOptions(state.opportunities || [], (opp) => getOpportunityCountryCode(opp) || opp.countryCode || "Unknown");
@@ -7951,7 +8030,7 @@ function hasOpportunityDeadline(opp) {
 }
 
 function getMissingDeadlineOpportunities() {
-  const selectedSource = state.adminOpportunityFilters?.missingDeadlineSource || "all";
+  const selectedSource = getAdminOpportunityFilters().missingDeadlineSource || "all";
   return (state.opportunities || [])
     .filter((opp) => !hasOpportunityDeadline(opp))
     .filter((opp) => !isDemoTestOpportunity(opp))
@@ -8027,7 +8106,7 @@ function renderMissingDeadlineDebugSection() {
     return acc;
   }, {});
   const sources = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
-  const selectedSource = state.adminOpportunityFilters?.missingDeadlineSource || "all";
+  const selectedSource = getAdminOpportunityFilters().missingDeadlineSource || "all";
   const sourceOptions = getMissingDeadlineSourceOptions();
   return `
     <section class="ops-card admin-debug-card">
