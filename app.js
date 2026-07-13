@@ -30,6 +30,7 @@ import {
   formatReportRisk as formatReportRiskBase,
   getAuthCallbackInfo,
   getAuthCallbackRedirectUrl,
+  getAppHashUrl,
   formatShortDate,
   buildCompanyDraftFromTrialRequest,
   createCompanyFromTrialRequest,
@@ -3618,11 +3619,11 @@ function getAuthRedirectUrl() {
   if (inviteToken && shouldPreserveInviteForRoute(state.route)) {
     return getAuthCallbackRedirectUrl(inviteToken);
   }
-  return `${window.location.origin}/#/onboarding`;
+  return getAppHashUrl("/onboarding");
 }
 
 function getPasswordResetRedirectUrl() {
-  return `${window.location.origin}/#/reset-password`;
+  return getAppHashUrl("/reset-password");
 }
 
 function isExistingSignupResponse(data) {

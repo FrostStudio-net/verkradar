@@ -1,4 +1,5 @@
 import { SUPABASE_ANON_KEY, SUPABASE_URL, supabaseClient } from "../supabaseClient.js";
+import { getAppHashUrl, getAppOrigin, getAppUrl } from "./appUrls.js";
 
 const PENDING_INVITE_TOKEN_KEY = "verkradar_pending_invite_token";
 const PERSISTED_INVITE_FLOW_KEY = "verkradar_pending_invite_flow";
@@ -55,7 +56,7 @@ export function getAuthCallbackInfo() {
 }
 
 export function getAuthCallbackRedirectUrl(inviteToken = "") {
-  const url = new URL("/auth/callback", window.location.origin);
+  const url = new URL(getAppUrl("/auth/callback"));
   const cleanToken = sanitizeInviteToken(inviteToken);
   if (cleanToken) url.searchParams.set("invite", cleanToken);
   return url.toString();
@@ -64,7 +65,7 @@ export function getAuthCallbackRedirectUrl(inviteToken = "") {
 export function replaceUrlWithInviteRoute(inviteToken = "") {
   const cleanToken = sanitizeInviteToken(inviteToken);
   const route = cleanToken ? `/#/accept-invite?token=${encodeURIComponent(cleanToken)}` : "/#/";
-  window.history.replaceState(null, "", `${window.location.origin}${route}`);
+  window.history.replaceState(null, "", `${getAppOrigin()}${route}`);
   return cleanToken ? `/accept-invite?token=${encodeURIComponent(cleanToken)}` : "/";
 }
 
@@ -202,7 +203,7 @@ export function clearStoredPendingInviteToken() {
 export function buildCompanyInviteLink(token) {
   const cleanToken = sanitizeInviteToken(token);
   if (!cleanToken) return "";
-  return `${window.location.origin}/#/accept-invite?token=${encodeURIComponent(cleanToken)}`;
+  return getAppHashUrl(`/accept-invite?token=${encodeURIComponent(cleanToken)}`);
 }
 
 export async function previewCompanyInvite(token) {

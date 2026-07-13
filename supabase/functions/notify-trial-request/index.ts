@@ -15,7 +15,7 @@ Deno.serve(async (req) => {
   const resendApiKey = Deno.env.get("RESEND_API_KEY");
   const recipient = Deno.env.get("TRIAL_NOTIFICATION_EMAIL");
   const sender = Deno.env.get("TRIAL_NOTIFICATION_FROM") || "VerkRadar <onboarding@resend.dev>";
-  const appUrl = Deno.env.get("VERKRADAR_APP_URL") || "https://verkradar.vercel.app";
+  const appUrl = Deno.env.get("VERKRADAR_APP_URL") || "https://verkradar.is";
 
   if (!supabaseUrl || !serviceRoleKey) {
     return json({ error: "Missing Supabase Edge Function environment variables." }, 500);
