@@ -171,12 +171,6 @@ export function renderLandingPage({ t, escapeHtml, language, trialHref }) {
         <p class="source-disclaimer">${escapeHtml(t("sourceDisclaimer"))}</p>
       </div>
     </section>
-
-    <section class="cta-panel">
-      <h2>${escapeHtml(t("tryDemoTitle"))}</h2>
-      <p>${escapeHtml(t("tryDemoText"))}</p>
-      <button class="btn btn-primary" data-action="load-demo">${escapeHtml(t("loadDemoCompany"))}</button>
-    </section>
   `;
 }
 

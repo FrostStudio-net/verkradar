@@ -26,10 +26,14 @@ function renderProfileBasicsSection(ctx) {
         <label>${escapeHtml(t("phone"))}<input name="phone" data-profile-field="phone" value="${escapeHtml(p.phone || "")}" required /></label>
         <label>${escapeHtml(t("address"))}<input name="address" data-profile-field="address" value="${escapeHtml(p.address || "")}" required /></label>
         <label>${escapeHtml(t("website"))}<input name="website" data-profile-field="website" value="${escapeHtml(p.website || "")}" /></label>
-        <label>${escapeHtml(t("selectedPlan"))}
-          <select name="selectedPlan" data-profile-field="selectedPlan">
-            ${["basic", "pro", "priority"].map((plan) => `<option value="${plan}" ${String(p.selectedPlan || "basic") === plan ? "selected" : ""}>${escapeHtml(t(`plan_${plan}`))}</option>`).join("")}
-          </select>
+        <label class="custom-select-field">${escapeHtml(t("selectedPlan"))}
+          <input type="hidden" name="selectedPlan" value="${escapeHtml(p.selectedPlan || "basic")}" data-profile-field="selectedPlan" />
+          ${renderCustomDropdown({
+            key: "selectedPlan",
+            value: p.selectedPlan || "basic",
+            options: getFilterOptions("selectedPlan"),
+            profileField: "selectedPlan"
+          })}
         </label>
         <label class="custom-select-field">${escapeHtml(t("industry"))}
           <input id="industry-input" type="hidden" name="industry" value="${escapeHtml(selectedIndustry)}" required />
@@ -113,13 +117,25 @@ function renderProfileLocationsSection(ctx) {
           <input name="serviceAreas" data-profile-field="serviceAreas" data-profile-array="true" value="${escapeHtml(arrayFieldText(p.serviceAreas))}" placeholder="${escapeHtml(t("serviceAreasPlaceholder"))}" />
         </label>
       </div>
-      <div class="checkbox-grid">
-        ${LOCATION_OPTIONS.map((loc) => `
-          <label class="checkbox">
-            <input type="checkbox" name="locations" value="${loc}" data-profile-location ${(p.locations || []).includes(loc) ? "checked" : ""} />
-            <span>${escapeHtml(formatCustomerLocation(loc))}</span>
-          </label>
-        `).join("")}
+      <div class="location-multiselect" data-location-selector>
+        <button class="location-selector-toggle" type="button" data-action="toggle-location-selector" aria-expanded="false" aria-haspopup="listbox">
+          <span class="location-selector-label">${escapeHtml(t("selectServiceAreas"))}</span>
+          <span class="location-selector-summary">
+            <strong>${escapeHtml(formatLocationSelectionSummary(p.locations || [], t, formatCustomerLocation))}</strong>
+            <span class="location-selector-chevron" aria-hidden="true"></span>
+          </span>
+        </button>
+        <div class="location-options-panel">
+          <div class="checkbox-grid location-checkbox-grid">
+            ${LOCATION_OPTIONS.map((loc) => `
+              <label class="checkbox">
+                <input type="checkbox" name="locations" value="${loc}" data-profile-location ${(p.locations || []).includes(loc) ? "checked" : ""} />
+                <span>${escapeHtml(formatCustomerLocation(loc))}</span>
+              </label>
+            `).join("")}
+          </div>
+          <button class="btn btn-secondary btn-small location-selector-done" type="button" data-action="close-location-selector">${escapeHtml(t("done"))}</button>
+        </div>
       </div>
       <div class="profile-travel-panel">
         <h3>${escapeHtml(t("travelScope"))}</h3>
@@ -134,6 +150,14 @@ function renderProfileLocationsSection(ctx) {
       </div>
     </div>
   `;
+}
+
+
+function formatLocationSelectionSummary(locations, t, formatCustomerLocation) {
+  const selected = Array.isArray(locations) ? locations.filter(Boolean) : [];
+  if (!selected.length) return t("noServiceAreasSelected");
+  if (selected.length > 3) return t("serviceAreasSelected", { count: selected.length });
+  return selected.map((location) => formatCustomerLocation(location)).join(", ");
 }
 
 function renderProfileValueSection(ctx) {

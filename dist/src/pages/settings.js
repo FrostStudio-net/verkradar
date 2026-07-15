@@ -4,7 +4,7 @@ export function renderSettingsPage({
   language,
   profileDraftDirty,
   profileLoadError,
-  showDemoReset,
+  showTrialReset,
   profileFormHtml
 }) {
   return `
@@ -21,10 +21,10 @@ export function renderSettingsPage({
       ` : ""}
     </section>
     ${profileFormHtml}
-    ${showDemoReset ? `<section class="danger-zone">
-      <h2>Reset demo</h2>
-      <p>This clears localStorage profile, saved and ignored opportunities.</p>
-      <button class="btn btn-ghost" data-action="reset">Reset all demo data</button>
+    ${showTrialReset ? `<section class="danger-zone trial-reset-card">
+      <h2>${escapeHtml(t("resetTrialTitle"))}</h2>
+      <p>${escapeHtml(t("resetTrialText"))}</p>
+      <button class="btn btn-ghost" data-action="reset-trial-data">${escapeHtml(t("resetTrialButton"))}</button>
     </section>` : ""}
   `;
 }

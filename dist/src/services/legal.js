@@ -110,17 +110,13 @@ export function getLegalPageData(key, language = "is") {
     contact: is ? {
       eyebrow: "Hafa samband",
       title: "Hafa samband",
-      intro: "Viltu prófa VerkRadar, spyrja um vöktun eða benda á leiðréttingu?",
-      sections: [
-        ["VerkRadar / Frost Studio", ["Netfang: info@verkradar.is", "Tengiliður: Kristján Jakob"]]
-      ]
+      intro: "Viltu prófa VerkRadar, spyrja um vöktun eða senda okkur ábendingu?",
+      sections: []
     } : {
       eyebrow: "Contact",
       title: "Contact",
-      intro: "Want to try VerkRadar, ask about monitoring, or report a correction?",
-      sections: [
-        ["VerkRadar / Frost Studio", ["Email: info@verkradar.is", "Contact person: Kristján Jakob"]]
-      ]
+      intro: "Want to try VerkRadar, ask about monitoring, or send us a note?",
+      sections: []
     }
   };
   return pages[key];

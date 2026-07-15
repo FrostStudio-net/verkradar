@@ -40,11 +40,17 @@ export function renderDashboardPage({
   renderEmptyState,
   escapeHtml
 }) {
+  const companyName = String(profile?.companyName || "");
+  const welcomeText = String(labels.welcomeCompany || "");
+  const companyIndex = companyName ? welcomeText.indexOf(companyName) : -1;
+  const welcomeHeading = companyIndex >= 0
+    ? `${escapeHtml(welcomeText.slice(0, companyIndex))}<span class="dashboard-company-name">${escapeHtml(companyName)}</span>${escapeHtml(welcomeText.slice(companyIndex + companyName.length))}`
+    : escapeHtml(welcomeText);
   return `
     <section class="dashboard-head">
       <div>
         <p class="eyebrow">${escapeHtml(labels.dashboard)}</p>
-        <h1>${escapeHtml(labels.welcomeCompany)}</h1>
+        <h1>${welcomeHeading}</h1>
         <p>${escapeHtml(labels.dashboardIntro)}</p>
       </div>
       <div class="dashboard-actions">

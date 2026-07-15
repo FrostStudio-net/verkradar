@@ -57,6 +57,7 @@ import {
   isUuid,
   localizeLegacyReportContent,
   loadActiveCompanyMemberships,
+  loadAdminContactRequests,
   loadAdminTrialRequests,
   mergeAiReviewsIntoReportMatches,
   normalizeLocationText,
@@ -80,6 +81,7 @@ import {
   renderAdminAutomaticAiReviewPanel,
   renderAdminCompanyAiReviewPanel,
   renderAdminCompanyMatchList,
+  renderContactPage as renderContactPageContent,
   renderForgotPasswordPage,
   renderLandingPage,
   renderLegalPageContent,
@@ -109,6 +111,7 @@ import {
   sortAiReportMatches,
   splitInput,
   stripHtmlFromString,
+  submitContactRequest,
   submitTrialRequest,
   supabaseClient,
   translate,
@@ -160,6 +163,9 @@ let state = {
   inviteCallbackHandled: false,
   trialRequestSubmitted: false,
   trialRequestError: "",
+  contactRequestSubmitted: false,
+  contactRequestSubmitting: false,
+  contactRequestError: "",
   user: null,
   currentUser: null,
   isAdmin: false,
@@ -227,6 +233,10 @@ let state = {
   adminTrialRequestsLoading: false,
   adminTrialRequestsLoaded: false,
   adminTrialRequestsError: null,
+  adminContactRequests: [],
+  adminContactRequestsLoading: false,
+  adminContactRequestsLoaded: false,
+  adminContactRequestsError: null,
   selectedAdminTrialRequestId: null,
   adminTrialRequestActions: {},
   adminTrialCompanyDraft: null,
@@ -608,6 +618,13 @@ document.addEventListener("click", (event) => {
     closeDropdown();
   }
 
+  if (!event.target.closest?.("[data-location-selector]")) {
+    document.querySelectorAll("[data-location-selector].is-open").forEach((selector) => {
+      selector.classList.remove("is-open");
+      selector.querySelector("[data-action='toggle-location-selector']")?.setAttribute("aria-expanded", "false");
+    });
+  }
+
   if (state.profileMenuOpen && !event.target.closest?.(".profile-menu")) {
     state.profileMenuOpen = false;
     render();
@@ -706,12 +723,14 @@ document.addEventListener("click", (event) => {
     const key = action.dataset.key;
     const value = action.dataset.value;
     if (action.dataset.profileField) {
+      const profileField = action.dataset.profileField;
+      const profileValue = profileField === "selectedPlan" ? (normalizeSelectedPlan(value) || "basic") : value;
       if (action.closest?.("#admin-trial-company-form")) {
         initializeAdminTrialCompanyDraft();
-        state.adminTrialCompanyDraft[action.dataset.profileField] = value;
+        state.adminTrialCompanyDraft[profileField] = profileValue;
       } else {
         initializeProfileDraft();
-        state.profileDraft[action.dataset.profileField] = value;
+        state.profileDraft[profileField] = profileValue;
         markProfileDraftDirty();
       }
     } else {
@@ -927,6 +946,28 @@ document.addEventListener("click", (event) => {
     markProfileDraftDirty();
     navigate("/settings");
   }
+  if (name === "toggle-location-selector") {
+    event.preventDefault();
+    const selector = action.closest?.("[data-location-selector]");
+    const isOpen = selector?.classList.toggle("is-open");
+    action.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    return;
+  }
+  if (name === "close-location-selector") {
+    event.preventDefault();
+    const selector = action.closest?.("[data-location-selector]");
+    selector?.classList.remove("is-open");
+    selector?.querySelector?.("[data-action='toggle-location-selector']")?.setAttribute("aria-expanded", "false");
+    render();
+    return;
+  }
+  if (name === "reset-trial-data") {
+    const confirmed = window.confirm(t("resetTrialConfirm"));
+    if (!confirmed) return;
+    clearLocalProfileState();
+    navigate("/");
+    return;
+  }
   if (name === "delete-opportunity") deleteOpportunity(id);
   if (name === "logout") {
     state.profileMenuOpen = false;
@@ -936,25 +977,6 @@ document.addEventListener("click", (event) => {
       return;
     }
     signOut();
-  }
-  if (name === "load-demo") {
-    if (state.user) {
-      saveCompanyProfile(defaultProfile)
-        .then(() => navigate("/dashboard"))
-        .catch((error) => {
-          console.error("Failed to load demo profile:", error);
-          state.profileSaveError = formatSupabaseError(error);
-          render();
-        });
-    } else {
-      saveProfile(defaultProfile);
-      state.profile = defaultProfile;
-      navigate("/dashboard");
-    }
-  }
-  if (name === "reset") {
-    clearLocalProfileState();
-    navigate("/");
   }
 });
 
@@ -1026,7 +1048,7 @@ document.addEventListener("keydown", (event) => {
     const profileField = dropdownRoot?.querySelector?.("[data-profile-field]")?.dataset.profileField;
     if (profileField) {
       initializeProfileDraft();
-      state.profileDraft[profileField] = option.value;
+      state.profileDraft[profileField] = profileField === "selectedPlan" ? (normalizeSelectedPlan(option.value) || "basic") : option.value;
       markProfileDraftDirty();
     } else {
       state.filters[activeKey] = option.value;
@@ -1214,6 +1236,31 @@ document.addEventListener("submit", async (event) => {
       state.trialRequestError = t("trialRequestError");
       render();
       showToast(t("trialRequestError"), "error");
+    }
+    return;
+  }
+
+  if (event.target.id === "contact-request-form") {
+    event.preventDefault();
+    if (state.contactRequestSubmitting) return;
+    state.contactRequestError = "";
+    state.contactRequestSubmitting = true;
+    render();
+    try {
+      await submitContactRequest(new FormData(event.target));
+      state.contactRequestSubmitted = true;
+      event.target.reset();
+      render();
+      scrollToPageTop();
+    } catch (error) {
+      console.error("Contact request failed:", error);
+      state.contactRequestSubmitted = false;
+      state.contactRequestError = formatSupabaseError(error) || "Gat ekki sent skilaboð. Reyndu aftur.";
+      render();
+      showToast(state.contactRequestError, "error");
+    } finally {
+      state.contactRequestSubmitting = false;
+      render();
     }
     return;
   }
@@ -1538,6 +1585,7 @@ function afterRouteRender() {
     if (!state.importRunsLoaded && !state.importRunsLoading) loadImportRunsForAdmin();
     if (!state.adminReportsLoaded && !state.adminReportsLoading) loadAdminReports();
     if (!state.adminTrialRequestsLoaded && !state.adminTrialRequestsLoading) loadTrialRequestsForAdmin();
+    if (!state.adminContactRequestsLoaded && !state.adminContactRequestsLoading) loadContactRequestsForAdmin();
     if (!state.sourceCoverageLoaded && !state.sourceCoverageLoading) loadSourceCoverageForAdmin();
     if (!state.adminCompaniesLoaded && !state.adminCompaniesLoading) loadAdminCompanies();
     if (!state.adminReviewLoaded && !state.adminReviewLoading) loadAdminReviewQueue();
@@ -1711,6 +1759,30 @@ async function loadTrialRequestsForAdmin() {
   } finally {
     state.adminTrialRequestsLoading = false;
     state.adminTrialRequestsLoaded = true;
+    render();
+  }
+}
+
+async function loadContactRequestsForAdmin() {
+  if (!supabaseClient || !state.isAdmin) {
+    state.adminContactRequests = [];
+    state.adminContactRequestsLoaded = true;
+    return;
+  }
+
+  state.adminContactRequestsLoading = true;
+  state.adminContactRequestsError = null;
+  render();
+
+  try {
+    state.adminContactRequests = await loadAdminContactRequests();
+  } catch (error) {
+    console.error("Failed to load contact requests:", error);
+    state.adminContactRequests = [];
+    state.adminContactRequestsError = formatSupabaseError(error);
+  } finally {
+    state.adminContactRequestsLoading = false;
+    state.adminContactRequestsLoaded = true;
     render();
   }
 }
@@ -2781,6 +2853,7 @@ async function refreshAdminOperationsData() {
     loadNewestImportedTedOpportunities(),
     loadAdminReports(),
     loadTrialRequestsForAdmin(),
+    loadContactRequestsForAdmin(),
     loadSourceCoverageForAdmin(),
     loadAdminCompanies(),
     loadAdminReviewQueue()
@@ -6506,6 +6579,11 @@ function renderShell(content) {
   const hasProfile = Boolean(state.profile);
   const navItems = getHeaderNavItems(isLoggedIn, hasProfile);
   const headerCta = getHeaderCta(isLoggedIn, hasProfile);
+  const mainClasses = [
+    "app-main",
+    isLoggedIn ? "is-authenticated" : "is-public",
+    `route-${String(state.route || "/").replace(/^\/+/, "").replace(/[^a-z0-9]+/gi, "-") || "home"}`
+  ].join(" ");
 
   return `
     <header class="site-header ${state.isMobileMenuOpen ? "is-menu-open" : ""} ${state.isMobileMenuClosing ? "is-menu-closing" : ""}">
@@ -6551,7 +6629,7 @@ function renderShell(content) {
       </div>
       ${renderMobileMenuPanel(navItems, headerCta, isLoggedIn)}
     </header>
-    <main>${content}</main>
+    <main class="${mainClasses}">${content}</main>
     ${renderFooter()}
     ${state.toast ? `
       <div class="toast toast-${state.toast.type}">
@@ -6642,7 +6720,12 @@ function renderSecurityPage() {
 }
 
 function renderContactPage() {
-  return renderLegalDataPage("contact");
+  return renderShell(renderContactPageContent({
+    escapeHtml,
+    submitted: state.contactRequestSubmitted,
+    error: state.contactRequestError,
+    submitting: state.contactRequestSubmitting
+  }));
 }
 
 function renderMobileMenuPanel(navItems, headerCta, isLoggedIn) {
@@ -6758,7 +6841,6 @@ function requireProfilePage(title, message) {
       <h1>${escapeHtml(title)}</h1>
       <p>${escapeHtml(message)}</p>
       <button class="btn btn-primary" data-action="go" data-href="/onboarding">${escapeHtml(t("createProfile"))}</button>
-      <button class="btn btn-secondary" data-action="load-demo">${escapeHtml(t("loadDemoCompany"))}</button>
     </section>
   `);
 }
@@ -8296,19 +8378,32 @@ function getFilterOptions(key) {
     ];
   }
 
+  if (key === "selectedPlan") {
+    return ["basic", "pro", "priority"].map((value) => ({
+      value,
+      label: t(`plan_${value}`)
+    }));
+  }
+
   return [];
+}
+
+function getSelectedDropdownValue(key) {
+  if (key === "industry") return state.profileDraft?.industry || state.profile?.industry || "";
+  if (key === "selectedPlan") return normalizeSelectedPlan(state.profileDraft?.selectedPlan || state.profile?.selectedPlan) || "basic";
+  return state.filters[key];
 }
 
 function getSelectedFilterIndex(key) {
   const options = getFilterOptions(key);
-  const selectedValue = key === "industry" ? (state.profileDraft?.industry || state.profile?.industry || "") : state.filters[key];
+  const selectedValue = getSelectedDropdownValue(key);
   const index = options.findIndex((option) => option.value === selectedValue);
   return Math.max(0, index);
 }
 
 function getFilterLabel(key) {
   const options = getFilterOptions(key);
-  const selectedValue = key === "industry" ? (state.profileDraft?.industry || state.profile?.industry || "") : state.filters[key];
+  const selectedValue = getSelectedDropdownValue(key);
   return options.find((option) => option.value === selectedValue)?.label || (key === "industry" ? t("selectIndustry") : options[0]?.label) || "";
 }
 
@@ -8882,6 +8977,7 @@ function renderAdminTabs() {
     ["companies", "Companies"],
     ["review", "Review Queue"],
     ["trial-requests", "Trial Requests"],
+    ["contact-requests", "Contact Requests"],
     ["sources", "Sources/imports"],
     ["opportunities", "Opportunities"],
     ["reports", "Reports"]
@@ -8901,6 +8997,7 @@ function renderAdminActiveTab(opportunities) {
   if (state.adminActiveTab === "companies") return renderAdminCompaniesSection();
   if (state.adminActiveTab === "review") return renderAdminReviewQueue();
   if (state.adminActiveTab === "trial-requests") return renderAdminTrialRequestsSection();
+  if (state.adminActiveTab === "contact-requests") return renderAdminContactRequestsSection();
   if (state.adminActiveTab === "sources") {
     return `
       ${renderAutomationStatusCard()}
@@ -8979,6 +9076,70 @@ function renderAdminReviewQueue() {
       ` : `<div class="empty-card">${escapeHtml(labels.empty)}</div>`}
     </section>
   `;
+}
+
+function renderAdminContactRequestsSection() {
+  const rows = state.adminContactRequests || [];
+  const message = state.adminContactRequestsLoading ? "Loading contact requests..." : `${rows.length} message${rows.length === 1 ? "" : "s"} received.`;
+  const content = state.adminContactRequestsLoading && !rows.length
+    ? `<div class="empty-card">Loading contact requests...</div>`
+    : rows.length
+      ? `
+        <div class="ops-table-wrap">
+          <table class="ops-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Company</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>Subject</th>
+                <th>Message</th>
+                <th>Status</th>
+                <th>Created at</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(renderAdminContactRequestRow).join("")}
+            </tbody>
+          </table>
+        </div>
+      `
+      : `<div class="empty-card">No contact requests yet.</div>`;
+  return `
+    <section class="ops-card">
+      <div class="card-header">
+        <div>
+          <h2>Contact Requests</h2>
+          <p>${escapeHtml(message)}</p>
+        </div>
+        <button class="btn btn-ghost btn-small" type="button" data-action="refresh-admin-status">Refresh</button>
+      </div>
+      ${state.adminContactRequestsError ? `<div class="admin-message is-error">${escapeHtml(state.adminContactRequestsError)}</div>` : ""}
+      ${content}
+    </section>
+  `;
+}
+
+function renderAdminContactRequestRow(row) {
+  return `
+    <tr>
+      <td><strong>${escapeHtml(row.name || "—")}</strong></td>
+      <td>${escapeHtml(row.company_name || "—")}</td>
+      <td>${escapeHtml(row.email || "—")}</td>
+      <td>${escapeHtml(row.phone || "—")}</td>
+      <td>${escapeHtml(row.subject || "—")}</td>
+      <td>${escapeHtml(row.message || "—")}</td>
+      <td>${renderContactRequestStatus(row.status)}</td>
+      <td>${escapeHtml(row.created_at ? formatDateTime(row.created_at) : "—")}</td>
+    </tr>
+  `;
+}
+
+function renderContactRequestStatus(status) {
+  const normalized = String(status || "new").toLowerCase();
+  const label = normalized === "new" ? "Ný" : normalized;
+  return `<span class="status-pill is-running">${escapeHtml(label)}</span>`;
 }
 
 function renderAdminTrialRequestsSection() {
@@ -11043,12 +11204,13 @@ function renderSettings() {
     language: state.language,
     profileDraftDirty: state.profileDraftDirty,
     profileLoadError: state.profileLoadError,
-    showDemoReset: canShowDemoReset(),
+    showTrialReset: canShowTrialReset(),
     profileFormHtml: renderProfileForm()
   }));
 }
 
-function canShowDemoReset() {
+
+function canShowTrialReset() {
   return Boolean(state.isAdmin || ["localhost", "127.0.0.1", ""].includes(window.location.hostname));
 }
 
