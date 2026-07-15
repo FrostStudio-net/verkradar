@@ -6174,3 +6174,272 @@ body.modal-open {
     width: min(100% - 32px, 1180px);
   }
 }
+
+@media (max-width: 768px) {
+  main.app-main.route-admin .page-head {
+    padding-top: 22px;
+    margin-bottom: 14px;
+  }
+
+  main.app-main.route-admin .page-head h1 {
+    margin-bottom: 8px;
+  }
+
+  main.app-main.route-admin .admin-tabs {
+    flex-wrap: nowrap;
+    gap: 6px;
+    margin: 0 0 12px;
+    padding: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-padding-inline: 6px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  main.app-main.route-admin .admin-tabs button {
+    flex: 0 0 auto;
+    min-height: 36px;
+    padding: 0 11px;
+    white-space: nowrap;
+  }
+
+  main.app-main.route-admin .ops-card,
+  main.app-main.route-admin .admin-panel,
+  main.app-main.route-admin .import-panel,
+  main.app-main.route-admin .admin-review-card,
+  main.app-main.route-admin .admin-trial-detail-card {
+    gap: 12px;
+    margin: 12px 0;
+    padding: 14px;
+  }
+
+  main.app-main.route-admin .card-header {
+    gap: 10px;
+  }
+
+  main.app-main.route-admin .card-header h2,
+  main.app-main.route-admin .admin-panel h3,
+  main.app-main.route-admin .import-result-head h3,
+  main.app-main.route-admin .admin-review-title-block h3 {
+    margin-bottom: 4px;
+  }
+
+  main.app-main.route-admin .card-header p,
+  main.app-main.route-admin .admin-panel p,
+  main.app-main.route-admin .import-panel p,
+  main.app-main.route-admin .admin-row p {
+    line-height: 1.35;
+  }
+
+  main.app-main.route-admin .ops-metrics,
+  main.app-main.route-admin .admin-overview-metrics,
+  main.app-main.route-admin .imported-opportunity-row dl,
+  main.app-main.route-admin .admin-review-meta-grid,
+  main.app-main.route-admin .admin-ai-review-meta,
+  main.app-main.route-admin .admin-trial-detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px;
+  }
+
+  main.app-main.route-admin .ops-metrics div,
+  main.app-main.route-admin .admin-review-meta-item,
+  main.app-main.route-admin .admin-trial-detail-field {
+    min-width: 0;
+    min-height: 76px;
+    padding: 10px;
+    align-content: space-between;
+  }
+
+  main.app-main.route-admin .ops-metrics span,
+  main.app-main.route-admin .admin-review-meta-item span,
+  main.app-main.route-admin .admin-trial-detail-field span {
+    margin-bottom: 4px;
+    font-size: 0.7rem;
+    line-height: 1.2;
+  }
+
+  main.app-main.route-admin .ops-metrics strong,
+  main.app-main.route-admin .admin-review-meta-item strong,
+  main.app-main.route-admin .admin-trial-detail-field strong {
+    font-size: 0.86rem;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+  }
+
+  main.app-main.route-admin .admin-trial-detail-field.is-wide,
+  main.app-main.route-admin .admin-review-reason-box,
+  main.app-main.route-admin .admin-ai-review-box,
+  main.app-main.route-admin .admin-message,
+  main.app-main.route-admin .import-debug,
+  main.app-main.route-admin .import-failure-row {
+    grid-column: 1 / -1;
+  }
+
+  main.app-main.route-admin .admin-review-card-top {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  main.app-main.route-admin .admin-review-title-block p {
+    margin: 2px 0;
+    font-size: 0.9rem;
+  }
+
+  main.app-main.route-admin .admin-source-url,
+  main.app-main.route-admin .source-item span,
+  main.app-main.route-admin .import-skip-samples span,
+  main.app-main.route-admin .import-skip-samples em,
+  main.app-main.route-admin .ops-table td,
+  main.app-main.route-admin .ops-table a {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  main.app-main.route-admin .admin-review-source-action {
+    justify-content: stretch;
+  }
+
+  main.app-main.route-admin .admin-review-source-action .btn {
+    width: 100%;
+  }
+
+  main.app-main.route-admin .admin-review-reasons {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin-top: 10px;
+  }
+
+  main.app-main.route-admin .admin-review-reason-box,
+  main.app-main.route-admin .admin-ai-review-box,
+  main.app-main.route-admin .import-debug,
+  main.app-main.route-admin .import-run-row,
+  main.app-main.route-admin .source-items-panel,
+  main.app-main.route-admin .source-item {
+    padding: 12px;
+  }
+
+  main.app-main.route-admin .admin-review-actions {
+    align-items: stretch;
+    gap: 10px;
+    margin-top: 10px;
+    padding-top: 10px;
+  }
+
+  main.app-main.route-admin .admin-row-actions,
+  main.app-main.route-admin .admin-report-actions,
+  main.app-main.route-admin .automation-actions,
+  main.app-main.route-admin .imported-opportunity-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+  }
+
+  main.app-main.route-admin .admin-row-actions .btn,
+  main.app-main.route-admin .admin-report-actions .btn,
+  main.app-main.route-admin .automation-actions .btn,
+  main.app-main.route-admin .imported-opportunity-actions .btn {
+    width: 100%;
+    min-height: 42px;
+    padding-inline: 10px;
+  }
+
+  main.app-main.route-admin .import-mode-control {
+    max-width: none;
+  }
+
+  main.app-main.route-admin .import-stats,
+  main.app-main.route-admin .import-run-metrics,
+  main.app-main.route-admin .import-skip-reasons {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  main.app-main.route-admin .import-stats span,
+  main.app-main.route-admin .import-run-metrics span,
+  main.app-main.route-admin .import-skip-reasons span {
+    min-width: 0;
+    padding: 8px;
+    border-radius: var(--radius-sm);
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+  }
+
+  main.app-main.route-admin .import-per-source div {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 6px 8px;
+    padding: 7px 0;
+  }
+
+  main.app-main.route-admin .import-per-source strong {
+    grid-column: 1 / -1;
+    min-width: 0;
+  }
+
+  main.app-main.route-admin .import-skip-samples div {
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+    gap: 6px 8px;
+  }
+
+  main.app-main.route-admin .import-skip-samples em {
+    grid-column: 1 / -1;
+  }
+
+  main.app-main.route-admin .imported-opportunity-row {
+    gap: 10px;
+    padding: 12px 0;
+  }
+
+  main.app-main.route-admin .source-items-list {
+    gap: 8px;
+  }
+
+  main.app-main.route-admin .source-item {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 7px;
+  }
+
+  main.app-main.route-admin .admin-filters,
+  main.app-main.route-admin .admin-company-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin: 12px 0 8px;
+  }
+
+  main.app-main.route-admin .admin-filters input,
+  main.app-main.route-admin .admin-filters select {
+    min-height: 44px;
+    padding: 10px;
+  }
+
+  main.app-main.route-admin .admin-filters > input:first-child,
+  main.app-main.route-admin .admin-company-filters > input:first-child,
+  main.app-main.route-admin .admin-filter-count,
+  main.app-main.route-admin .ops-table-wrap,
+  main.app-main.route-admin .missing-deadline-source-group,
+  main.app-main.route-admin .admin-list {
+    grid-column: 1 / -1;
+  }
+
+  main.app-main.route-admin .admin-row {
+    gap: 10px;
+    padding: 12px 0;
+  }
+
+  main.app-main.route-admin .admin-list {
+    margin: 18px 0 56px;
+  }
+}
+
+@media (max-width: 360px) {
+  main.app-main.route-admin .admin-row-actions,
+  main.app-main.route-admin .admin-report-actions,
+  main.app-main.route-admin .automation-actions,
+  main.app-main.route-admin .imported-opportunity-actions,
+  main.app-main.route-admin .admin-filters,
+  main.app-main.route-admin .admin-company-filters {
+    grid-template-columns: 1fr;
+  }
+}
