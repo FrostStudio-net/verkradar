@@ -270,6 +270,42 @@ async function upsertEvaluationLabel(
   return { evaluation_label: data };
 }
 
+async function findAuthUserByEmail(supabase: ReturnType<typeof createClient>, email: string) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) return null;
+  const { data, error } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
+  if (error) throw error;
+  return (data?.users || []).find((user) => normalizeEmail(user.email || "") === normalizedEmail) || null;
+}
+
+async function ensureCompanyOwnerMembership(
+  supabase: ReturnType<typeof createClient>,
+  options: { companyId: string; email: string; userId?: string | null },
+) {
+  const normalizedEmail = normalizeEmail(options.email);
+  if (!isUuid(options.companyId) || !normalizedEmail) return null;
+  const now = new Date().toISOString();
+  const payload = {
+    company_id: options.companyId,
+    user_id: options.userId || null,
+    email: String(options.email || "").trim(),
+    email_normalized: normalizedEmail,
+    role: "owner",
+    status: options.userId ? "active" : "invited",
+    invited_at: now,
+    accepted_at: options.userId ? now : null,
+    revoked_at: null,
+    updated_at: now,
+  };
+  const { data, error } = await supabase
+    .from("company_members")
+    .upsert(payload, { onConflict: "company_id,email_normalized" })
+    .select("id, company_id, email, role, status, user_id")
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
 async function createCompanyFromTrialRequest(
   supabase: ReturnType<typeof createClient>,
   options: { trialRequestId: string; company: AdminCompanyInput },
@@ -322,12 +358,20 @@ async function createCompanyFromTrialRequest(
     include_low_confidence: cleanProfile.includeLowConfidence,
     auto_alert_mode: cleanProfile.autoAlertMode,
   };
+  const existingUser = await findAuthUserByEmail(supabase, cleanProfile.contactEmail);
+
   const { data: company, error: companyError } = await supabase
     .from("companies")
     .insert(companyPayload)
     .select("id, company_name")
     .single();
   if (companyError) throw companyError;
+
+  await ensureCompanyOwnerMembership(supabase, {
+    companyId: company.id,
+    email: cleanProfile.contactEmail,
+    userId: existingUser?.id || null,
+  });
 
   const serviceRows = cleanProfile.services.map((service) => ({ company_id: company.id, service }));
   const locationRows = cleanProfile.locations.map((location) => ({ company_id: company.id, location }));

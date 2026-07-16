@@ -1603,6 +1603,11 @@ function afterRouteRender() {
     loadCompanyInvitePreview();
     if (state.user && !state.inviteAccepting && !state.invitePreviewError) acceptPendingCompanyInvite();
   }
+  if (getRoutePath(state.route) === "/onboarding" && state.user && state.profile) {
+    replaceHashRoute("/dashboard");
+    render();
+    return;
+  }
   if (state.route === "/report" && state.companyId && !state.reportsLoaded && !state.reportArchiveLoading) {
     loadReportsForCurrentCompany();
   }
@@ -3781,7 +3786,7 @@ function getAuthRedirectUrl() {
   if (inviteToken && shouldPreserveInviteForRoute(state.route)) {
     return getAuthCallbackRedirectUrl(inviteToken);
   }
-  return getAppHashUrl("/onboarding");
+  return getAuthCallbackRedirectUrl();
 }
 
 function getPasswordResetRedirectUrl() {
@@ -4276,7 +4281,7 @@ async function loadCompanyProfile(options = {}) {
   }
 
   try {
-    await claimInvitedCompanyMemberships(supabaseClient, state.user).catch((error) => {
+    await claimInvitedCompanyMemberships(supabaseClient, state.user, { allowEmailClaim: true }).catch((error) => {
       console.warn("Failed to claim invited company memberships:", error);
       return [];
     });
