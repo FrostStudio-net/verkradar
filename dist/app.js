@@ -1777,9 +1777,13 @@ async function loadContactRequestsForAdmin() {
   try {
     state.adminContactRequests = await loadAdminContactRequests();
   } catch (error) {
-    console.error("Failed to load contact requests:", error);
     state.adminContactRequests = [];
-    state.adminContactRequestsError = formatSupabaseError(error);
+    if (isMissingContactRequestsStorageError(error)) {
+      state.adminContactRequestsError = "Contact request storage is not available. Run the contact_requests migration to enable this admin tab.";
+    } else {
+      console.error("Failed to load contact requests:", error);
+      state.adminContactRequestsError = formatSupabaseError(error);
+    }
   } finally {
     state.adminContactRequestsLoading = false;
     state.adminContactRequestsLoaded = true;
@@ -9665,6 +9669,7 @@ function renderAdminOpportunitiesSection(opportunities) {
 }
 
 function renderAdminCompanyDetails(company) {
+  const actionState = state.adminCompanyActions?.[company.id] || "";
   const projectRange = [
     company.minProjectValue ? formatISK(company.minProjectValue) : "No minimum",
     company.maxProjectValue ? formatISK(company.maxProjectValue) : "No maximum"
@@ -9847,14 +9852,32 @@ function renderAdminOpportunityChangeBadge(opp) {
 }
 
 function getAdminOpportunityChangeStatus(opp) {
-  const created = getDateTimeValue(opp.createdAt);
-  const updated = getDateTimeValue(opp.updatedAt);
-  if (!Number.isFinite(created)) return "";
-  if (!Number.isFinite(updated)) return "new";
-  const differenceMs = Math.abs(updated - created);
-  if (differenceMs <= 2 * 60 * 1000) return "new";
-  if (updated > created) return "updated";
+  const latestRunId = getLatestCompletedDailyPipelineRunId();
+  const firstImportRunId = opp.rawPayload?.first_import_run_id || opp.rawPayload?.firstImportRunId || "";
+  if (latestRunId && firstImportRunId && String(firstImportRunId) === String(latestRunId)) return "new";
   return "";
+}
+
+function getLatestCompletedDailyPipelineRunId() {
+  const successfulStatuses = new Set(["success", "completed", "complete"]);
+  const dailyPipelineRuns = (state.importRuns || []).filter((run) => {
+    const runType = String(run.run_type || run.import_mode || run.details?.run_type || "").toLowerCase();
+    const status = String(run.status || "").toLowerCase();
+    return run.id && runType.includes("daily") && runType.includes("pipeline") && successfulStatuses.has(status);
+  });
+  return dailyPipelineRuns[0]?.id || "";
+}
+
+function isMissingContactRequestsStorageError(error) {
+  const code = String(error?.code || "").toUpperCase();
+  const status = Number(error?.status || error?.statusCode || 0);
+  const message = String(error?.message || error?.details || "").toLowerCase();
+  return (
+    code === "42P01" ||
+    code === "PGRST205" ||
+    (status === 404 && message.includes("contact_requests")) ||
+    (message.includes("contact_requests") && (message.includes("schema cache") || message.includes("does not exist")))
+  );
 }
 
 function formatAdminOpportunityDateTime(value) {
