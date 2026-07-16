@@ -988,15 +988,14 @@
         </button>
       </form>
     </section>
-  `}function rn(e,{t}={}){if(!e)return!0;sn(e);let n=typeof t==`function`?t:e=>e,r=[];for(let t of tn){let i=e.elements[t.name];if(!i)continue;let a=String(i.value||``).trim(),o=``;t.required&&!a?o=n(t.error):t.name===`email`&&a&&!i.validity.valid&&(o=n(`trialEmailInvalid`)),o&&(cn(i,o),r.push(i))}return r.length?(r[0].focus({preventScroll:!0}),r[0].scrollIntoView({behavior:`smooth`,block:`center`}),!1):!0}function an(e){if(!e)return;e.removeAttribute(`aria-invalid`);let t=e.getAttribute(`aria-describedby`);if(!t)return;let n=document.getElementById(t);n&&(n.textContent=``)}function on(e,{t,escapeHtml:n}){let r=`trial-${e.name}`,i=`${r}-error`,a=[`form-group`,`trial-request-field`,e.width===`half`?`is-half`:`is-full`,e.className||``].filter(Boolean).join(` `),o=e.required?` <span class="required-mark" aria-hidden="true">*</span>`:``,s=e.optional?` <span class="optional-label">${n(t(`optionalField`))}</span>`:``,c=`
+  `}function rn(e,{t}={}){if(!e)return!0;sn(e);let n=typeof t==`function`?t:e=>e,r=[];for(let t of tn){let i=e.elements[t.name];if(!i)continue;let a=String(i.value||``).trim(),o=``;t.required&&!a?o=n(t.error):t.name===`email`&&a&&!i.validity.valid&&(o=n(`trialEmailInvalid`)),o&&(cn(i,o),r.push(i))}return r.length?(r[0].focus({preventScroll:!0}),r[0].scrollIntoView({behavior:`smooth`,block:`center`}),!1):!0}function an(e){if(!e)return;e.removeAttribute(`aria-invalid`);let t=e.getAttribute(`aria-describedby`);if(!t)return;let n=document.getElementById(t);n&&(n.textContent=``)}function on(e,{t,escapeHtml:n}){let r=`trial-${e.name}`,i=`${r}-error`,a=[`form-group`,`trial-request-field`,e.width===`half`?`is-half`:`is-full`,e.className||``].filter(Boolean).join(` `),o=e.required?` <span class="required-mark" aria-hidden="true">*</span>`:``,s=`
     <span class="trial-request-label">
       <span>${n(t(e.label))}${o}</span>
-      ${s}
     </span>
-  `,l=[`id="${r}"`,`name="${e.name}"`,`placeholder="${n(t(e.placeholder))}"`,`aria-describedby="${i}"`,e.required?`required aria-required="true"`:``,e.autocomplete?`autocomplete="${e.autocomplete}"`:``,e.attrs||``].filter(Boolean).join(` `);return`
+  `,c=[`id="${r}"`,`name="${e.name}"`,`placeholder="${n(t(e.placeholder))}"`,`aria-describedby="${i}"`,e.required?`required aria-required="true"`:``,e.autocomplete?`autocomplete="${e.autocomplete}"`:``,e.attrs||``].filter(Boolean).join(` `);return`
     <label class="${a}" for="${r}">
-      ${c}
-      ${e.textarea?`<textarea ${l}></textarea>`:`<input type="${e.type||`text`}" ${l} />`}
+      ${s}
+      ${e.textarea?`<textarea ${c}></textarea>`:`<input type="${e.type||`text`}" ${c} />`}
       <span class="field-error" id="${i}" aria-live="polite"></span>
     </label>
   `}function sn(e){for(let t of e.querySelectorAll(`input, textarea`))an(t)}function cn(e,t){e.setAttribute(`aria-invalid`,`true`);let n=e.getAttribute(`aria-describedby`),r=n?document.getElementById(n):null;r&&(r.textContent=t)}var ln=[`Reykjavík`,`Capital Area`,`Suðurnes`,`South Iceland`,`West Iceland`,`North Iceland`,`East Iceland`,`Westfjords`,`All Iceland`,`Remote / Online`];function un(e){let{t,escapeHtml:n,profileDraft:r,renderCustomDropdown:i,getFilterOptions:a}=e,o=r.industry||``;return`

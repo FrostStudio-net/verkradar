@@ -402,11 +402,9 @@ function renderTrialRequestField(field, { t, escapeHtml }) {
     field.className || ""
   ].filter(Boolean).join(" ");
   const requiredMark = field.required ? ` <span class="required-mark" aria-hidden="true">*</span>` : "";
-  const optional = field.optional ? ` <span class="optional-label">${escapeHtml(t("optionalField"))}</span>` : "";
   const label = `
     <span class="trial-request-label">
       <span>${escapeHtml(t(field.label))}${requiredMark}</span>
-      ${optional}
     </span>
   `;
   const commonAttrs = [
