@@ -250,7 +250,75 @@ function pricingCard(plan, { t, escapeHtml, trialHref }) {
   `;
 }
 
-export function renderTrialRequestPage({ t, escapeHtml, submitted = false, error = "" }) {
+const TRIAL_REQUEST_FIELDS = [
+  {
+    name: "company",
+    label: "trialCompany",
+    type: "text",
+    autocomplete: "organization",
+    placeholder: "trialCompanyPlaceholder",
+    required: true,
+    error: "trialCompanyRequired",
+    width: "half"
+  },
+  {
+    name: "contact",
+    label: "trialContact",
+    type: "text",
+    autocomplete: "name",
+    placeholder: "trialContactPlaceholder",
+    required: true,
+    error: "trialContactRequired",
+    width: "half"
+  },
+  {
+    name: "email",
+    label: "trialEmail",
+    type: "email",
+    autocomplete: "email",
+    placeholder: "trialEmailPlaceholder",
+    required: true,
+    error: "trialEmailRequired",
+    width: "half"
+  },
+  {
+    name: "phone",
+    label: "trialPhone",
+    type: "tel",
+    autocomplete: "tel",
+    placeholder: "trialPhonePlaceholder",
+    optional: true,
+    width: "half",
+    attrs: `inputmode="tel" maxlength="24"`
+  },
+  {
+    name: "services",
+    label: "trialServices",
+    placeholder: "trialServicesPlaceholder",
+    required: true,
+    error: "trialServicesRequired",
+    textarea: true,
+    className: "is-services"
+  },
+  {
+    name: "regions",
+    label: "trialRegions",
+    placeholder: "trialRegionsPlaceholder",
+    optional: true,
+    textarea: true,
+    className: "is-compact"
+  },
+  {
+    name: "notes",
+    label: "trialNotes",
+    placeholder: "trialNotesPlaceholder",
+    optional: true,
+    textarea: true,
+    className: "is-compact"
+  }
+];
+
+export function renderTrialRequestPage({ t, escapeHtml, submitted = false, error = "", submitting = false }) {
   return `
     <section class="page-head pricing-head">
       <p class="eyebrow">${escapeHtml(t("trialRequestEyebrow"))}</p>
@@ -259,7 +327,7 @@ export function renderTrialRequestPage({ t, escapeHtml, submitted = false, error
     </section>
 
     <section class="trial-request-layout">
-      <form id="trial-request-form" class="form-card trial-request-card">
+      <form id="trial-request-form" class="form-card trial-request-card" novalidate>
         ${submitted ? `
           <div class="admin-message is-success">
             <span>${escapeHtml(t("trialRequestSuccess"))}</span>
@@ -270,16 +338,108 @@ export function renderTrialRequestPage({ t, escapeHtml, submitted = false, error
             <span>${escapeHtml(error)}</span>
           </div>
         ` : ""}
-        <label class="form-group">${escapeHtml(t("trialCompany"))}<input type="text" name="company" autocomplete="organization" required /></label>
-        <label class="form-group">${escapeHtml(t("trialContact"))}<input type="text" name="contact" autocomplete="name" required /></label>
-        <label class="form-group">${escapeHtml(t("trialEmail"))}<input type="email" name="email" autocomplete="email" required /></label>
-        <label class="form-group">${escapeHtml(t("trialPhone"))}<input type="tel" name="phone" autocomplete="tel" /></label>
-        <label class="form-group">${escapeHtml(t("trialServices"))}<textarea name="services" rows="4" required></textarea></label>
-        <label class="form-group">${escapeHtml(t("trialRegions"))}<textarea name="regions" rows="3" required></textarea></label>
-        <label class="form-group">${escapeHtml(t("trialNotes"))}<textarea name="notes" rows="3"></textarea></label>
+        <p class="trial-request-intro">${escapeHtml(t("trialRequestIntro"))}</p>
+        <div class="trial-request-grid">
+          ${TRIAL_REQUEST_FIELDS.map((field) => renderTrialRequestField(field, { t, escapeHtml })).join("")}
+        </div>
         <p class="muted-text">${escapeHtml(t("trialRequestHelper"))}</p>
-        <button class="btn btn-primary btn-large" type="submit">${escapeHtml(t("trialRequestSubmit"))}</button>
+        <button class="btn btn-primary btn-large trial-request-submit" type="submit" ${submitting ? "disabled" : ""}>
+          ${escapeHtml(submitting ? t("trialRequestSubmitting") : t("trialRequestSubmit"))}
+        </button>
       </form>
     </section>
   `;
+}
+
+export function validateTrialRequestForm(form, { t } = {}) {
+  if (!form) return true;
+  clearTrialRequestErrors(form);
+
+  const translate = typeof t === "function" ? t : (key) => key;
+  const invalidFields = [];
+
+  for (const field of TRIAL_REQUEST_FIELDS) {
+    const control = form.elements[field.name];
+    if (!control) continue;
+    const value = String(control.value || "").trim();
+    let message = "";
+    if (field.required && !value) {
+      message = translate(field.error);
+    } else if (field.name === "email" && value && !control.validity.valid) {
+      message = translate("trialEmailInvalid");
+    }
+    if (message) {
+      setTrialRequestFieldError(control, message);
+      invalidFields.push(control);
+    }
+  }
+
+  if (invalidFields.length) {
+    invalidFields[0].focus({ preventScroll: true });
+    invalidFields[0].scrollIntoView({ behavior: "smooth", block: "center" });
+    return false;
+  }
+
+  return true;
+}
+
+export function clearTrialRequestFieldError(control) {
+  if (!control) return;
+  control.removeAttribute("aria-invalid");
+  const errorId = control.getAttribute("aria-describedby");
+  if (!errorId) return;
+  const error = document.getElementById(errorId);
+  if (error) error.textContent = "";
+}
+
+function renderTrialRequestField(field, { t, escapeHtml }) {
+  const fieldId = `trial-${field.name}`;
+  const errorId = `${fieldId}-error`;
+  const classes = [
+    "form-group",
+    "trial-request-field",
+    field.width === "half" ? "is-half" : "is-full",
+    field.className || ""
+  ].filter(Boolean).join(" ");
+  const requiredMark = field.required ? ` <span class="required-mark" aria-hidden="true">*</span>` : "";
+  const optional = field.optional ? ` <span class="optional-label">${escapeHtml(t("optionalField"))}</span>` : "";
+  const label = `
+    <span class="trial-request-label">
+      <span>${escapeHtml(t(field.label))}${requiredMark}</span>
+      ${optional}
+    </span>
+  `;
+  const commonAttrs = [
+    `id="${fieldId}"`,
+    `name="${field.name}"`,
+    `placeholder="${escapeHtml(t(field.placeholder))}"`,
+    `aria-describedby="${errorId}"`,
+    field.required ? `required aria-required="true"` : "",
+    field.autocomplete ? `autocomplete="${field.autocomplete}"` : "",
+    field.attrs || ""
+  ].filter(Boolean).join(" ");
+  const control = field.textarea
+    ? `<textarea ${commonAttrs}></textarea>`
+    : `<input type="${field.type || "text"}" ${commonAttrs} />`;
+
+  return `
+    <label class="${classes}" for="${fieldId}">
+      ${label}
+      ${control}
+      <span class="field-error" id="${errorId}" aria-live="polite"></span>
+    </label>
+  `;
+}
+
+function clearTrialRequestErrors(form) {
+  for (const control of form.querySelectorAll("input, textarea")) {
+    clearTrialRequestFieldError(control);
+  }
+}
+
+function setTrialRequestFieldError(control, message) {
+  control.setAttribute("aria-invalid", "true");
+  const errorId = control.getAttribute("aria-describedby");
+  const error = errorId ? document.getElementById(errorId) : null;
+  if (error) error.textContent = message;
 }

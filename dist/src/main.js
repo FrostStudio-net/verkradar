@@ -17,7 +17,7 @@ export { renderAdminAutomaticAiReviewPanel, renderAdminCompanyAiReviewPanel, ren
 export { renderDashboardEmptyStatePage, renderDashboardPage, renderOpportunityCardPage, renderOpportunityModalPage } from "./pages/dashboard.js";
 export { renderLegalPageContent } from "./pages/legal.js";
 export { renderContactPage } from "./pages/contact.js";
-export { renderLandingPage, renderPricingPage, renderTrialRequestPage } from "./pages/public.js";
+export { clearTrialRequestFieldError, renderLandingPage, renderPricingPage, renderTrialRequestPage, validateTrialRequestForm } from "./pages/public.js";
 export { renderProfileFormPage } from "./pages/profile.js";
 export {
   renderReportArchiveRowPage,

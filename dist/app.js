@@ -116,7 +116,9 @@ import {
   supabaseClient,
   translate,
   updateTrialRequestStatus,
-  uniqueStrings
+  uniqueStrings,
+  validateTrialRequestForm,
+  clearTrialRequestFieldError
 } from "./src/main.js";
 
 /* VerkRadar MVP single-page app.
@@ -162,6 +164,7 @@ let state = {
   inviteAuthEvent: "",
   inviteCallbackHandled: false,
   trialRequestSubmitted: false,
+  trialRequestSubmitting: false,
   trialRequestError: "",
   contactRequestSubmitted: false,
   contactRequestSubmitting: false,
@@ -1207,6 +1210,12 @@ document.addEventListener("change", (event) => {
   markProfileDraftDirty();
 });
 
+document.addEventListener("input", (event) => {
+  if (event.target?.closest?.("#trial-request-form")) {
+    clearTrialRequestFieldError(event.target);
+  }
+});
+
 document.addEventListener("submit", async (event) => {
   if (event.target.id === "login-form") {
     event.preventDefault();
@@ -1224,9 +1233,20 @@ document.addEventListener("submit", async (event) => {
 
   if (event.target.id === "trial-request-form") {
     event.preventDefault();
+    if (state.trialRequestSubmitting) return;
     state.trialRequestError = "";
+    if (!validateTrialRequestForm(event.target, { t })) return;
+    const form = event.target;
+    const submitButton = form.querySelector('button[type="submit"]');
+    const originalButtonText = submitButton?.textContent || "";
+    const formData = new FormData(form);
+    state.trialRequestSubmitting = true;
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.textContent = t("trialRequestSubmitting");
+    }
     try {
-      await submitTrialRequest(new FormData(event.target));
+      await submitTrialRequest(formData);
       state.trialRequestSubmitted = true;
       render();
       scrollToPageTop();
@@ -1234,8 +1254,16 @@ document.addEventListener("submit", async (event) => {
       console.error("Trial request failed:", error);
       state.trialRequestSubmitted = false;
       state.trialRequestError = t("trialRequestError");
-      render();
       showToast(t("trialRequestError"), "error");
+      const existingError = form.querySelector(".admin-message.is-error");
+      if (existingError) existingError.remove();
+      form.insertAdjacentHTML("afterbegin", '<div class="admin-message is-error"><span>' + escapeHtml(t("trialRequestError")) + '</span></div>');
+    } finally {
+      state.trialRequestSubmitting = false;
+      if (submitButton && !state.trialRequestSubmitted) {
+        submitButton.disabled = false;
+        submitButton.textContent = originalButtonText || t("trialRequestSubmit");
+      }
     }
     return;
   }
@@ -11186,7 +11214,8 @@ function renderTrialRequest() {
     t,
     escapeHtml,
     submitted: state.trialRequestSubmitted,
-    error: state.trialRequestError
+    error: state.trialRequestError,
+    submitting: state.trialRequestSubmitting
   }));
 }
 

@@ -146,7 +146,7 @@ function createRequestId() {
 }
 
 function validateTrialRequestPayload(payload) {
-  const required = ["company_name", "contact_name", "email", "services", "locations"];
+  const required = ["company_name", "contact_name", "email", "services"];
   const missing = required.filter((key) => !String(payload[key] || "").trim());
   if (missing.length) throw new Error(`Missing required trial request fields: ${missing.join(", ")}`);
 }
