@@ -88,6 +88,26 @@ export async function createCompanyFromTrialRequest(requestId, profile) {
   return result;
 }
 
+export async function deleteTrialRequest(requestId) {
+  const endpoint = getAdminCompanyActionsEndpoint();
+  if (!endpoint) throw new Error("Admin company action endpoint is not configured.");
+  if (!requestId) throw new Error("A trial request id is required.");
+  const headers = await getAdminActionHeaders();
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      action: "delete_trial_request",
+      trialRequestId: requestId
+    })
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result?.error) {
+    throw new Error(result?.error || `Trial request deletion failed with status ${response.status}`);
+  }
+  return result;
+}
+
 export function buildCompanyDraftFromTrialRequest(request, createEmptyProfile) {
   const draft = createEmptyProfile ? createEmptyProfile() : {};
   const services = splitRequestList(request?.services);

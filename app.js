@@ -34,6 +34,7 @@ import {
   formatShortDate,
   buildCompanyDraftFromTrialRequest,
   createCompanyFromTrialRequest,
+  deleteTrialRequest,
   getReportEmailStatus,
   getReportScoreLabel,
   getReportStatusBadge,
@@ -305,6 +306,7 @@ let state = {
   reportMessage: null,
   selectedReportId: null,
   selectedAdminReportId: null,
+  adminTrialDeleteConfirmId: null,
   adminMessage: null,
   adminSubmitting: false,
   adminDeletingId: null,
@@ -838,6 +840,7 @@ document.addEventListener("click", (event) => {
     state.selectedAdminCompanyId = null;
     state.selectedAdminReportId = null;
     state.selectedAdminTrialRequestId = null;
+    state.adminTrialDeleteConfirmId = null;
     state.adminTrialCompanyDraft = null;
     render();
     scrollActiveAdminTabIntoView();
@@ -861,6 +864,7 @@ document.addEventListener("click", (event) => {
   if (name === "close-admin-trial-request") {
     state.selectedAdminTrialRequestId = null;
     state.adminTrialCompanyDraft = null;
+    state.adminTrialDeleteConfirmId = null;
     state.adminTrialCompanyMessage = "";
     state.adminTrialCompanyError = "";
     render();
@@ -868,6 +872,21 @@ document.addEventListener("click", (event) => {
   }
   if (name === "admin-trial-request-status") {
     updateAdminTrialRequestStatus(id, action.dataset.status || "");
+    return;
+  }
+  if (name === "delete-admin-trial-request") {
+    state.adminTrialDeleteConfirmId = id;
+    state.adminTrialRequestsError = null;
+    render();
+    return;
+  }
+  if (name === "cancel-admin-trial-delete") {
+    state.adminTrialDeleteConfirmId = null;
+    render();
+    return;
+  }
+  if (name === "confirm-admin-trial-delete") {
+    deleteAdminTrialRequest(state.adminTrialDeleteConfirmId);
     return;
   }
   if (name === "admin-start-trial-company") {
@@ -1853,6 +1872,39 @@ async function updateAdminTrialRequestStatus(requestId, status) {
     state.adminTrialCompanyError = formatSupabaseError(error);
     showToast(state.adminTrialCompanyError, "error");
     render();
+  } finally {
+    state.adminTrialRequestActions = {
+      ...(state.adminTrialRequestActions || {}),
+      [requestId]: null
+    };
+    render();
+  }
+}
+
+async function deleteAdminTrialRequest(requestId) {
+  if (!requestId) return;
+  state.adminTrialRequestActions = {
+    ...(state.adminTrialRequestActions || {}),
+    [requestId]: "delete"
+  };
+  state.adminTrialRequestsError = null;
+  render();
+  try {
+    const result = await deleteTrialRequest(requestId);
+    state.adminTrialRequests = (state.adminTrialRequests || []).filter((row) => row.id !== requestId);
+    if (state.selectedAdminTrialRequestId === requestId) {
+      state.selectedAdminTrialRequestId = null;
+      state.adminTrialCompanyDraft = null;
+      state.adminTrialCompanyMessage = "";
+      state.adminTrialCompanyError = "";
+    }
+    state.adminTrialDeleteConfirmId = null;
+    const wasConverted = Boolean(result?.was_converted || result?.converted_company_id);
+    showToast(wasConverted ? "Prufubeiðni eytt. Fyrirtækið var ekki fjarlægt." : "Prufubeiðni eytt.", "success");
+  } catch (error) {
+    console.error("Failed to delete trial request:", error);
+    state.adminTrialRequestsError = formatSupabaseError(error);
+    showToast(state.adminTrialRequestsError, "error");
   } finally {
     state.adminTrialRequestActions = {
       ...(state.adminTrialRequestActions || {}),
@@ -9006,7 +9058,7 @@ function renderAdmin() {
     </section>
 
     ${state.adminMessage ? `
-      <div class="admin-message ${state.adminMessage.type === "error" ? "is-error" : "is-success"}">
+      <div class="admin-message admin-global-message ${state.adminMessage.type === "error" ? "is-error" : "is-success"}" role="status" aria-live="polite">
         ${escapeHtml(state.adminMessage.text)}
       </div>
     ` : ""}
@@ -9231,11 +9283,55 @@ function renderAdminTrialRequestsSection() {
       ` : `<div class="empty-card">No trial requests yet.</div>`}
     </section>
     ${selected ? renderAdminTrialRequestDetail(selected) : ""}
+    ${state.adminTrialDeleteConfirmId ? renderAdminTrialDeleteConfirm() : ""}
+  `;
+}
+
+function getAdminTrialDeleteCopy(row) {
+  const isEnglish = state.language === "en";
+  const converted = Boolean(row?.converted_company_id || row?.status === "converted");
+  return {
+    title: isEnglish ? "Delete trial request?" : "Eyða prufubeiðni?",
+    body: isEnglish
+      ? "This permanently deletes the trial request. This action cannot be undone."
+      : "Þessi aðgerð eyðir prufubeiðninni varanlega. Ekki er hægt að afturkalla aðgerðina.",
+    convertedNote: converted
+      ? (isEnglish ? "The converted company and its data will remain unchanged." : "Fyrirtækið sem var stofnað úr beiðninni verður áfram óbreytt.")
+      : "",
+    cancel: isEnglish ? "Cancel" : "Hætta við",
+    confirm: isEnglish ? "Delete" : "Eyða",
+    deleting: isEnglish ? "Deleting..." : "Eyði...",
+    deleteAction: isEnglish ? "Delete" : "Eyða"
+  };
+}
+
+function renderAdminTrialDeleteConfirm() {
+  const row = (state.adminTrialRequests || []).find((request) => request.id === state.adminTrialDeleteConfirmId);
+  if (!row) return "";
+  const copy = getAdminTrialDeleteCopy(row);
+  const busy = state.adminTrialRequestActions?.[row.id] === "delete";
+  return `
+    <div class="modal-backdrop admin-confirm-backdrop" role="presentation">
+      <section class="admin-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="admin-trial-delete-title">
+        <div>
+          <p class="eyebrow">Trial Requests</p>
+          <h2 id="admin-trial-delete-title">${escapeHtml(copy.title)}</h2>
+          <p>${escapeHtml(copy.body)}</p>
+          ${copy.convertedNote ? `<p class="admin-confirm-note">${escapeHtml(copy.convertedNote)}</p>` : ""}
+        </div>
+        <div class="admin-confirm-actions">
+          <button class="btn btn-ghost" type="button" data-action="cancel-admin-trial-delete" ${busy ? "disabled" : ""}>${escapeHtml(copy.cancel)}</button>
+          <button class="btn btn-danger" type="button" data-action="confirm-admin-trial-delete" data-id="${escapeHtml(row.id)}" ${busy ? "disabled" : ""}>${escapeHtml(busy ? copy.deleting : copy.confirm)}</button>
+        </div>
+      </section>
+    </div>
   `;
 }
 
 function renderAdminTrialRequestRow(row) {
   const isSelected = state.selectedAdminTrialRequestId === row.id;
+  const busy = state.adminTrialRequestActions?.[row.id];
+  const deleteCopy = getAdminTrialDeleteCopy(row);
   return `
     <tr class="${isSelected ? "is-selected" : ""}">
       <td><strong>${escapeHtml(row.company_name || "—")}</strong></td>
@@ -9247,7 +9343,10 @@ function renderAdminTrialRequestRow(row) {
       <td>${renderTrialRequestStatus(row.status)}</td>
       <td>${escapeHtml(row.created_at ? formatDateTime(row.created_at) : "—")}</td>
       <td>
-        <button class="btn btn-secondary btn-small" type="button" data-action="view-admin-trial-request" data-id="${escapeHtml(row.id)}">Opna</button>
+        <div class="admin-row-actions">
+          <button class="btn btn-secondary btn-small" type="button" data-action="view-admin-trial-request" data-id="${escapeHtml(row.id)}" ${busy === "delete" ? "disabled" : ""}>Opna</button>
+          <button class="btn btn-danger btn-small" type="button" data-action="delete-admin-trial-request" data-id="${escapeHtml(row.id)}" ${busy ? "disabled" : ""}>${escapeHtml(busy === "delete" ? deleteCopy.deleting : deleteCopy.deleteAction)}</button>
+        </div>
       </td>
     </tr>
   `;

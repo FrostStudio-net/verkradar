@@ -76,6 +76,11 @@ Deno.serve(async (req) => {
       });
       return json({ ok: true, action, ...result });
     }
+    if (action === "delete_trial_request") {
+      const trialRequestId = String(body.trialRequestId || "").trim();
+      const result = await deleteTrialRequest(adminClient, { trialRequestId });
+      return json({ ok: true, action, ...result });
+    }
     if (!isUuid(companyId)) return json({ error: "A valid companyId is required." }, 400);
     if (!["refresh_matches", "generate_report", "review_match", "mark_report_sent", "invite_customer", "revoke_customer_access", "update_company_matching_profile", "upsert_match_decision", "upsert_evaluation_label"].includes(action)) {
       return json({ error: "Unsupported action." }, 400);
@@ -407,6 +412,34 @@ async function createCompanyFromTrialRequest(
     company_id: company.id,
     company_name: company.company_name,
     trial_request_status: "converted",
+  };
+}
+
+async function deleteTrialRequest(
+  supabase: ReturnType<typeof createClient>,
+  options: { trialRequestId: string },
+) {
+  if (!isUuid(options.trialRequestId)) throw new Error("A valid trialRequestId is required.");
+
+  const { data: request, error: requestError } = await supabase
+    .from("trial_requests")
+    .select("id, status, converted_company_id")
+    .eq("id", options.trialRequestId)
+    .maybeSingle();
+  if (requestError) throw requestError;
+  if (!request) throw new Error("Trial request not found.");
+
+  const { error: deleteError } = await supabase
+    .from("trial_requests")
+    .delete()
+    .eq("id", options.trialRequestId);
+  if (deleteError) throw deleteError;
+
+  return {
+    trial_request_id: options.trialRequestId,
+    deleted: true,
+    was_converted: Boolean(request.converted_company_id || request.status === "converted"),
+    converted_company_id: request.converted_company_id || null,
   };
 }
 

@@ -31,6 +31,7 @@ export { renderSettingsPage } from "./pages/settings.js";
 export {
   buildCompanyDraftFromTrialRequest,
   createCompanyFromTrialRequest,
+  deleteTrialRequest,
   getTrialRequestStatusLabel,
   loadAdminTrialRequests,
   submitTrialRequest,
