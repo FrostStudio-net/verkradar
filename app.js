@@ -121,10 +121,7 @@ import {
   clearTrialRequestFieldError
 } from "./src/main.js";
 
-/* VerkRadar MVP single-page app.
-   No backend required. Uses localStorage and mock data.
-   Later: replace storage functions with Supabase queries.
-*/
+/* VerkRadar single-page app. Production data comes from Supabase; demo data must be explicitly isolated. */
 
 const MISSING_DEADLINE_RISK = "Deadline not available in imported data — verify on source page.";
 const EXTRACTED_PROJECT_DEADLINE_RISK = "No formal tender deadline extracted — verify source article.";
@@ -1651,23 +1648,22 @@ async function loadOpportunities() {
 
     if (error) throw error;
 
-    if (!data || data.length === 0) {
-      state.opportunities = window.VERKRADAR_OPPORTUNITIES || [];
-      state.storedMatches = [];
-      state.opportunityLoadError = "Using demo data. Supabase has no opportunities yet.";
-    } else {
-      state.opportunities = data.map(mapSupabaseOpportunity);
-      state.opportunityLoadError = null;
-      if (state.companyId) {
-        await loadOpportunityActionsForCurrentCompany();
-        await loadStoredMatchesForCurrentCompany();
-      }
+    state.opportunities = (data || []).map(mapSupabaseOpportunity);
+    state.opportunityLoadError = null;
+    if (state.companyId) {
+      await loadOpportunityActionsForCurrentCompany();
+      await loadStoredMatchesForCurrentCompany();
     }
   } catch (err) {
     console.error("Failed to load Supabase opportunities:", err);
-    state.opportunities = window.VERKRADAR_OPPORTUNITIES || [];
-    state.storedMatches = [];
-    state.opportunityLoadError = "Using demo data. Supabase connection failed.";
+    state.opportunities = [];
+    if (state.companyId) {
+      await loadOpportunityActionsForCurrentCompany();
+      await loadStoredMatchesForCurrentCompany();
+    } else {
+      state.storedMatches = [];
+    }
+    state.opportunityLoadError = formatSupabaseError(err);
   } finally {
     state.isLoadingOpportunities = false;
     render();
@@ -9655,7 +9651,7 @@ function renderAdminOpportunitiesSection(opportunities) {
       <div class="card-header">
         <div>
           <h2>Existing opportunities</h2>
-          <p>${(state.opportunities || []).length} loaded ${state.opportunityLoadError ? "from fallback data" : "from Supabase"}.</p>
+          <p>${(state.opportunities || []).length} loaded from Supabase.</p>
         </div>
       </div>
       ${renderAdminOpportunityFilters(opportunities)}

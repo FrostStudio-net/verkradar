@@ -14,8 +14,9 @@ Deno.serve(async (req) => {
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   const resendApiKey = Deno.env.get("RESEND_API_KEY");
   const recipient = Deno.env.get("TRIAL_NOTIFICATION_EMAIL");
-  const sender = Deno.env.get("TRIAL_NOTIFICATION_FROM") || "VerkRadar <onboarding@resend.dev>";
+  const configuredSender = Deno.env.get("TRIAL_NOTIFICATION_FROM");
   const appUrl = Deno.env.get("VERKRADAR_APP_URL") || "https://verkradar.is";
+  const sender = configuredSender || (isLocalDevelopmentUrl(appUrl) ? "VerkRadar <onboarding@resend.dev>" : "");
 
   if (!supabaseUrl || !serviceRoleKey) {
     return json({ error: "Missing Supabase Edge Function environment variables." }, 500);
@@ -79,8 +80,14 @@ Deno.serve(async (req) => {
       });
     }
 
-    if (!resendApiKey || !recipient) {
-      const message = "Trial notification email is not configured.";
+    if (!resendApiKey || !recipient || !sender) {
+      const missing = [
+        !resendApiKey ? "RESEND_API_KEY" : "",
+        !recipient ? "TRIAL_NOTIFICATION_EMAIL" : "",
+        !sender ? "TRIAL_NOTIFICATION_FROM" : "",
+      ].filter(Boolean).join(", ");
+      const message = `Trial notification email is not configured. Missing: ${missing}.`;
+      console.error(message);
       await markNotificationError(supabase, requestId, message);
       return json({ error: message, request_id: requestId }, 500);
     }
@@ -96,6 +103,7 @@ Deno.serve(async (req) => {
         from: sender,
         to: [recipient],
         subject: `Ný prufubeiðni í VerkRadar – ${trialRequest.company_name || "óþekkt fyrirtæki"}`,
+        reply_to: getReplyTo(trialRequest),
         text: email.text,
         html: email.html,
       }),
@@ -185,6 +193,22 @@ async function markNotificationError(
       notification_error: String(message || "Unknown notification error").slice(0, 1000),
     })
     .eq("id", requestId);
+}
+
+function getReplyTo(row: Record<string, unknown>) {
+  const email = String(row.email || "").trim();
+  const name = String(row.contact_name || row.company_name || "").trim();
+  if (!/^\S+@\S+\.\S+$/.test(email)) return undefined;
+  return name ? `${name} <${email}>` : email;
+}
+
+function isLocalDevelopmentUrl(value: string) {
+  try {
+    const hostname = new URL(value).hostname.toLowerCase();
+    return ["localhost", "127.0.0.1", "::1"].includes(hostname);
+  } catch {
+    return false;
+  }
 }
 
 function value(input: unknown) {

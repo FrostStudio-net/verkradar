@@ -3924,6 +3924,14 @@ body.modal-open {
   padding: 28px;
 }
 
+.form-honeypot {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
 .trial-request-intro {
   margin: 0;
   max-width: 620px;

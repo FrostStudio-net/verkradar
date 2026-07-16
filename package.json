@@ -2,7 +2,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && cp app.js data.js dist/ && cp -R src dist/src",
+    "build": "vite build && cp app.js dist/ && cp -R src dist/src",
     "preview": "vite preview"
   },
   "dependencies": {

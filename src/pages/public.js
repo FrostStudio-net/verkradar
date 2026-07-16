@@ -339,6 +339,10 @@ export function renderTrialRequestPage({ t, escapeHtml, submitted = false, error
           </div>
         ` : ""}
         <p class="trial-request-intro">${escapeHtml(t("trialRequestIntro"))}</p>
+        <div class="form-honeypot" aria-hidden="true">
+          <label for="trial-website">Website</label>
+          <input id="trial-website" name="website" type="text" tabindex="-1" autocomplete="off" />
+        </div>
         <div class="trial-request-grid">
           ${TRIAL_REQUEST_FIELDS.map((field) => renderTrialRequestField(field, { t, escapeHtml })).join("")}
         </div>

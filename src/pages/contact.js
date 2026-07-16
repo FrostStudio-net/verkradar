@@ -25,6 +25,10 @@ export function renderContactPage({ escapeHtml, submitted = false, error = "", s
             <span>${escapeHtml(error)}</span>
           </div>
         ` : ""}
+        <div class="form-honeypot" aria-hidden="true">
+          <label for="contact-website">Website</label>
+          <input id="contact-website" name="website" type="text" tabindex="-1" autocomplete="off" />
+        </div>
         <div class="form-grid two">
           <label class="form-group">Nafn<input type="text" name="name" autocomplete="name" required /></label>
           <label class="form-group">Fyrirtæki <span class="optional-label">(valfrjálst)</span><input type="text" name="company" autocomplete="organization" /></label>

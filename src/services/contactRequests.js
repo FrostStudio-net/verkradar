@@ -2,6 +2,7 @@ import { supabaseClient } from "../supabaseClient.js";
 
 export async function submitContactRequest(formData) {
   if (!supabaseClient) throw new Error("Contact request storage is not configured.");
+  assertNoHoneypotValue(formData);
   const payload = buildContactRequestPayload(formData);
   validateContactRequestPayload(payload);
   const { error } = await supabaseClient
@@ -45,4 +46,13 @@ function validateContactRequestPayload(payload) {
     .filter(([key]) => !String(payload[key] || "").trim())
     .map(([, message]) => message);
   if (missing.length) throw new Error(missing[0]);
+  if (!/^\S+@\S+\.\S+$/.test(String(payload.email || "").trim())) {
+    throw new Error("Skráðu gilt netfang.");
+  }
+}
+
+function assertNoHoneypotValue(formData) {
+  if (String(formData.get("website") || "").trim()) {
+    throw new Error("Request rejected.");
+  }
 }

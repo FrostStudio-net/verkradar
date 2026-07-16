@@ -6,7 +6,7 @@ Primary production URL:
 https://verkradar.is
 ```
 
-The Vercel deployment URL may still exist internally, but user-facing links, auth callbacks, invite links and notification emails should use `https://verkradar.is`.
+The Vercel deployment URL may still exist internally, but user-facing links, auth callbacks, invite links and notification emails should use `https://verkradar.is`. Redirect `https://www.verkradar.is` and the exact production Vercel host to `https://verkradar.is`.
 
 ## Supabase Auth Settings
 

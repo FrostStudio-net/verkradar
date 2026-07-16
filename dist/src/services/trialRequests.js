@@ -2,6 +2,7 @@ import { SUPABASE_ANON_KEY, SUPABASE_URL, supabaseClient } from "../supabaseClie
 
 export async function submitTrialRequest(formData) {
   if (!supabaseClient) throw new Error("Trial request storage is not configured.");
+  assertNoHoneypotValue(formData);
   const payload = buildTrialRequestPayload(formData);
   validateTrialRequestPayload(payload);
   const requestId = createRequestId();
@@ -149,6 +150,16 @@ function validateTrialRequestPayload(payload) {
   const required = ["company_name", "contact_name", "email", "services"];
   const missing = required.filter((key) => !String(payload[key] || "").trim());
   if (missing.length) throw new Error(`Missing required trial request fields: ${missing.join(", ")}`);
+  if (!/^\S+@\S+\.\S+$/.test(String(payload.email || "").trim())) {
+    throw new Error("A valid email address is required.");
+  }
+  if (String(payload.phone || "").length > 24) throw new Error("Phone number is too long.");
+}
+
+function assertNoHoneypotValue(formData) {
+  if (String(formData.get("website") || "").trim()) {
+    throw new Error("Request rejected.");
+  }
 }
 
 function normalizeTrialRequestStatus(status) {
