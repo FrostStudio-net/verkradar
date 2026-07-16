@@ -2689,10 +2689,10 @@ select option:checked {
 }
 
 .admin-company-modal {
-  width: min(90vw, 1300px);
-  max-width: 90vw;
-  height: min(92vh, 980px);
-  max-height: 92vh;
+  width: min(94vw, 1500px);
+  max-width: 94vw;
+  height: min(95dvh, 1040px);
+  max-height: 95dvh;
 }
 
 .admin-detail-grid {
@@ -2700,6 +2700,11 @@ select option:checked {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
   gap: 22px;
   align-items: start;
+}
+
+.admin-company-modal .admin-detail-grid {
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.2fr);
+  align-items: stretch;
 }
 
 .admin-company-modal .modal-header {
@@ -2710,14 +2715,18 @@ select option:checked {
 
 .admin-company-modal .modal-body {
   flex: 1 1 auto;
+  min-height: 0;
   padding: 22px 28px 28px;
   overflow-y: auto;
+  overflow-x: hidden;
   overscroll-behavior: contain;
 }
 
 .admin-company-modal .side-panel {
   min-width: 0;
-  height: fit-content;
+  height: auto;
+  align-self: stretch;
+  overflow-wrap: anywhere;
 }
 
 .admin-company-modal .side-panel h3 {
@@ -3361,10 +3370,10 @@ button:disabled,
 }
 
 .modal.admin-company-modal {
-  width: min(90vw, 1400px);
-  max-width: 90vw;
-  height: min(90vh, 980px);
-  max-height: 90vh;
+  width: min(94vw, 1500px);
+  max-width: 94vw;
+  height: min(95dvh, 1040px);
+  max-height: 95dvh;
   overflow: hidden;
 }
 
@@ -4070,7 +4079,8 @@ body.modal-open {
 }
 
 @media (max-width: 1180px) {
-  .admin-detail-grid {
+  .admin-detail-grid,
+  .admin-company-modal .admin-detail-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -4081,6 +4091,7 @@ body.modal-open {
     max-width: calc(100vw - 24px);
     height: calc(100dvh - 24px);
     max-height: calc(100dvh - 24px);
+    border-radius: 14px;
   }
 
   .admin-company-modal .modal-header {
@@ -4089,6 +4100,10 @@ body.modal-open {
 
   .admin-company-modal .modal-body {
     padding: 18px;
+  }
+
+  .admin-company-modal .admin-detail-grid {
+    gap: 16px;
   }
 
   .site-header {
@@ -4576,7 +4591,8 @@ body.modal-open {
   .ops-metrics,
   .admin-filters,
   .admin-overview-metrics,
-  .admin-detail-grid {
+  .admin-detail-grid,
+  .admin-company-modal .admin-detail-grid {
     grid-template-columns: 1fr;
   }
 
@@ -4951,6 +4967,13 @@ body.modal-open {
     width: 100%;
     max-height: calc(100dvh - 24px);
     border-radius: 12px;
+  }
+
+  .modal.admin-company-modal {
+    width: calc(100vw - 24px);
+    max-width: calc(100vw - 24px);
+    height: calc(100dvh - 24px);
+    max-height: calc(100dvh - 24px);
   }
 
   .modal-body {
