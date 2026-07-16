@@ -397,7 +397,7 @@ main {
   grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.8fr);
   gap: clamp(28px, 5vw, 72px);
   padding: 72px 0 54px;
-  align-items: end;
+  align-items: start;
 }
 
 .eyebrow {
