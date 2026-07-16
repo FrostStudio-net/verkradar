@@ -195,6 +195,7 @@ let state = {
   profileLoadError: null,
   companyId: null,
   opportunities: [],
+  opportunitiesLoaded: false,
   storedMatches: [],
   opportunityActions: [],
   saved: loadArray(STORAGE_KEYS.saved),
@@ -1607,6 +1608,7 @@ function afterRouteRender() {
   }
   if (state.route === "/admin" && state.isAdmin) {
     scrollActiveAdminTabIntoView();
+    if (!state.opportunitiesLoaded && !state.isLoadingOpportunities) loadOpportunities();
     if (!state.importRunsLoaded && !state.importRunsLoading) loadImportRunsForAdmin();
     if (!state.adminReportsLoaded && !state.adminReportsLoading) loadAdminReports();
     if (!state.adminTrialRequestsLoaded && !state.adminTrialRequestsLoading) loadTrialRequestsForAdmin();
@@ -1630,7 +1632,18 @@ function scrollToSection(id) {
   el.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+function canLoadProtectedOpportunities() {
+  return Boolean(state.authLoaded && state.user && state.isAdmin);
+}
+
 async function loadOpportunities() {
+  if (!canLoadProtectedOpportunities()) {
+    state.opportunities = [];
+    state.opportunitiesLoaded = false;
+    state.opportunityLoadError = null;
+    return;
+  }
+
   state.isLoadingOpportunities = true;
   state.opportunityLoadError = null;
   render();
@@ -1649,6 +1662,7 @@ async function loadOpportunities() {
     if (error) throw error;
 
     state.opportunities = (data || []).map(mapSupabaseOpportunity);
+    state.opportunitiesLoaded = true;
     state.opportunityLoadError = null;
     if (state.companyId) {
       await loadOpportunityActionsForCurrentCompany();
@@ -1657,6 +1671,7 @@ async function loadOpportunities() {
   } catch (err) {
     console.error("Failed to load Supabase opportunities:", err);
     state.opportunities = [];
+    state.opportunitiesLoaded = true;
     if (state.companyId) {
       await loadOpportunityActionsForCurrentCompany();
       await loadStoredMatchesForCurrentCompany();
@@ -3966,6 +3981,8 @@ async function signOut() {
     state.user = null;
     state.currentUser = null;
     state.isAdmin = false;
+    state.opportunities = [];
+    state.opportunitiesLoaded = false;
     state.authLoaded = true;
     state.adminLoaded = true;
     state.profileLoaded = true;
@@ -4140,6 +4157,8 @@ function registerAuthListener() {
     }
 
     state.isAdmin = false;
+    state.opportunities = [];
+    state.opportunitiesLoaded = false;
     state.profile = null;
     state.companyMembership = null;
     state.profileDraft = null;
@@ -11282,4 +11301,3 @@ ${state.language === "is" ? "Næsta skref" : "Next step"}: ${state.language === 
 }
 
 bootApp();
-loadOpportunities();
