@@ -2186,15 +2186,31 @@ async function loadAdminCompanies() {
         supabaseClient.from("match_evaluation_labels").select("id, company_id, opportunity_id, label, reason, notes, labeled_at, labeled_by").in("company_id", companyIds)
       ]);
 
-      services = servicesResult.error ? [] : servicesResult.data || [];
-      locations = locationsResult.error ? [] : locationsResult.data || [];
-      keywords = keywordsResult.error ? [] : keywordsResult.data || [];
-      matches = matchesResult.error ? [] : matchesResult.data || [];
-      reports = reportsResult.error ? [] : reportsResult.data || [];
-      aiReviews = aiReviewsResult.error ? [] : aiReviewsResult.data || [];
-      members = membersResult.error ? [] : membersResult.data || [];
-      decisions = decisionsResult.error ? [] : decisionsResult.data || [];
-      evaluationLabels = evaluationLabelsResult.error ? [] : evaluationLabelsResult.data || [];
+      const relatedResults = [
+        ["company services", servicesResult],
+        ["company locations", locationsResult],
+        ["company keywords", keywordsResult],
+        ["opportunity matches", matchesResult],
+        ["reports", reportsResult],
+        ["AI match reviews", aiReviewsResult],
+        ["company members", membersResult],
+        ["match decisions", decisionsResult],
+        ["evaluation labels", evaluationLabelsResult]
+      ];
+      const failedRelatedResult = relatedResults.find(([, result]) => result.error);
+      if (failedRelatedResult) {
+        throw new Error(`Failed to load ${failedRelatedResult[0]}: ${formatSupabaseError(failedRelatedResult[1].error)}`);
+      }
+
+      services = servicesResult.data || [];
+      locations = locationsResult.data || [];
+      keywords = keywordsResult.data || [];
+      matches = matchesResult.data || [];
+      reports = reportsResult.data || [];
+      aiReviews = aiReviewsResult.data || [];
+      members = membersResult.data || [];
+      decisions = decisionsResult.data || [];
+      evaluationLabels = evaluationLabelsResult.data || [];
     }
 
     state.adminCompanies = companyRows.map((company) => {
@@ -7609,8 +7625,8 @@ function renderLatestTedOpportunities() {
           <p>Newest imported EU TED rows for review.</p>
         </div>
       </div>
-      ${state.importedTedOpportunitiesError ? `<div class="admin-message is-error">${escapeHtml(state.importedTedOpportunitiesError)}</div>` : ""}
-      ${state.importedTedOpportunitiesLoading && !rows.length ? `<div class="empty-card">Loading TED opportunities...</div>` : rows.length ? `
+      ${state.importedTedOpportunitiesError ? `<div class="admin-message is-error">Ekki tókst að sækja nýjustu TED tækifæri. ${escapeHtml(state.importedTedOpportunitiesError)}</div>` : ""}
+      ${state.importedTedOpportunitiesError ? "" : state.importedTedOpportunitiesLoading && !rows.length ? `<div class="empty-card">Loading TED opportunities...</div>` : rows.length ? `
         <div class="imported-opportunities">
           ${rows.map(renderImportedTedRow).join("")}
         </div>
@@ -7629,8 +7645,8 @@ function renderLatestGeneratedReports() {
           <p>Newest saved weekly report records.</p>
         </div>
       </div>
-      ${state.adminReportsError ? `<div class="admin-message is-error">${escapeHtml(state.adminReportsError)}</div>` : ""}
-      ${state.adminReportsLoading && !rows.length ? `<div class="empty-card">Loading reports...</div>` : rows.length ? `
+      ${state.adminReportsError ? `<div class="admin-message is-error">Ekki tókst að sækja yfirlit. ${escapeHtml(state.adminReportsError)}</div>` : ""}
+      ${state.adminReportsError ? "" : state.adminReportsLoading && !rows.length ? `<div class="empty-card">Loading reports...</div>` : rows.length ? `
         <div class="ops-table-wrap">
           <table class="ops-table">
             <thead>
@@ -7740,8 +7756,8 @@ function renderSourceCoverageSection() {
           <p>Connected and planned lead sources for Icelandic opportunity coverage.</p>
         </div>
       </div>
-      ${state.sourceCoverageError ? `<div class="admin-message is-error">${escapeHtml(state.sourceCoverageError)}</div>` : ""}
-      ${state.sourceCoverageLoading && !rows.length ? `<div class="empty-card">Loading source coverage...</div>` : rows.length ? `
+      ${state.sourceCoverageError ? `<div class="admin-message is-error">Ekki tókst að sækja heimildayfirlit. ${escapeHtml(state.sourceCoverageError)}</div>` : ""}
+      ${state.sourceCoverageError ? "" : state.sourceCoverageLoading && !rows.length ? `<div class="empty-card">Loading source coverage...</div>` : rows.length ? `
         <div class="ops-table-wrap">
           <table class="ops-table">
             <thead>
@@ -9172,8 +9188,8 @@ function renderAdminReviewQueue() {
         </div>
         <button class="btn btn-ghost btn-small" type="button" data-action="refresh-admin-status">Refresh</button>
       </div>
-      ${state.adminReviewError ? `<div class="admin-message is-error">${escapeHtml(state.adminReviewError)}</div>` : ""}
-      ${state.adminReviewLoading && !rows.length ? `<div class="empty-card">${escapeHtml(labels.loading)}</div>` : rows.length ? `
+      ${state.adminReviewError ? `<div class="admin-message is-error">Ekki tókst að sækja yfirferðarröð. ${escapeHtml(state.adminReviewError)}</div>` : ""}
+      ${state.adminReviewError ? "" : state.adminReviewLoading && !rows.length ? `<div class="empty-card">${escapeHtml(labels.loading)}</div>` : rows.length ? `
         <div class="admin-review-list">
           ${rows.map(renderAdminReviewCard).join("")}
         </div>
@@ -9769,16 +9785,18 @@ function renderAdminOpportunitiesSection(opportunities) {
     ...createEmptyAdminOpportunityDraft(),
     ...(state.adminOpportunityDraft || {})
   };
+  const hasLoadError = Boolean(state.opportunityLoadError);
   return `
     <section class="admin-list">
       <div class="card-header">
         <div>
           <h2>Existing opportunities</h2>
-          <p>${(state.opportunities || []).length} loaded from Supabase.</p>
+          <p>${hasLoadError ? "Ekki tókst að sækja tækifæri." : `${(state.opportunities || []).length} loaded from Supabase.`}</p>
         </div>
       </div>
-      ${renderAdminOpportunityFilters(opportunities)}
-      ${opportunities.length ? opportunities.map(renderAdminOpportunityRow).join("") : `<div class="empty-card">No opportunities loaded.</div>`}
+      ${hasLoadError ? `<div class="admin-message is-error">Ekki tókst að sækja tækifæri. ${escapeHtml(state.opportunityLoadError)}</div>` : ""}
+      ${hasLoadError ? "" : renderAdminOpportunityFilters(opportunities)}
+      ${hasLoadError ? "" : opportunities.length ? opportunities.map(renderAdminOpportunityRow).join("") : `<div class="empty-card">No opportunities loaded.</div>`}
     </section>
 
     <form class="form-card admin-form" id="admin-opportunity-form">
