@@ -2760,6 +2760,64 @@ select option:checked {
   margin-top: 0;
 }
 
+
+.admin-company-profile-editor {
+  grid-column: 1 / -1;
+}
+
+.admin-company-profile-editor form {
+  display: grid;
+  gap: 16px;
+}
+
+.admin-profile-group {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.admin-profile-group h4 {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.98rem;
+}
+
+.admin-profile-group textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.admin-profile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.admin-profile-history {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.admin-profile-history h3 {
+  margin: 0 0 10px;
+}
+
+@media (max-width: 768px) {
+  .admin-profile-group {
+    padding: 14px;
+  }
+
+  .admin-profile-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+}
+
 .admin-tag-list {
   display: flex;
   flex-wrap: wrap;

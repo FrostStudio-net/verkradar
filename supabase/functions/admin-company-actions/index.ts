@@ -82,8 +82,19 @@ Deno.serve(async (req) => {
       return json({ ok: true, action, ...result });
     }
     if (!isUuid(companyId)) return json({ error: "A valid companyId is required." }, 400);
-    if (!["refresh_matches", "generate_report", "review_match", "mark_report_sent", "invite_customer", "revoke_customer_access", "update_company_matching_profile", "upsert_match_decision", "upsert_evaluation_label"].includes(action)) {
+    if (!["refresh_matches", "generate_report", "review_match", "mark_report_sent", "invite_customer", "revoke_customer_access", "update_company_profile", "update_company_matching_profile", "upsert_match_decision", "upsert_evaluation_label"].includes(action)) {
       return json({ error: "Unsupported action." }, 400);
+    }
+
+    if (action === "update_company_profile") {
+      const result = await updateAdminCompanyProfile(adminClient, {
+        companyId,
+        profile: body.companyProfile || {},
+        changedBy: userData.user.id,
+        changedByEmail: userData.user.email || "",
+        refreshMatches: Boolean(body.refreshMatches),
+      });
+      return json({ ok: true, action, ...result });
     }
 
     if (action === "update_company_matching_profile") {
@@ -189,6 +200,205 @@ Deno.serve(async (req) => {
     return json({ error: errorMessage(error) }, 500);
   }
 });
+
+async function updateAdminCompanyProfile(
+  supabase: ReturnType<typeof createClient>,
+  options: { companyId: string; profile: Record<string, unknown>; changedBy: string; changedByEmail: string; refreshMatches: boolean },
+) {
+  const profile = normalizeAdminCompanyProfileInput(options.profile || {});
+  if (!profile.companyName) throw new Error("Company name is required.");
+  if (!profile.contactEmail || !profile.contactEmail.includes("@")) throw new Error("A valid contact email is required.");
+  if (profile.notificationEmail && !profile.notificationEmail.includes("@")) throw new Error("A valid notification email is required.");
+  if (profile.billingEmail && !profile.billingEmail.includes("@")) throw new Error("A valid billing email is required.");
+
+  const [companyResult, servicesResult, locationsResult, keywordsResult] = await Promise.all([
+    supabase.from("companies").select("*").eq("id", options.companyId).maybeSingle(),
+    supabase.from("company_services").select("service").eq("company_id", options.companyId),
+    supabase.from("company_locations").select("location").eq("company_id", options.companyId),
+    supabase.from("company_keywords").select("keyword, type").eq("company_id", options.companyId),
+  ]);
+  if (companyResult.error) throw companyResult.error;
+  if (servicesResult.error) throw servicesResult.error;
+  if (locationsResult.error) throw locationsResult.error;
+  if (keywordsResult.error) throw keywordsResult.error;
+  if (!companyResult.data) throw new Error("Company not found.");
+
+  const company = companyResult.data;
+  const previous = buildCompanyProfileSnapshot(company, servicesResult.data || [], locationsResult.data || [], keywordsResult.data || []);
+  const now = new Date().toISOString();
+  const companyPayload = {
+    company_name: profile.companyName,
+    kennitala: profile.kennitala || null,
+    contact_name: profile.contactName || null,
+    contact_email: profile.contactEmail,
+    notification_email: profile.notificationEmail || profile.contactEmail,
+    billing_email: profile.billingEmail || profile.contactEmail,
+    selected_plan: profile.selectedPlan,
+    plan: profile.selectedPlan,
+    billing_status: profile.billingStatus,
+    base_location: profile.baseLocation || null,
+    service_areas: profile.serviceAreas,
+    opportunity_categories: profile.opportunityCategories,
+    opportunity_types: profile.opportunityTypes,
+    subcontracting_relevant: profile.subcontractingRelevant,
+    minimum_relevance_threshold: profile.minimumRelevanceThreshold,
+    report_frequency: profile.reportFrequency,
+    report_day: profile.reportDay,
+    deadline_reminders: profile.deadlineReminders,
+    include_low_confidence: profile.includeLowConfidence,
+    core_services: profile.coreServices,
+    secondary_services: profile.secondaryServices,
+    excluded_services: profile.excludedServices,
+    preferred_project_types: profile.preferredProjectTypes,
+    excluded_project_types: profile.excludedProjectTypes,
+    equipment: profile.equipment,
+    certifications: profile.certifications,
+    preferred_buyers: profile.preferredBuyers,
+    max_travel_distance_km: profile.maxTravelDistanceKm,
+    typical_project_size: profile.typicalProjectSize || null,
+    profile_notes_for_ai: profile.profileNotesForAi || null,
+    internal_admin_notes: profile.internalAdminNotes || null,
+    matching_profile_updated_at: now,
+    matching_profile_hash: await sha256Hex(JSON.stringify(profile)),
+  };
+
+  const { data: updatedCompany, error: updateError } = await supabase
+    .from("companies")
+    .update(companyPayload)
+    .eq("id", options.companyId)
+    .select("id, company_name, matching_profile_updated_at")
+    .maybeSingle();
+  if (updateError) throw updateError;
+  if (!updatedCompany) throw new Error("Company not found.");
+
+  await replaceCompanyProfileRows(supabase, options.companyId, profile);
+
+  const next = buildCompanyProfileSnapshot({ ...company, ...companyPayload },
+    profile.services.map((service) => ({ service })),
+    profile.locations.map((location) => ({ location })),
+    [
+      ...profile.includeKeywords.map((keyword) => ({ keyword, type: "include" })),
+      ...profile.excludeKeywords.map((keyword) => ({ keyword, type: "exclude" })),
+    ],
+  );
+  const changedFields = getChangedProfileFields(previous, next);
+  if (changedFields.length) {
+    const { error: auditError } = await supabase.from("company_profile_change_log").insert({
+      company_id: options.companyId,
+      changed_by: options.changedBy,
+      changed_by_email: options.changedByEmail || null,
+      source: "admin",
+      changed_fields: changedFields,
+      previous_values: pickFields(previous, changedFields),
+      new_values: pickFields(next, changedFields),
+    });
+    if (auditError) throw auditError;
+  }
+
+  const refresh = options.refreshMatches ? await refreshCompanyMatches(supabase, options.companyId) : null;
+  return {
+    company_id: updatedCompany.id,
+    company_name: updatedCompany.company_name,
+    matching_profile_updated_at: updatedCompany.matching_profile_updated_at,
+    changed_fields: changedFields,
+    audit_logged: changedFields.length > 0,
+    refresh: refresh ? {
+      matches_refreshed: refresh.matches_refreshed,
+      matches_created: refresh.matches_created,
+      matches_updated: refresh.matches_updated,
+      matches_removed: refresh.matches_removed,
+    } : null,
+  };
+}
+
+async function replaceCompanyProfileRows(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+  profile: ReturnType<typeof normalizeAdminCompanyProfileInput>,
+) {
+  const [deleteServices, deleteLocations, deleteKeywords] = await Promise.all([
+    supabase.from("company_services").delete().eq("company_id", companyId),
+    supabase.from("company_locations").delete().eq("company_id", companyId),
+    supabase.from("company_keywords").delete().eq("company_id", companyId),
+  ]);
+  if (deleteServices.error) throw deleteServices.error;
+  if (deleteLocations.error) throw deleteLocations.error;
+  if (deleteKeywords.error) throw deleteKeywords.error;
+
+  const serviceRows = profile.services.map((service) => ({ company_id: companyId, service }));
+  const locationRows = profile.locations.map((location) => ({ company_id: companyId, location }));
+  const keywordRows = [
+    ...profile.includeKeywords.map((keyword) => ({ company_id: companyId, keyword, type: "include" })),
+    ...profile.excludeKeywords.map((keyword) => ({ company_id: companyId, keyword, type: "exclude" })),
+  ];
+  if (serviceRows.length) {
+    const { error } = await supabase.from("company_services").insert(serviceRows);
+    if (error) throw error;
+  }
+  if (locationRows.length) {
+    const { error } = await supabase.from("company_locations").insert(locationRows);
+    if (error) throw error;
+  }
+  if (keywordRows.length) {
+    const { error } = await supabase.from("company_keywords").insert(keywordRows);
+    if (error) throw error;
+  }
+}
+
+function buildCompanyProfileSnapshot(
+  company: Record<string, unknown>,
+  servicesRows: Array<Record<string, unknown>>,
+  locationsRows: Array<Record<string, unknown>>,
+  keywordRows: Array<Record<string, unknown>>,
+) {
+  return {
+    companyName: String(company.company_name || ""),
+    kennitala: String(company.kennitala || ""),
+    contactName: String(company.contact_name || ""),
+    contactEmail: String(company.contact_email || ""),
+    notificationEmail: String(company.notification_email || ""),
+    billingEmail: String(company.billing_email || ""),
+    selectedPlan: String(company.selected_plan || company.plan || ""),
+    billingStatus: String(company.billing_status || ""),
+    services: cleanStringArray(servicesRows.map((row) => row.service)),
+    locations: cleanStringArray(locationsRows.map((row) => row.location)),
+    includeKeywords: cleanStringArray(keywordRows.filter((row) => row.type === "include").map((row) => row.keyword)),
+    excludeKeywords: cleanStringArray(keywordRows.filter((row) => row.type === "exclude").map((row) => row.keyword)),
+    baseLocation: String(company.base_location || ""),
+    serviceAreas: cleanStringArray(company.service_areas),
+    opportunityCategories: cleanStringArray(company.opportunity_categories),
+    opportunityTypes: cleanStringArray(company.opportunity_types),
+    subcontractingRelevant: Boolean(company.subcontracting_relevant),
+    minimumRelevanceThreshold: Number(company.minimum_relevance_threshold ?? 50),
+    reportFrequency: String(company.report_frequency || "weekly"),
+    reportDay: String(company.report_day || "monday"),
+    deadlineReminders: Boolean(company.deadline_reminders),
+    includeLowConfidence: Boolean(company.include_low_confidence),
+    coreServices: cleanStringArray(company.core_services),
+    secondaryServices: cleanStringArray(company.secondary_services),
+    excludedServices: cleanStringArray(company.excluded_services),
+    preferredProjectTypes: cleanStringArray(company.preferred_project_types),
+    excludedProjectTypes: cleanStringArray(company.excluded_project_types),
+    equipment: cleanStringArray(company.equipment),
+    certifications: cleanStringArray(company.certifications),
+    preferredBuyers: cleanStringArray(company.preferred_buyers),
+    maxTravelDistanceKm: nullableNumber(company.max_travel_distance_km),
+    typicalProjectSize: String(company.typical_project_size || ""),
+    profileNotesForAi: String(company.profile_notes_for_ai || ""),
+    internalAdminNotes: String(company.internal_admin_notes || ""),
+  };
+}
+
+function getChangedProfileFields(previous: Record<string, unknown>, next: Record<string, unknown>) {
+  return Object.keys(next).filter((key) => JSON.stringify(previous[key] ?? null) !== JSON.stringify(next[key] ?? null));
+}
+
+function pickFields(source: Record<string, unknown>, fields: string[]) {
+  return fields.reduce((acc, field) => {
+    acc[field] = source[field] ?? null;
+    return acc;
+  }, {} as Record<string, unknown>);
+}
 
 async function updateCompanyMatchingProfile(
   supabase: ReturnType<typeof createClient>,
@@ -690,10 +900,12 @@ async function refreshCompanyMatches(supabase: ReturnType<typeof createClient>, 
 
   const { data: existingSafetyRows, error: existingSafetyError } = await supabase
     .from("opportunity_matches")
-    .select("opportunity_id, safety_status, safety_reasons, alert_eligible, review_required, reviewed_at, reviewed_by, review_note")
+    .select("opportunity_id, match_score, match_label, safety_status, safety_reasons, alert_eligible, review_required, reviewed_at, reviewed_by, review_note")
     .eq("company_id", companyId);
   if (existingSafetyError) throw existingSafetyError;
-  const existingSafety = new Map((existingSafetyRows || [])
+  const existingRows = existingSafetyRows || [];
+  const existingByOpportunity = new Map(existingRows.map((row) => [String(row.opportunity_id), row]));
+  const existingSafety = new Map(existingRows
     .filter((row) => row.reviewed_at)
     .map((row) => [String(row.opportunity_id), row]));
 
@@ -738,10 +950,25 @@ async function refreshCompanyMatches(supabase: ReturnType<typeof createClient>, 
     if (insertError) throw insertError;
   }
 
+  const nextOpportunityIds = new Set(rows.map((row) => String(row.opportunity_id)));
+  const matches_created = rows.filter((row) => !existingByOpportunity.has(String(row.opportunity_id))).length;
+  const matches_updated = rows.filter((row) => {
+    const previous = existingByOpportunity.get(String(row.opportunity_id));
+    return previous && (
+      Number(previous.match_score || 0) !== Number(row.match_score || 0) ||
+      String(previous.match_label || "") !== String(row.match_label || "") ||
+      String(previous.safety_status || "") !== String(row.safety_status || "")
+    );
+  }).length;
+  const matches_removed = existingRows.filter((row) => !nextOpportunityIds.has(String(row.opportunity_id))).length;
+
   return {
     company,
     matches,
     matches_refreshed: rows.length,
+    matches_created,
+    matches_updated,
+    matches_removed,
   };
 }
 
@@ -2306,6 +2533,58 @@ function normalizeMatchingProfileInput(input: Record<string, unknown>) {
     typicalProjectSize: String(input.typicalProjectSize || "").trim(),
     profileNotesForAi: String(input.profileNotesForAi || "").trim(),
   };
+}
+
+function normalizeAdminCompanyProfileInput(input: Record<string, unknown>) {
+  const billingStatus = normalizeBillingStatus(String(input.billingStatus || "trial"));
+  const reportFrequency = ["daily", "weekly"].includes(String(input.reportFrequency || ""))
+    ? String(input.reportFrequency)
+    : "weekly";
+  const reportDay = ["monday", "tuesday", "wednesday", "thursday", "friday"].includes(String(input.reportDay || ""))
+    ? String(input.reportDay)
+    : "monday";
+  const minimumRelevanceThreshold = Math.max(0, Math.min(100, Number(input.minimumRelevanceThreshold ?? 50) || 50));
+  return {
+    companyName: String(input.companyName || "").trim(),
+    kennitala: String(input.kennitala || "").trim(),
+    contactName: String(input.contactName || "").trim(),
+    contactEmail: normalizeEmail(String(input.contactEmail || "")),
+    notificationEmail: normalizeEmail(String(input.notificationEmail || "")),
+    billingEmail: normalizeEmail(String(input.billingEmail || "")),
+    selectedPlan: normalizePlan(String(input.selectedPlan || "basic")),
+    billingStatus,
+    services: cleanStringArray(input.services),
+    includeKeywords: cleanStringArray(input.includeKeywords),
+    excludeKeywords: cleanStringArray(input.excludeKeywords),
+    locations: cleanStringArray(input.locations),
+    serviceAreas: cleanStringArray(input.serviceAreas),
+    baseLocation: String(input.baseLocation || "").trim(),
+    opportunityCategories: cleanStringArray(input.opportunityCategories),
+    opportunityTypes: cleanStringArray(input.opportunityTypes),
+    preferredProjectTypes: cleanStringArray(input.preferredProjectTypes),
+    excludedProjectTypes: cleanStringArray(input.excludedProjectTypes),
+    subcontractingRelevant: Boolean(input.subcontractingRelevant),
+    minimumRelevanceThreshold,
+    reportFrequency,
+    reportDay,
+    deadlineReminders: Boolean(input.deadlineReminders),
+    includeLowConfidence: Boolean(input.includeLowConfidence),
+    coreServices: cleanStringArray(input.coreServices),
+    secondaryServices: cleanStringArray(input.secondaryServices),
+    excludedServices: cleanStringArray(input.excludedServices),
+    equipment: cleanStringArray(input.equipment),
+    certifications: cleanStringArray(input.certifications),
+    preferredBuyers: cleanStringArray(input.preferredBuyers),
+    maxTravelDistanceKm: nullableNumber(input.maxTravelDistanceKm),
+    typicalProjectSize: String(input.typicalProjectSize || "").trim(),
+    profileNotesForAi: String(input.profileNotesForAi || "").trim(),
+    internalAdminNotes: String(input.internalAdminNotes || "").trim(),
+  };
+}
+
+function normalizeBillingStatus(value: string) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return ["trial", "active", "paused", "cancelled"].includes(normalized) ? normalized : "trial";
 }
 
 function normalizeDecisionReason(value: string) {

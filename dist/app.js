@@ -5,9 +5,9 @@ import {
   acceptCompanyInvite,
   capitalize,
   buildCompanyInviteLink,
+  buildAdminCompanyProfilePayload,
   buildEvaluationLabelPayload,
   buildMatchDecisionPayload,
-  buildMatchingProfilePayload,
   buildReportEmail,
   claimInvitedCompanyMemberships,
   clearStoredPendingInviteToken,
@@ -60,6 +60,7 @@ import {
   loadActiveCompanyMemberships,
   loadAdminContactRequests,
   loadAdminTrialRequests,
+  logClientCompanyProfileChange,
   mergeAiReviewsIntoReportMatches,
   normalizeLocationText,
   normalizeAccessEmail,
@@ -76,7 +77,7 @@ import {
   normalizeReportRisk,
   renderAdminDailyPipelinePanel,
   renderAdminCompanyAccessPanel,
-  renderAdminMatchingProfilePanel,
+  renderAdminCompanyProfilePanel,
   renderMatchDecisionControls,
   renderAcceptInvitePage,
   renderAdminAutomaticAiReviewPanel,
@@ -107,6 +108,7 @@ import {
   previewCompanyInvite,
   replaceUrlWithInviteRoute,
   sanitizeInviteToken,
+  saveAdminCompanyProfile,
   setStoredPendingInviteToken,
   shouldPreserveInviteForRoute,
   sortAiReportMatches,
@@ -126,6 +128,8 @@ import {
 
 const MISSING_DEADLINE_RISK = "Deadline not available in imported data — verify on source page.";
 const EXTRACTED_PROJECT_DEADLINE_RISK = "No formal tender deadline extracted — verify source article.";
+
+const COMPANY_PROFILE_SELECT = "id, owner_id, company_name, kennitala, contact_email, billing_email, contact_name, phone, address, website, industry, plan, selected_plan, billing_status, trial_started_at, trial_ends_at, base_location, service_areas, willing_to_travel, national_projects, remote_projects, minimum_project_value_for_travel, min_project_value, max_project_value, allow_unknown_value, report_frequency, report_day, deadline_reminders, include_low_confidence, auto_alert_mode";
 
 function getInitialLanguage() {
   return getInitialLanguageBase(STORAGE_KEYS);
@@ -272,6 +276,8 @@ let state = {
   adminCompanyInviteDrafts: {},
   adminCompanyInviteLinks: {},
   adminCompanyInviteDebug: {},
+  adminCompanyProfileDirty: {},
+  adminCompanyProfileResults: {},
   adminReportDeliveryActions: {},
   selectedAdminCompanyId: null,
   adminActiveTab: "overview",
@@ -836,6 +842,7 @@ document.addEventListener("click", (event) => {
     return;
   }
   if (name === "admin-tab") {
+    if (!confirmDiscardAdminCompanyProfileChanges()) return;
     state.adminActiveTab = action.dataset.tab || "overview";
     state.selectedAdminCompanyId = null;
     state.selectedAdminReportId = null;
@@ -846,10 +853,12 @@ document.addEventListener("click", (event) => {
     scrollActiveAdminTabIntoView();
   }
   if (name === "view-admin-company") {
+    if (state.selectedAdminCompanyId && state.selectedAdminCompanyId !== id && !confirmDiscardAdminCompanyProfileChanges()) return;
     state.selectedAdminCompanyId = id;
     render();
   }
   if (name === "close-admin-company") {
+    if (!confirmDiscardAdminCompanyProfileChanges()) return;
     state.selectedAdminCompanyId = null;
     render();
   }
@@ -1022,6 +1031,7 @@ document.addEventListener("keydown", (event) => {
 
   if (event.key === "Escape" && state.selectedAdminCompanyId) {
     event.preventDefault();
+    if (!confirmDiscardAdminCompanyProfileChanges()) return;
     state.selectedAdminCompanyId = null;
     render();
     return;
@@ -1081,6 +1091,12 @@ document.addEventListener("keydown", (event) => {
 });
 
 document.addEventListener("input", (event) => {
+  const adminCompanyProfileForm = event.target?.closest?.("[data-admin-company-profile-form]");
+  if (adminCompanyProfileForm) {
+    const companyId = adminCompanyProfileForm.dataset.companyId || "";
+    state.adminCompanyProfileDirty = { ...(state.adminCompanyProfileDirty || {}), [companyId]: true };
+  }
+
   const authField = event.target.closest?.("[data-auth-field]");
   if (authField) {
     state.authForm[authField.dataset.authField] = authField.value;
@@ -1338,11 +1354,13 @@ document.addEventListener("submit", async (event) => {
     return;
   }
 
-  if (event.target.matches("[data-admin-matching-profile-form]")) {
+  if (event.target.matches("[data-admin-company-profile-form]")) {
     event.preventDefault();
-    await saveAdminCompanyMatchingProfile(event.target.dataset.companyId || "", event.target);
+    const submitMode = event.submitter?.dataset?.adminProfileSubmit === "refresh" ? "refresh" : "save";
+    await submitAdminCompanyProfileForm(event.target.dataset.companyId || "", event.target, { refreshMatches: submitMode === "refresh" });
     return;
   }
+
 
   if (event.target.matches("[data-admin-match-decision-form]")) {
     event.preventDefault();
@@ -2169,9 +2187,10 @@ async function loadAdminCompanies() {
     let members = [];
     let decisions = [];
     let evaluationLabels = [];
+    let profileChanges = [];
 
     if (companyIds.length) {
-      const [servicesResult, locationsResult, keywordsResult, matchesResult, reportsResult, aiReviewsResult, membersResult, decisionsResult, evaluationLabelsResult] = await Promise.all([
+      const [servicesResult, locationsResult, keywordsResult, matchesResult, reportsResult, aiReviewsResult, membersResult, decisionsResult, evaluationLabelsResult, profileChangesResult] = await Promise.all([
         supabaseClient.from("company_services").select("company_id, service").in("company_id", companyIds),
         supabaseClient.from("company_locations").select("company_id, location").in("company_id", companyIds),
         supabaseClient.from("company_keywords").select("company_id, keyword, type").in("company_id", companyIds),
@@ -2183,7 +2202,8 @@ async function loadAdminCompanies() {
         supabaseClient.from("ai_match_reviews").select("id, company_id, opportunity_id, match_id, fit, confidence, send_to_client, reason, reviewed_profile_hash, profile_updated_at, company_services_snapshot, company_locations_snapshot, created_at, updated_at").in("company_id", companyIds),
         supabaseClient.from("company_members").select("id, company_id, user_id, email, role, status, invited_at, accepted_at, revoked_at, expires_at").in("company_id", companyIds).order("created_at", { ascending: false }),
         supabaseClient.from("admin_match_decisions").select("id, company_id, opportunity_id, decision, reason, comment, decided_at, decided_by").in("company_id", companyIds),
-        supabaseClient.from("match_evaluation_labels").select("id, company_id, opportunity_id, label, reason, notes, labeled_at, labeled_by").in("company_id", companyIds)
+        supabaseClient.from("match_evaluation_labels").select("id, company_id, opportunity_id, label, reason, notes, labeled_at, labeled_by").in("company_id", companyIds),
+        supabaseClient.from("company_profile_change_log").select("id, company_id, changed_by, changed_by_email, changed_at, source, changed_fields, previous_values, new_values").in("company_id", companyIds).order("changed_at", { ascending: false })
       ]);
 
       const relatedResults = [
@@ -2195,7 +2215,8 @@ async function loadAdminCompanies() {
         ["AI match reviews", aiReviewsResult],
         ["company members", membersResult],
         ["match decisions", decisionsResult],
-        ["evaluation labels", evaluationLabelsResult]
+        ["evaluation labels", evaluationLabelsResult],
+        ["company profile changes", profileChangesResult]
       ];
       const failedRelatedResult = relatedResults.find(([, result]) => result.error);
       if (failedRelatedResult) {
@@ -2211,6 +2232,7 @@ async function loadAdminCompanies() {
       members = membersResult.data || [];
       decisions = decisionsResult.data || [];
       evaluationLabels = evaluationLabelsResult.data || [];
+      profileChanges = profileChangesResult.data || [];
     }
 
     state.adminCompanies = companyRows.map((company) => {
@@ -2239,7 +2261,8 @@ async function loadAdminCompanies() {
         reports: reports.filter((row) => row.company_id === company.id),
         members: members.filter((row) => row.company_id === company.id),
         decisions: decisions.filter((row) => row.company_id === company.id),
-        evaluationLabels: evaluationLabels.filter((row) => row.company_id === company.id)
+        evaluationLabels: evaluationLabels.filter((row) => row.company_id === company.id),
+        profileChanges: profileChanges.filter((row) => row.company_id === company.id)
       });
     });
     state.adminCompaniesLoaded = true;
@@ -2396,6 +2419,7 @@ function mapAdminCompany(company, related) {
     ownerId: company.owner_id || "",
     companyName: company.company_name || "Unnamed company",
     contactEmail: company.contact_email || "",
+    notificationEmail: company.notification_email || "",
     kennitala: company.kennitala || "",
     billingEmail: company.billing_email || "",
     contactName: company.contact_name || "",
@@ -2429,6 +2453,11 @@ function mapAdminCompany(company, related) {
     reportDay: company.report_day || "monday",
     deadlineReminders: Boolean(company.deadline_reminders),
     autoAiReviewEnabled: Boolean(company.auto_ai_review_enabled),
+    opportunityCategories: cleanStringArray(company.opportunity_categories),
+    opportunityTypes: cleanStringArray(company.opportunity_types),
+    subcontractingRelevant: Boolean(company.subcontracting_relevant),
+    minimumRelevanceThreshold: company.minimum_relevance_threshold ?? 50,
+    internalAdminNotes: company.internal_admin_notes || "",
     coreServices: cleanStringArray(company.core_services),
     secondaryServices: cleanStringArray(company.secondary_services),
     excludedServices: cleanStringArray(company.excluded_services),
@@ -2442,6 +2471,7 @@ function mapAdminCompany(company, related) {
     profileNotesForAi: company.profile_notes_for_ai || "",
     matchingProfileUpdatedAt: company.matching_profile_updated_at || "",
     matchingProfileHash: company.matching_profile_hash || "",
+    profileChanges: related.profileChanges || [],
     members,
     matchCount: matches.length,
     savedCount: 0,
@@ -2462,6 +2492,21 @@ function clearAdminCompanyAction(companyId) {
   const next = { ...(state.adminCompanyActions || {}) };
   delete next[companyId];
   state.adminCompanyActions = next;
+}
+
+function hasDirtyAdminCompanyProfile(companyId = state.selectedAdminCompanyId) {
+  return Boolean(companyId && state.adminCompanyProfileDirty?.[companyId]);
+}
+
+function confirmDiscardAdminCompanyProfileChanges(companyId = state.selectedAdminCompanyId) {
+  if (!hasDirtyAdminCompanyProfile(companyId)) return true;
+  return window.confirm("Það eru óvistaðar breytingar í vöktunarprófíl. Viltu halda áfram án þess að vista?");
+}
+
+function clearAdminCompanyProfileDirty(companyId) {
+  const next = { ...(state.adminCompanyProfileDirty || {}) };
+  delete next[companyId];
+  state.adminCompanyProfileDirty = next;
 }
 
 function getAdminCompanyInviteEmail(company) {
@@ -2554,26 +2599,40 @@ async function revokeAdminCompanyAccess(companyId, memberId) {
   }
 }
 
-async function saveAdminCompanyMatchingProfile(companyId, formElement) {
+async function submitAdminCompanyProfileForm(companyId, formElement, options = {}) {
   if (!state.isAdmin || !companyId) return;
-  setAdminCompanyAction(companyId, "matching_profile");
+  const refreshMatches = Boolean(options.refreshMatches);
+  setAdminCompanyAction(companyId, refreshMatches ? "profile_refresh" : "profile_save");
   state.adminMessage = null;
   render();
   try {
-    await runAdminCompanyAction(companyId, "update_company_matching_profile", {
-      matchingProfile: buildMatchingProfilePayload(formElement)
-    });
-    await loadAdminCompanies();
-    state.adminMessage = { type: "success", text: "Matching profile saved. Production matching is unchanged." };
-    showToast("Matching profile saved", "success");
+    const payload = buildAdminCompanyProfilePayload(formElement);
+    const result = await saveAdminCompanyProfile(companyId, payload, { refreshMatches });
+    await Promise.all([
+      loadAdminCompanies(),
+      refreshMatches ? loadAdminReviewQueue() : Promise.resolve()
+    ]);
+    clearAdminCompanyProfileDirty(companyId);
+    state.adminCompanyProfileResults = {
+      ...(state.adminCompanyProfileResults || {}),
+      [companyId]: result
+    };
+    const refresh = result.refresh || {};
+    const message = refreshMatches
+      ? `Vöktunarprófíll vistaður og samsvaranir endurreiknaðar: ${Number(refresh.matches_created || 0)} nýjar, ${Number(refresh.matches_updated || 0)} uppfærðar, ${Number(refresh.matches_removed || 0)} fjarlægðar.`
+      : "Vöktunarprófíll vistaður.";
+    state.adminMessage = { type: "success", text: message };
+    showToast(message, "success");
   } catch (error) {
-    console.error("Failed to save matching profile:", error);
-    state.adminMessage = { type: "error", text: `Failed to save matching profile. ${formatSupabaseError(error)}` };
+    console.error("Failed to save admin company profile:", error);
+    state.adminMessage = { type: "error", text: `Ekki tókst að vista vöktunarprófíl. ${formatSupabaseError(error)}` };
+    showToast("Ekki tókst að vista vöktunarprófíl", "error");
   } finally {
     clearAdminCompanyAction(companyId);
     render();
   }
 }
+
 
 async function saveAdminMatchDecision(companyId, formElement) {
   if (!state.isAdmin || !companyId) return;
@@ -4319,7 +4378,7 @@ async function loadAuthenticatedCompany() {
 
   const { data: ownedCompany, error: ownerError } = await supabaseClient
     .from("companies")
-    .select("*")
+    .select(COMPANY_PROFILE_SELECT)
     .eq("owner_id", state.user.id)
     .maybeSingle();
   if (ownerError) throw ownerError;
@@ -4331,7 +4390,7 @@ async function loadAuthenticatedCompany() {
 
   const { data: memberCompany, error: companyError } = await supabaseClient
     .from("companies")
-    .select("*")
+    .select(COMPANY_PROFILE_SELECT)
     .eq("id", membership.company_id)
     .maybeSingle();
   if (companyError) throw companyError;
@@ -4513,8 +4572,8 @@ async function saveCompanyProfile(profile) {
     auto_alert_mode: cleanProfile.autoAlertMode
   };
   const companyRequest = state.companyId
-    ? supabaseClient.from("companies").update(companyPayload).eq("id", state.companyId).select().single()
-    : supabaseClient.from("companies").upsert({ ...companyPayload, owner_id: user.id }, { onConflict: "owner_id" }).select().single();
+    ? supabaseClient.from("companies").update(companyPayload).eq("id", state.companyId).select("id").single()
+    : supabaseClient.from("companies").upsert({ ...companyPayload, owner_id: user.id }, { onConflict: "owner_id" }).select("id").single();
   const { data: company, error: companyError } = await companyRequest;
 
   if (companyError) {
@@ -4572,6 +4631,8 @@ async function saveCompanyProfile(profile) {
     const { error } = await supabaseClient.from("company_keywords").insert(keywordRows);
     if (error) throw error;
   }
+
+  await logClientCompanyProfileChange(supabaseClient, company.id, state.profile, cleanProfile, user);
 
   state.profile = cleanProfile;
   state.pendingSignupPlan = "";
@@ -9907,9 +9968,12 @@ function renderAdminCompanyDetails(company) {
               actionState: state.adminCompanyAccessActions?.[company.id] || ""
             })}
 
-            ${renderAdminMatchingProfilePanel(company, {
+            ${renderAdminCompanyProfilePanel(company, {
               escapeHtml,
-              actionState: actionState
+              formatDateTime,
+              actionState,
+              lastResult: state.adminCompanyProfileResults?.[company.id] || null,
+              changes: company.profileChanges || []
             })}
 
             <section class="side-panel">
