@@ -55,8 +55,12 @@ export async function saveAdminCompanyProfile(companyId, profile, options = {}) 
     })
   });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok || payload?.error) {
-    throw new Error(payload?.error || `Admin company profile update failed with status ${response.status}`);
+  if (!response.ok || payload?.success === false || payload?.error) {
+    const error = new Error(payload?.error || `Admin company profile update failed with status ${response.status}`);
+    error.code = payload?.code || `HTTP_${response.status}`;
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
   }
   return payload;
 }

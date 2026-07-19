@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
     });
 
     const { data: userData, error: userError } = await userClient.auth.getUser();
-    if (userError || !userData.user) return json({ error: "Unauthorized" }, 401);
+    if (userError || !userData.user) return jsonError("Unauthorized", "UNAUTHORIZED", 401);
 
     const { data: adminRow, error: adminError } = await adminClient
       .from("admin_users")
@@ -62,7 +62,7 @@ Deno.serve(async (req) => {
       .eq("user_id", userData.user.id)
       .maybeSingle();
     if (adminError) throw adminError;
-    if (!adminRow) return json({ error: "Admin access required" }, 403);
+    if (!adminRow) return jsonError("Admin access required", "ADMIN_REQUIRED", 403);
 
     const body = await safeJson(req);
     const companyId = String(body.companyId || "").trim();
@@ -81,9 +81,9 @@ Deno.serve(async (req) => {
       const result = await deleteTrialRequest(adminClient, { trialRequestId });
       return json({ ok: true, action, ...result });
     }
-    if (!isUuid(companyId)) return json({ error: "A valid companyId is required." }, 400);
+    if (!isUuid(companyId)) return jsonError("A valid companyId is required.", "INVALID_COMPANY_ID", 400);
     if (!["refresh_matches", "generate_report", "review_match", "mark_report_sent", "invite_customer", "revoke_customer_access", "update_company_profile", "update_company_matching_profile", "upsert_match_decision", "upsert_evaluation_label"].includes(action)) {
-      return json({ error: "Unsupported action." }, 400);
+      return jsonError("Unsupported action", "UNSUPPORTED_ACTION", 400, { action });
     }
 
     if (action === "update_company_profile") {
@@ -94,7 +94,7 @@ Deno.serve(async (req) => {
         changedByEmail: userData.user.email || "",
         refreshMatches: Boolean(body.refreshMatches),
       });
-      return json({ ok: true, action, ...result });
+      return json({ success: true, ok: true, message: "Company profile updated", action, companyId: result.company_id, ...result });
     }
 
     if (action === "update_company_matching_profile") {
@@ -197,7 +197,7 @@ Deno.serve(async (req) => {
     });
   } catch (error) {
     console.error("Admin company action failed:", error);
-    return json({ error: errorMessage(error) }, 500);
+    return jsonError(errorMessage(error), "INTERNAL_ERROR", 500);
   }
 });
 
@@ -2719,6 +2719,15 @@ async function safeJson(req: Request) {
   } catch {
     return {};
   }
+}
+
+function jsonError(error: string, code: string, status = 400, details: Record<string, unknown> = {}) {
+  return json({
+    success: false,
+    error,
+    code,
+    ...details,
+  }, status);
 }
 
 function json(body: unknown, status = 200) {

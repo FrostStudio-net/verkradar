@@ -4301,6 +4301,36 @@ body.modal-open {
   border-color: rgba(215, 255, 63, 0.28);
 }
 
+.toast-warning {
+  border-color: rgba(248, 214, 109, 0.32);
+}
+
+.toast-info {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.toast-close {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  border: 0;
+  border-radius: 999px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+}
+
+.toast-close:hover,
+.toast-close:focus-visible {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.12);
+  outline: none;
+}
+
 @keyframes toastIn {
   from {
     opacity: 0;

@@ -499,6 +499,7 @@ async function handleAuthCallbackIfPresent() {
   }
 
   const nextRoute = replaceUrlWithInviteRoute(inviteToken);
+  clearToast();
   state.route = nextRoute;
   return true;
 }
@@ -612,6 +613,7 @@ window.addEventListener("hashchange", () => {
   }
 
   state.route = nextRoute;
+  if (routeChanged) clearToast();
   syncPendingSignupPlanFromRoute(nextRoute);
   syncPendingInviteTokenFromRoute(nextRoute);
   resetMobileMenuState();
@@ -776,6 +778,13 @@ document.addEventListener("click", (event) => {
     };
     if (state.isMobileMenuOpen || state.isMobileMenuClosing) closeMobileMenu(goToTarget);
     else goToTarget();
+    return;
+  }
+
+  if (name === "close-toast") {
+    event.preventDefault();
+    clearToast();
+    render();
     return;
   }
 
@@ -1561,6 +1570,7 @@ function navigate(route) {
     return;
   }
 
+  clearToast();
   clearOpportunityDetailsState();
   state.route = route;
   syncPendingSignupPlanFromRoute(route);
@@ -2621,12 +2631,10 @@ async function submitAdminCompanyProfileForm(companyId, formElement, options = {
     const message = refreshMatches
       ? `Vöktunarprófíll vistaður og samsvaranir endurreiknaðar: ${Number(refresh.matches_created || 0)} nýjar, ${Number(refresh.matches_updated || 0)} uppfærðar, ${Number(refresh.matches_removed || 0)} fjarlægðar.`
       : "Vöktunarprófíll vistaður.";
-    state.adminMessage = { type: "success", text: message };
-    showToast(message, "success");
+    showToast(message, "success", { key: `admin-profile:${companyId}` });
   } catch (error) {
     console.error("Failed to save admin company profile:", error);
-    state.adminMessage = { type: "error", text: `Ekki tókst að vista vöktunarprófíl. ${formatSupabaseError(error)}` };
-    showToast("Ekki tókst að vista vöktunarprófíl", "error");
+    showToast("Ekki tókst að vista vöktunarprófílinn. Reyndu aftur.", "error", { key: `admin-profile:${companyId}` });
   } finally {
     clearAdminCompanyAction(companyId);
     render();
@@ -5303,18 +5311,41 @@ function isExistingAccountError(error) {
   );
 }
 
-function showToast(message, type = "success") {
+const TOAST_DURATIONS = {
+  success: 3000,
+  info: 4000,
+  warning: 5000,
+  error: 6000
+};
+
+function showToast(message, type = "success", options = {}) {
+  const toastType = TOAST_DURATIONS[type] ? type : "info";
+  const key = options.key || `${toastType}:${message}`;
+  if (state.toast?.key === key && state.toast.message === message) {
+    clearTimeout(window.__toastTimeout);
+  }
   state.toast = {
     message,
-    type
+    type: toastType,
+    key,
+    persistent: Boolean(options.persistent)
   };
   render();
 
   clearTimeout(window.__toastTimeout);
-  window.__toastTimeout = setTimeout(() => {
-    state.toast = null;
-    render();
-  }, 2500);
+  if (!state.toast.persistent) {
+    window.__toastTimeout = setTimeout(() => {
+      if (state.toast?.key === key) {
+        state.toast = null;
+        render();
+      }
+    }, options.duration ?? TOAST_DURATIONS[toastType]);
+  }
+}
+
+function clearToast() {
+  clearTimeout(window.__toastTimeout);
+  state.toast = null;
 }
 
 function loadProfile() {
@@ -6813,9 +6844,10 @@ function renderShell(content) {
     <main class="${mainClasses}">${content}</main>
     ${renderFooter()}
     ${state.toast ? `
-      <div class="toast toast-${state.toast.type}">
+      <div class="toast toast-${state.toast.type}" role="status" aria-live="polite">
         <span class="toast-dot"></span>
         <span>${escapeHtml(state.toast.message)}</span>
+        <button class="toast-close" type="button" data-action="close-toast" aria-label="Close notification">×</button>
       </div>
     ` : ""}
   `;
