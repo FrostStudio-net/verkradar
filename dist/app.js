@@ -121,7 +121,9 @@ import {
   updateTrialRequestStatus,
   uniqueStrings,
   validateTrialRequestForm,
-  clearTrialRequestFieldError
+  clearTrialRequestFieldError,
+  validateContactRequestForm,
+  clearContactRequestFieldError
 } from "./src/main.js";
 
 /* VerkRadar single-page app. Production data comes from Supabase; demo data must be explicitly isolated. */
@@ -629,6 +631,11 @@ document.addEventListener("click", (event) => {
     closeDropdown();
   }
 
+  const openContactSubject = document.querySelector("[data-contact-subject-select].is-open");
+  if (openContactSubject && !event.target.closest?.("[data-contact-subject-select]")) {
+    closeContactSubjectDropdown(openContactSubject);
+  }
+
   if (!event.target.closest?.("[data-location-selector]")) {
     document.querySelectorAll("[data-location-selector].is-open").forEach((selector) => {
       selector.classList.remove("is-open");
@@ -729,6 +736,24 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (name === "toggle-contact-subject") {
+    event.preventDefault();
+    const select = action.closest("[data-contact-subject-select]");
+    if (!select) return;
+    const willOpen = !select.classList.contains("is-open");
+    setContactSubjectDropdownOpen(select, willOpen);
+    if (willOpen) focusContactSubjectOption(select);
+    return;
+  }
+
+  if (name === "select-contact-subject") {
+    event.preventDefault();
+    const select = action.closest("[data-contact-subject-select]");
+    if (!select) return;
+    selectContactSubject(select, action);
+    return;
+  }
+
   if (name === "select-filter") {
     event.preventDefault();
     const key = action.dataset.key;
@@ -783,8 +808,7 @@ document.addEventListener("click", (event) => {
 
   if (name === "close-toast") {
     event.preventDefault();
-    clearToast();
-    render();
+    dismissToast();
     return;
   }
 
@@ -827,6 +851,7 @@ document.addEventListener("click", (event) => {
     render();
   }
   if (name === "view-admin-report") {
+    clearToast();
     state.selectedAdminReportId = id;
     state.selectedAdminReport = null;
     state.selectedAdminReportError = null;
@@ -852,6 +877,7 @@ document.addEventListener("click", (event) => {
   }
   if (name === "admin-tab") {
     if (!confirmDiscardAdminCompanyProfileChanges()) return;
+    clearToast();
     state.adminActiveTab = action.dataset.tab || "overview";
     state.selectedAdminCompanyId = null;
     state.selectedAdminReportId = null;
@@ -1045,6 +1071,9 @@ document.addEventListener("keydown", (event) => {
     render();
     return;
   }
+
+  const contactSubjectSelect = event.target.closest?.("[data-contact-subject-select]");
+  if (contactSubjectSelect && handleContactSubjectKeydown(event, contactSubjectSelect)) return;
 
   const dropdownRoot = event.target.closest?.(".custom-select");
   const activeKey = dropdownRoot?.dataset.key || state.dropdown.openKey;
@@ -1256,6 +1285,10 @@ document.addEventListener("input", (event) => {
   if (event.target?.closest?.("#trial-request-form")) {
     clearTrialRequestFieldError(event.target);
   }
+
+  if (event.target?.closest?.("#contact-request-form")) {
+    clearContactRequestFieldError(event.target);
+  }
 });
 
 document.addEventListener("submit", async (event) => {
@@ -1314,23 +1347,35 @@ document.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (state.contactRequestSubmitting) return;
     state.contactRequestError = "";
+    if (!validateContactRequestForm(event.target)) return;
+    const form = event.target;
+    const formData = new FormData(form);
+    const submitButton = form.querySelector('button[type="submit"]');
+    const originalButtonText = submitButton?.textContent || "";
     state.contactRequestSubmitting = true;
-    render();
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.textContent = "Sendi...";
+    }
     try {
-      await submitContactRequest(new FormData(event.target));
+      await submitContactRequest(formData);
       state.contactRequestSubmitted = true;
-      event.target.reset();
       render();
       scrollToPageTop();
     } catch (error) {
       console.error("Contact request failed:", error);
       state.contactRequestSubmitted = false;
       state.contactRequestError = formatSupabaseError(error) || "Gat ekki sent skilaboð. Reyndu aftur.";
-      render();
       showToast(state.contactRequestError, "error");
+      const existingError = form.querySelector(".admin-message.is-error");
+      if (existingError) existingError.remove();
+      form.insertAdjacentHTML("afterbegin", `<div class="admin-message is-error" role="alert"><span>${escapeHtml(state.contactRequestError)}</span></div>`);
     } finally {
       state.contactRequestSubmitting = false;
-      render();
+      if (submitButton && !state.contactRequestSubmitted) {
+        submitButton.disabled = false;
+        submitButton.textContent = originalButtonText || "Senda skilaboð";
+      }
     }
     return;
   }
@@ -2952,20 +2997,35 @@ async function runAdminAutomaticAiReview() {
 
 async function runAdminDailyPipeline() {
   if (!state.isAdmin) return;
+  clearToast();
   state.adminDailyPipelineLoading = true;
   state.adminMessage = null;
   render();
   try {
     const payload = await requestDailyPipelineRun();
     state.adminDailyPipelineResult = payload;
-    await Promise.all([refreshAdminOperationsData(), loadAdminCompanies(), loadAdminReviewQueue()]);
-    state.adminMessage = {
-      type: payload.errors?.length ? "error" : "success",
-      text: `Daily pipeline finished: ${Number(payload.sources_imported || 0)} sources, ${Number(payload.companies_refreshed || 0)} companies, ${Number(payload.ai_reviews_created || 0)} AI reviews.`
-    };
+    await Promise.all([refreshAdminOperationsData({ notify: false }), loadAdminCompanies(), loadAdminReviewQueue()]);
+    const summary = `Daily pipeline finished: ${Number(payload.sources_imported || 0)} sources, ${Number(payload.companies_refreshed || 0)} companies, ${Number(payload.ai_reviews_created || 0)} AI reviews.`;
+    if (payload.errors?.length) {
+      showToast(`${summary} ${payload.errors.length} error${payload.errors.length === 1 ? "" : "s"} reported.`, "error", {
+        key: "admin-daily-pipeline",
+        duration: 8000,
+        placement: "admin"
+      });
+    } else {
+      showToast(summary, "success", {
+        key: "admin-daily-pipeline",
+        duration: 5000,
+        placement: "admin"
+      });
+    }
   } catch (error) {
     console.error("Failed to run daily pipeline:", error);
-    state.adminMessage = { type: "error", text: `Daily pipeline failed. ${formatSupabaseError(error)}` };
+    showToast(`Daily pipeline failed. ${formatSupabaseError(error)}`, "error", {
+      key: "admin-daily-pipeline",
+      duration: 8000,
+      placement: "admin"
+    });
   } finally {
     state.adminDailyPipelineLoading = false;
     render();
@@ -3029,7 +3089,7 @@ function getAdminNoReportMessage(payload, companyName) {
     : `No customer-report-ready matches found for ${companyName}.`);
 }
 
-async function refreshAdminOperationsData() {
+async function refreshAdminOperationsData({ notify = true } = {}) {
   if (!state.isAdmin) return;
   await Promise.all([
     loadImportRunsForAdmin(),
@@ -3041,7 +3101,7 @@ async function refreshAdminOperationsData() {
     loadAdminCompanies(),
     loadAdminReviewQueue()
   ]);
-  showToast("Automation status refreshed", "success");
+  if (notify) showToast("Automation status refreshed", "success");
   render();
 }
 
@@ -5328,23 +5388,40 @@ function showToast(message, type = "success", options = {}) {
     message,
     type: toastType,
     key,
-    persistent: Boolean(options.persistent)
+    persistent: Boolean(options.persistent),
+    placement: options.placement || "default",
+    isClosing: false
   };
   render();
 
   clearTimeout(window.__toastTimeout);
+  clearTimeout(window.__toastExitTimeout);
   if (!state.toast.persistent) {
     window.__toastTimeout = setTimeout(() => {
       if (state.toast?.key === key) {
-        state.toast = null;
-        render();
+        dismissToast(key);
       }
     }, options.duration ?? TOAST_DURATIONS[toastType]);
   }
 }
 
+function dismissToast(key = state.toast?.key) {
+  if (!state.toast || state.toast.key !== key || state.toast.isClosing) return;
+  clearTimeout(window.__toastTimeout);
+  state.toast = { ...state.toast, isClosing: true };
+  render();
+  clearTimeout(window.__toastExitTimeout);
+  window.__toastExitTimeout = setTimeout(() => {
+    if (state.toast?.key === key) {
+      state.toast = null;
+      render();
+    }
+  }, 180);
+}
+
 function clearToast() {
   clearTimeout(window.__toastTimeout);
+  clearTimeout(window.__toastExitTimeout);
   state.toast = null;
 }
 
@@ -6844,7 +6921,7 @@ function renderShell(content) {
     <main class="${mainClasses}">${content}</main>
     ${renderFooter()}
     ${state.toast ? `
-      <div class="toast toast-${state.toast.type}" role="status" aria-live="polite">
+      <div class="toast toast-${state.toast.type} toast-${state.toast.placement} ${state.toast.isClosing ? "is-closing" : ""}" role="${state.toast.type === "error" ? "alert" : "status"}" aria-live="${state.toast.type === "error" ? "assertive" : "polite"}">
         <span class="toast-dot"></span>
         <span>${escapeHtml(state.toast.message)}</span>
         <button class="toast-close" type="button" data-action="close-toast" aria-label="Close notification">×</button>
@@ -8683,6 +8760,82 @@ function closeDropdown() {
   state.dropdown.openKey = null;
   state.dropdown.focusedIndex = 0;
   render();
+}
+
+function setContactSubjectDropdownOpen(select, isOpen) {
+  select.classList.toggle("is-open", isOpen);
+  select.querySelector(".custom-select-trigger")?.setAttribute("aria-expanded", String(isOpen));
+  const menu = select.querySelector(".custom-select-menu");
+  if (menu) menu.hidden = !isOpen;
+}
+
+function closeContactSubjectDropdown(select) {
+  setContactSubjectDropdownOpen(select, false);
+}
+
+function getContactSubjectOptions(select) {
+  return Array.from(select.querySelectorAll(".custom-select-option"));
+}
+
+function focusContactSubjectOption(select, direction = 1) {
+  const options = getContactSubjectOptions(select);
+  if (!options.length) return;
+  const selectedIndex = options.findIndex((option) => option.getAttribute("aria-selected") === "true");
+  const index = selectedIndex >= 0 ? selectedIndex : (direction > 0 ? 0 : options.length - 1);
+  options[index].focus();
+}
+
+function selectContactSubject(select, option) {
+  const value = option.dataset.value || "";
+  const hiddenInput = select.parentElement?.querySelector('input[name="subject"]');
+  if (hiddenInput) hiddenInput.value = value;
+  clearContactRequestFieldError(select.querySelector(".custom-select-trigger"));
+  const label = select.querySelector("[data-contact-subject-label]");
+  if (label) label.textContent = option.textContent.trim();
+  getContactSubjectOptions(select).forEach((item) => {
+    const selected = item === option;
+    item.classList.toggle("is-selected", selected);
+    item.setAttribute("aria-selected", String(selected));
+    const check = item.querySelector(".custom-select-check");
+    if (check) check.textContent = selected ? "✓" : "";
+  });
+  closeContactSubjectDropdown(select);
+  select.querySelector(".custom-select-trigger")?.focus();
+}
+
+function handleContactSubjectKeydown(event, select) {
+  const isOpen = select.classList.contains("is-open");
+  const options = getContactSubjectOptions(select);
+
+  if (event.key === "Escape" && isOpen) {
+    event.preventDefault();
+    closeContactSubjectDropdown(select);
+    select.querySelector(".custom-select-trigger")?.focus();
+    return true;
+  }
+
+  if ((event.key === "ArrowDown" || event.key === "ArrowUp") && !isOpen) {
+    event.preventDefault();
+    setContactSubjectDropdownOpen(select, true);
+    focusContactSubjectOption(select, event.key === "ArrowDown" ? 1 : -1);
+    return true;
+  }
+
+  if (isOpen && (event.key === "Enter" || event.key === " ")) {
+    const activeOption = options.find((option) => option === document.activeElement);
+    if (!activeOption) return false;
+    event.preventDefault();
+    selectContactSubject(select, activeOption);
+    return true;
+  }
+
+  if (!isOpen || !["ArrowDown", "ArrowUp"].includes(event.key)) return false;
+  event.preventDefault();
+  const currentIndex = options.indexOf(document.activeElement);
+  const direction = event.key === "ArrowDown" ? 1 : -1;
+  const nextIndex = (Math.max(0, currentIndex) + direction + options.length) % options.length;
+  options[nextIndex]?.focus();
+  return true;
 }
 
 function focusDropdownOption() {

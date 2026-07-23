@@ -19,7 +19,7 @@ export { renderForgotPasswordPage, renderLoginPage, renderPublicSignupUnavailabl
 export { renderAdminAutomaticAiReviewPanel, renderAdminCompanyAiReviewPanel, renderAdminCompanyMatchList } from "./pages/adminAiReviews.js";
 export { renderDashboardEmptyStatePage, renderDashboardPage, renderOpportunityCardPage, renderOpportunityModalPage } from "./pages/dashboard.js";
 export { renderLegalPageContent } from "./pages/legal.js";
-export { renderContactPage } from "./pages/contact.js";
+export { clearContactRequestFieldError, renderContactPage, validateContactRequestForm } from "./pages/contact.js";
 export { clearTrialRequestFieldError, renderLandingPage, renderPricingPage, renderTrialRequestPage, validateTrialRequestForm } from "./pages/public.js";
 export { renderProfileFormPage } from "./pages/profile.js";
 export {

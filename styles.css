@@ -3102,6 +3102,10 @@ button:disabled,
   animation: dropdown-in 120ms ease-out;
 }
 
+.custom-select-menu[hidden] {
+  display: none;
+}
+
 .custom-select-option {
   width: 100%;
   min-height: 38px;
@@ -4127,6 +4131,33 @@ body.modal-open {
   box-shadow: 0 0 0 1px rgba(255, 120, 120, 0.16);
 }
 
+.trial-request-card .custom-select-trigger[aria-invalid="true"] {
+  border-color: rgba(255, 120, 120, 0.78);
+  box-shadow: 0 0 0 1px rgba(255, 120, 120, 0.16);
+}
+
+.contact-request-card {
+  gap: 20px;
+  padding: 30px;
+}
+
+.contact-request-card .form-grid.two {
+  gap: 18px 16px;
+}
+
+.contact-request-card :is(input:not([type="hidden"]), .custom-select-trigger) {
+  min-height: 48px;
+}
+
+.contact-request-card textarea {
+  min-height: 150px;
+}
+
+.contact-field-label {
+  color: var(--muted);
+  font-weight: 650;
+}
+
 .trial-request-submit {
   justify-self: start;
   min-width: 180px;
@@ -4141,6 +4172,10 @@ body.modal-open {
 
   .trial-request-card {
     gap: 16px;
+    padding: 20px;
+  }
+
+  .contact-request-card {
     padding: 20px;
   }
 
@@ -4295,6 +4330,16 @@ body.modal-open {
   animation: toastIn .18s ease-out;
 }
 
+.toast-admin {
+  top: calc(var(--header-height, 76px) + 18px);
+  bottom: auto;
+}
+
+.toast.is-closing {
+  pointer-events: none;
+  animation: toastOut .18s ease-in forwards;
+}
+
 .toast-dot {
   width: 9px;
   height: 9px;
@@ -4354,6 +4399,17 @@ body.modal-open {
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes toastOut {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
   }
 }
 
@@ -4968,6 +5024,11 @@ body.modal-open {
     right: 18px;
     bottom: 18px;
     max-width: none;
+  }
+
+  .toast.toast-admin {
+    top: calc(var(--header-height, 68px) + 12px);
+    bottom: auto;
   }
 }
 
@@ -5771,13 +5832,20 @@ body.modal-open {
     bottom: 10px;
     max-width: none;
   }
+
+  .toast.toast-admin {
+    top: calc(var(--header-height, 68px) + 10px);
+    bottom: auto;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .mobile-menu-panel,
   .site-header::before,
-  .menu-toggle span {
+  .menu-toggle span,
+  .toast {
     transition: none !important;
+    animation: none !important;
   }
 }
 
