@@ -22,6 +22,11 @@ Deno.serve(async (req) => {
     return json({ error: "Missing Supabase Edge Function environment variables." }, 500);
   }
 
+  const bearerToken = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
+  if (!constantTimeEqual(bearerToken, serviceRoleKey)) {
+    return json({ error: "Unauthorized" }, 401);
+  }
+
   const supabase = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false },
   });
@@ -227,6 +232,17 @@ function escapeHtml(input: unknown) {
 
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function constantTimeEqual(left: string, right: string) {
+  const leftBytes = new TextEncoder().encode(left);
+  const rightBytes = new TextEncoder().encode(right);
+  const length = Math.max(leftBytes.length, rightBytes.length);
+  let difference = leftBytes.length ^ rightBytes.length;
+  for (let index = 0; index < length; index += 1) {
+    difference |= (leftBytes[index] || 0) ^ (rightBytes[index] || 0);
+  }
+  return difference === 0;
 }
 
 async function safeJson(req: Request) {

@@ -1,28 +1,25 @@
 import { SUPABASE_ANON_KEY, SUPABASE_URL, supabaseClient } from "../supabaseClient.js";
 
 export async function submitTrialRequest(formData) {
-  if (!supabaseClient) throw new Error("Trial request storage is not configured.");
   assertNoHoneypotValue(formData);
   const payload = buildTrialRequestPayload(formData);
   validateTrialRequestPayload(payload);
-  const requestId = createRequestId();
-  const { error } = await supabaseClient
-    .from("trial_requests")
-    .insert({ id: requestId, ...payload });
-  if (error) throw error;
-  const notification = await notifyTrialRequestCreated(requestId).catch((notificationError) => {
-    console.warn("Trial request was saved, but notification failed:", notificationError);
-    return {
-      ok: false,
-      error: notificationError instanceof Error ? notificationError.message : String(notificationError)
-    };
+  const endpoint = getPublicFormSubmitEndpoint();
+  if (!endpoint) throw new Error("Trial request storage is not configured.");
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: getPublicFunctionHeaders(),
+    body: JSON.stringify({
+      kind: "trial",
+      payload,
+      website: String(formData.get("website") || "")
+    })
   });
-  return {
-    ok: true,
-    request: { id: requestId },
-    stored: true,
-    notification
-  };
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result?.error) {
+    throw new Error(result?.error || `Trial request failed with status ${response.status}`);
+  }
+  return result;
 }
 
 export async function loadAdminTrialRequests() {
@@ -33,21 +30,6 @@ export async function loadAdminTrialRequests() {
     .order("created_at", { ascending: false });
   if (error) throw error;
   return data || [];
-}
-
-export async function notifyTrialRequestCreated(requestId) {
-  const endpoint = getTrialRequestNotificationEndpoint();
-  if (!endpoint) return { ok: false, skipped: true, reason: "notification_endpoint_not_configured" };
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: getPublicFunctionHeaders(),
-    body: JSON.stringify({ requestId })
-  });
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok || result?.error) {
-    throw new Error(result?.error || `Trial notification failed with status ${response.status}`);
-  }
-  return result;
 }
 
 export async function updateTrialRequestStatus(requestId, status) {
@@ -156,16 +138,6 @@ function buildTrialRequestPayload(formData) {
   };
 }
 
-function createRequestId() {
-  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
-  return "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (char) => {
-    const byte = globalThis.crypto?.getRandomValues
-      ? globalThis.crypto.getRandomValues(new Uint8Array(1))[0]
-      : Math.floor(Math.random() * 256);
-    return (Number(char) ^ (byte & (15 >> (Number(char) / 4)))).toString(16);
-  });
-}
-
 function validateTrialRequestPayload(payload) {
   const required = ["company_name", "contact_name", "email", "services"];
   const missing = required.filter((key) => !String(payload[key] || "").trim());
@@ -201,10 +173,10 @@ function getAdminCompanyActionsEndpoint() {
   return "";
 }
 
-function getTrialRequestNotificationEndpoint() {
-  if (window.VERKRADAR_NOTIFY_TRIAL_REQUEST_URL) return window.VERKRADAR_NOTIFY_TRIAL_REQUEST_URL;
-  if (window.VERKRADAR_SUPABASE_URL) return `${window.VERKRADAR_SUPABASE_URL}/functions/v1/notify-trial-request`;
-  if (SUPABASE_URL) return `${SUPABASE_URL}/functions/v1/notify-trial-request`;
+function getPublicFormSubmitEndpoint() {
+  if (window.VERKRADAR_PUBLIC_FORM_SUBMIT_URL) return window.VERKRADAR_PUBLIC_FORM_SUBMIT_URL;
+  if (window.VERKRADAR_SUPABASE_URL) return `${window.VERKRADAR_SUPABASE_URL}/functions/v1/public-form-submit`;
+  if (SUPABASE_URL) return `${SUPABASE_URL}/functions/v1/public-form-submit`;
   return "";
 }
 

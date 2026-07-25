@@ -544,6 +544,7 @@ async function createCompanyFromTrialRequest(
 
   const now = new Date().toISOString();
   const companyPayload = {
+    source_trial_request_id: options.trialRequestId,
     company_name: cleanProfile.companyName,
     contact_email: cleanProfile.contactEmail,
     kennitala: cleanProfile.kennitala,

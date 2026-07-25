@@ -1,15 +1,29 @@
-import { supabaseClient } from "../supabaseClient.js";
+import { SUPABASE_ANON_KEY, SUPABASE_URL, supabaseClient } from "../supabaseClient.js";
 
 export async function submitContactRequest(formData) {
-  if (!supabaseClient) throw new Error("Contact request storage is not configured.");
   assertNoHoneypotValue(formData);
   const payload = buildContactRequestPayload(formData);
   validateContactRequestPayload(payload);
-  const { error } = await supabaseClient
-    .from("contact_requests")
-    .insert(payload);
-  if (error) throw error;
-  return { ok: true, stored: true };
+  const endpoint = getPublicFormSubmitEndpoint();
+  if (!endpoint) throw new Error("Contact request storage is not configured.");
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`
+    },
+    body: JSON.stringify({
+      kind: "contact",
+      payload,
+      website: String(formData.get("website") || "")
+    })
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result?.error) {
+    throw new Error(result?.error || `Contact request failed with status ${response.status}`);
+  }
+  return result;
 }
 
 export async function loadAdminContactRequests() {
@@ -55,4 +69,11 @@ function assertNoHoneypotValue(formData) {
   if (String(formData.get("website") || "").trim()) {
     throw new Error("Request rejected.");
   }
+}
+
+function getPublicFormSubmitEndpoint() {
+  if (window.VERKRADAR_PUBLIC_FORM_SUBMIT_URL) return window.VERKRADAR_PUBLIC_FORM_SUBMIT_URL;
+  if (window.VERKRADAR_SUPABASE_URL) return `${window.VERKRADAR_SUPABASE_URL}/functions/v1/public-form-submit`;
+  if (SUPABASE_URL) return `${SUPABASE_URL}/functions/v1/public-form-submit`;
+  return "";
 }

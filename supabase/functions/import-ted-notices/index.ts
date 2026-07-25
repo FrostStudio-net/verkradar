@@ -36,7 +36,7 @@ const DEFAULT_LIMIT = 50;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-automation-secret",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -60,15 +60,43 @@ Deno.serve(async (req) => {
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
-    if (!supabaseUrl || !serviceRoleKey) {
-      return json({ ...status, errors: ["Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY."] }, 500);
+    if (!supabaseUrl || !anonKey || !serviceRoleKey) {
+      return json({ ...status, errors: ["Missing required Supabase environment variables."] }, 500);
     }
 
     const supabase = createClient(supabaseUrl, serviceRoleKey, {
       auth: { persistSession: false },
     });
+
+    const automationSecret = Deno.env.get("AUTOMATION_SECRET") || "";
+    const suppliedAutomationSecret = req.headers.get("x-automation-secret") || "";
+    const isAutomation = automationSecret.length > 0
+      && constantTimeEqual(suppliedAutomationSecret, automationSecret);
+
+    if (!isAutomation) {
+      const jwt = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
+      if (!jwt) return json({ ...status, errors: ["Authentication required."] }, 401);
+
+      const userClient = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: `Bearer ${jwt}` } },
+        auth: { persistSession: false },
+      });
+      const { data: userData, error: userError } = await userClient.auth.getUser(jwt);
+      if (userError || !userData.user) {
+        return json({ ...status, errors: ["Authentication failed."] }, 401);
+      }
+
+      const { data: adminUser, error: adminError } = await supabase
+        .from("admin_users")
+        .select("user_id")
+        .eq("user_id", userData.user.id)
+        .maybeSingle();
+      if (adminError) throw adminError;
+      if (!adminUser) return json({ ...status, errors: ["Administrator access required."] }, 403);
+    }
 
     const body = await safeJson(req);
     const limit = clamp(Number(body.limit || DEFAULT_LIMIT), 1, 250);
@@ -142,6 +170,17 @@ function json(body: unknown, status = 200) {
 function clamp(value: number, min: number, max: number) {
   if (!Number.isFinite(value)) return DEFAULT_LIMIT;
   return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+function constantTimeEqual(left: string, right: string) {
+  const leftBytes = new TextEncoder().encode(left);
+  const rightBytes = new TextEncoder().encode(right);
+  const length = Math.max(leftBytes.length, rightBytes.length);
+  let difference = leftBytes.length ^ rightBytes.length;
+  for (let index = 0; index < length; index += 1) {
+    difference |= (leftBytes[index] || 0) ^ (rightBytes[index] || 0);
+  }
+  return difference === 0;
 }
 
 function buildRecentTedQuery() {

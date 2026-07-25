@@ -22,7 +22,7 @@ Deno.serve(async (req) => {
     const token = String(body.token || "").trim();
     if (!token) {
       const diagnostics = buildPreviewDiagnostics("", false, null);
-      console.info("company_invite_preview_lookup", diagnostics);
+      debugLog("company_invite_preview_lookup", diagnostics);
       return json({ error: "Invite token is required.", code: "invite_invalid", diagnostics }, 400);
     }
 
@@ -39,11 +39,11 @@ Deno.serve(async (req) => {
       lookup = await loadInviteByToken(adminClient, token);
     } catch (lookupError) {
       const diagnostics = await buildQueryErrorDiagnostics(token);
-      console.info("company_invite_preview_lookup", diagnostics);
+      debugLog("company_invite_preview_lookup", diagnostics);
       console.error("Company invite lookup failed:", errorMessage(lookupError));
       return json({ error: "Invite lookup failed.", code: "invite_invalid", diagnostics }, 500);
     }
-    console.info("company_invite_preview_lookup", lookup.diagnostics);
+    debugLog("company_invite_preview_lookup", lookup.diagnostics);
     const invite = lookup.invite;
     if (!invite) {
       return json({
@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
 
     const inviteStatus = getInviteStatus(invite);
     if (action === "preview") {
-      console.info("company_invite_preview_success", {
+      debugLog("company_invite_preview_success", {
         member_id: invite.id,
         company_id: invite.company_id,
         invited_email: invite.email,
@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
           updateSucceeded: false,
           authorizationHeaderPresent: Boolean(req.headers.get("authorization")),
         });
-        console.info("company_invite_accept_failed", diagnostics);
+        debugLog("company_invite_accept_failed", diagnostics);
         return json({
           error: "Invite not found, expired, or revoked.",
           code: "invite_invalid",
@@ -110,7 +110,7 @@ Deno.serve(async (req) => {
           getUserAttempted: false,
           getUserSucceeded: false,
         });
-        console.info("company_invite_accept_failed", diagnostics);
+        debugLog("company_invite_accept_failed", diagnostics);
         return json({ error: "Log in to accept this invite.", code: "no_session", diagnostics }, 401);
       }
       const authClient = createClient(supabaseUrl, anonKey, {
@@ -137,7 +137,7 @@ Deno.serve(async (req) => {
           getUserErrorMessage: userError?.message || "",
           adminUserLookup,
         });
-        console.info("company_invite_accept_failed", diagnostics);
+        debugLog("company_invite_accept_failed", diagnostics);
         return json({ error: "Log in to accept this invite.", code: "invalid_session", diagnostics }, 401);
       }
 
@@ -159,7 +159,7 @@ Deno.serve(async (req) => {
           getUserSucceeded: true,
           adminUserLookup,
         });
-        console.info("company_invite_accept_failed", diagnostics);
+        debugLog("company_invite_accept_failed", diagnostics);
         return json({
           error: `This invite was sent to ${invite.email}. Log in with that email address.`,
           code: "email_mismatch",
@@ -186,7 +186,7 @@ Deno.serve(async (req) => {
             getUserSucceeded: true,
             adminUserLookup,
           });
-          console.info("company_invite_accept_already_active", diagnostics);
+          debugLog("company_invite_accept_already_active", diagnostics);
           return json({
             ok: true,
             company_id: invite.company_id,
@@ -218,7 +218,7 @@ Deno.serve(async (req) => {
           getUserSucceeded: true,
           adminUserLookup,
         });
-        console.info("company_invite_accept_failed", diagnostics);
+        debugLog("company_invite_accept_failed", diagnostics);
         return json({
           error: "This invite has already been accepted.",
           code: "invite_already_accepted",
@@ -257,7 +257,7 @@ Deno.serve(async (req) => {
         getUserSucceeded: true,
         adminUserLookup,
       });
-      console.info("company_invite_accept_success", diagnostics);
+      debugLog("company_invite_accept_success", diagnostics);
 
       return json({
         ok: true,
@@ -320,7 +320,7 @@ async function attachCompanyName(supabase: ReturnType<typeof createClient>, invi
     .eq("id", companyId)
     .maybeSingle();
   if (error) {
-    console.info("company_invite_company_lookup_failed", {
+    debugLog("company_invite_company_lookup_failed", {
       member_id: invite.id,
       company_id: companyId,
       reason: error.message,
@@ -503,10 +503,22 @@ async function safeJson(req: Request) {
 }
 
 function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
+  return new Response(JSON.stringify(stripDiagnostics(body)), {
     status,
     headers: { ...corsHeaders, "content-type": "application/json" },
   });
+}
+
+function debugLog(event: string, details: unknown) {
+  if (Deno.env.get("INVITE_DEBUG_ENABLED") === "true") console.info(event, details);
+}
+
+function stripDiagnostics(body: unknown) {
+  if (Deno.env.get("INVITE_DEBUG_ENABLED") === "true") return body;
+  if (!body || typeof body !== "object" || Array.isArray(body)) return body;
+  const safeBody = { ...(body as Record<string, unknown>) };
+  delete safeBody.diagnostics;
+  return safeBody;
 }
 
 function errorMessage(error: unknown) {

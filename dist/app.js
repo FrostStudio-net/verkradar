@@ -282,6 +282,8 @@ let state = {
   adminCompanyProfileResults: {},
   adminReportDeliveryActions: {},
   selectedAdminCompanyId: null,
+  adminCompanyDetailScrollCompanyId: null,
+  adminCompanyDetailScrollTop: 0,
   adminActiveTab: "overview",
   adminCompanyFilters: {
     search: "",
@@ -561,7 +563,7 @@ function clearLocalProfileState() {
   state.adminCompaniesLoading = false;
   state.adminCompaniesLoaded = false;
   state.adminCompaniesError = null;
-  state.selectedAdminCompanyId = null;
+  clearAdminCompanyDetailsState();
   state.lastMatchedAt = null;
 }
 
@@ -620,7 +622,10 @@ window.addEventListener("hashchange", () => {
   syncPendingInviteTokenFromRoute(nextRoute);
   resetMobileMenuState();
   state.profileMenuOpen = false;
-  if (routeChanged) clearOpportunityDetailsState();
+  if (routeChanged) {
+    clearOpportunityDetailsState();
+    clearAdminCompanyDetailsState();
+  }
   render();
   scrollToPageTop();
   afterRouteRender();
@@ -650,8 +655,20 @@ document.addEventListener("click", (event) => {
 
   if (event.target.classList?.contains("modal-backdrop")) {
     event.preventDefault();
+    if (event.target.classList.contains("admin-confirm-backdrop")) {
+      state.adminTrialDeleteConfirmId = null;
+      render();
+      return;
+    }
+    if (event.target.classList.contains("admin-report-backdrop")) {
+      state.selectedAdminReportId = null;
+      state.selectedAdminReport = null;
+      state.selectedAdminReportError = null;
+      render();
+      return;
+    }
     if (state.selectedAdminCompanyId) {
-      state.selectedAdminCompanyId = null;
+      clearAdminCompanyDetailsState();
       render();
       return;
     }
@@ -674,7 +691,7 @@ document.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
     if (state.selectedAdminCompanyId) {
-      state.selectedAdminCompanyId = null;
+      clearAdminCompanyDetailsState();
       render();
       return;
     }
@@ -879,7 +896,7 @@ document.addEventListener("click", (event) => {
     if (!confirmDiscardAdminCompanyProfileChanges()) return;
     clearToast();
     state.adminActiveTab = action.dataset.tab || "overview";
-    state.selectedAdminCompanyId = null;
+    clearAdminCompanyDetailsState();
     state.selectedAdminReportId = null;
     state.selectedAdminTrialRequestId = null;
     state.adminTrialDeleteConfirmId = null;
@@ -889,12 +906,12 @@ document.addEventListener("click", (event) => {
   }
   if (name === "view-admin-company") {
     if (state.selectedAdminCompanyId && state.selectedAdminCompanyId !== id && !confirmDiscardAdminCompanyProfileChanges()) return;
-    state.selectedAdminCompanyId = id;
+    openAdminCompanyDetails(id);
     render();
   }
   if (name === "close-admin-company") {
     if (!confirmDiscardAdminCompanyProfileChanges()) return;
-    state.selectedAdminCompanyId = null;
+    clearAdminCompanyDetailsState();
     render();
   }
   if (name === "view-admin-trial-request") {
@@ -1064,10 +1081,26 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
+  if (event.key === "Escape" && state.adminTrialDeleteConfirmId) {
+    event.preventDefault();
+    state.adminTrialDeleteConfirmId = null;
+    render();
+    return;
+  }
+
+  if (event.key === "Escape" && state.selectedAdminReportId) {
+    event.preventDefault();
+    state.selectedAdminReportId = null;
+    state.selectedAdminReport = null;
+    state.selectedAdminReportError = null;
+    render();
+    return;
+  }
+
   if (event.key === "Escape" && state.selectedAdminCompanyId) {
     event.preventDefault();
     if (!confirmDiscardAdminCompanyProfileChanges()) return;
-    state.selectedAdminCompanyId = null;
+    clearAdminCompanyDetailsState();
     render();
     return;
   }
@@ -2015,7 +2048,8 @@ async function submitAdminTrialCompanyForm(formElement) {
     const result = await createCompanyFromTrialRequest(request.id, profile);
     state.adminTrialCompanyMessage = `Fyrirtæki stofnað: ${result.company_name || profile.companyName}`;
     state.adminTrialCompanyDraft = null;
-    state.selectedAdminCompanyId = result.company_id || null;
+    if (result.company_id) openAdminCompanyDetails(result.company_id);
+    else clearAdminCompanyDetailsState();
     await Promise.all([
       loadTrialRequestsForAdmin(),
       loadAdminCompanies()
@@ -2547,6 +2581,41 @@ function clearAdminCompanyAction(companyId) {
   const next = { ...(state.adminCompanyActions || {}) };
   delete next[companyId];
   state.adminCompanyActions = next;
+}
+
+function openAdminCompanyDetails(companyId) {
+  const nextCompanyId = String(companyId || "").trim();
+  if (!nextCompanyId) {
+    clearAdminCompanyDetailsState();
+    return;
+  }
+  if (state.adminCompanyDetailScrollCompanyId !== nextCompanyId) {
+    state.adminCompanyDetailScrollCompanyId = nextCompanyId;
+    state.adminCompanyDetailScrollTop = 0;
+  }
+  state.selectedAdminCompanyId = nextCompanyId;
+}
+
+function clearAdminCompanyDetailsState() {
+  state.selectedAdminCompanyId = null;
+  state.adminCompanyDetailScrollCompanyId = null;
+  state.adminCompanyDetailScrollTop = 0;
+}
+
+function captureAdminCompanyDetailScroll() {
+  const scrollContainer = document.querySelector("[data-admin-company-scroll-container]");
+  const renderedCompanyId = scrollContainer?.dataset.companyId || "";
+  if (!renderedCompanyId || renderedCompanyId !== state.selectedAdminCompanyId) return;
+  if (state.adminCompanyDetailScrollCompanyId !== renderedCompanyId) return;
+  state.adminCompanyDetailScrollTop = scrollContainer.scrollTop;
+}
+
+function restoreAdminCompanyDetailScroll() {
+  const scrollContainer = document.querySelector("[data-admin-company-scroll-container]");
+  const renderedCompanyId = scrollContainer?.dataset.companyId || "";
+  if (!renderedCompanyId || renderedCompanyId !== state.selectedAdminCompanyId) return;
+  if (state.adminCompanyDetailScrollCompanyId !== renderedCompanyId) return;
+  scrollContainer.scrollTop = Math.max(0, Number(state.adminCompanyDetailScrollTop) || 0);
 }
 
 function hasDirtyAdminCompanyProfile(companyId = state.selectedAdminCompanyId) {
@@ -4619,11 +4688,6 @@ async function saveCompanyProfile(profile) {
     address: cleanProfile.address || null,
     website: cleanProfile.website || null,
     industry: cleanProfile.industry,
-    plan: cleanProfile.selectedPlan,
-    selected_plan: cleanProfile.selectedPlan,
-    billing_status: cleanProfile.billingStatus,
-    trial_started_at: cleanProfile.trialStartedAt,
-    trial_ends_at: cleanProfile.trialEndsAt,
     base_location: cleanProfile.baseLocation || null,
     service_areas: cleanProfile.serviceAreas,
     willing_to_travel: cleanProfile.willingToTravel,
@@ -6650,17 +6714,15 @@ function clearOpportunityDetailsState() {
 }
 
 function syncDetailsFromState() {
-  if (!state.selectedOpportunityId) {
-    document.body.classList.remove("modal-open");
-    return;
-  }
+  if (!state.selectedOpportunityId) return;
   const opp = getDashboardOpportunityById(state.selectedOpportunityId);
   if (!opp) {
     state.selectedOpportunityId = null;
-    document.body.classList.remove("modal-open");
-    return;
   }
-  document.body.classList.add("modal-open");
+}
+
+function syncBodyModalOpenState() {
+  document.body.classList.toggle("modal-open", Boolean(document.querySelector("#app .modal-backdrop")));
 }
 
 function getDeadlineDisplay(value) {
@@ -6767,6 +6829,8 @@ function render() {
   const app = document.getElementById("app");
   const route = getRoutePath(state.route);
 
+  captureAdminCompanyDetailScroll();
+
   let html = "";
   if (state.isBooting || !state.authLoaded || !state.profileLoaded || !state.adminLoaded) html = renderLoadingPage();
   else if (route === "/") html = renderLanding();
@@ -6802,6 +6866,8 @@ function render() {
   } else {
     syncDetailsFromState();
   }
+  restoreAdminCompanyDetailScroll();
+  syncBodyModalOpenState();
 }
 
 function renderPreservingInputAndScroll(input) {
@@ -8065,7 +8131,7 @@ function renderAdminReportDetails() {
   if (!report && !state.selectedAdminReportLoading && !state.selectedAdminReportError) return "";
   if (!report) {
     return `
-      <div class="modal-backdrop">
+      <div class="modal-backdrop admin-report-backdrop">
         <div class="modal admin-report-modal" role="dialog" aria-modal="true">
           <div class="modal-header">
             <div>
@@ -8086,7 +8152,7 @@ function renderAdminReportDetails() {
   const itemCount = Array.isArray(report.report_items) ? report.report_items.length : 0;
   const cleanTitle = getCustomerReportTitle(report, companyName);
   return `
-    <div class="modal-backdrop">
+    <div class="modal-backdrop admin-report-backdrop">
       <div class="modal admin-report-modal" role="dialog" aria-modal="true">
         <div class="modal-header">
           <div>
@@ -10097,7 +10163,7 @@ function renderAdminCompanyDetails(company) {
           </div>
           <button type="button" class="icon-btn modal-close-btn" data-action="close-admin-company" aria-label="Close company details">×</button>
         </div>
-        <div class="modal-body">
+        <div class="modal-body" data-admin-company-scroll-container data-company-id="${escapeHtml(company.id)}">
           <div class="admin-detail-grid">
             <section class="side-panel">
               <h3>Company basics</h3>
@@ -11551,18 +11617,13 @@ function downloadReportPdf(reportElementId = "report-preview", reportCompanyName
   <main class="pdf-export-shell">
     ${reportClone.outerHTML}
   </main>
-  <script>
-    window.addEventListener("load", () => {
-      document.title = ${JSON.stringify(fileName)};
-      setTimeout(() => {
-        window.focus();
-        window.print();
-      }, 250);
-    });
-  <\/script>
 </body>
 </html>`);
   pdfWindow.document.close();
+  setTimeout(() => {
+    pdfWindow.focus();
+    pdfWindow.print();
+  }, 250);
 }
 
 function downloadAdminReportPdf() {
