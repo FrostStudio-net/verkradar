@@ -569,6 +569,30 @@ function clearLocalProfileState() {
   state.lastMatchedAt = null;
 }
 
+function clearAdminAccessState() {
+  state.opportunities = [];
+  state.opportunitiesLoaded = false;
+  state.importRuns = [];
+  state.importRunsLoaded = false;
+  state.adminReports = [];
+  state.adminReportsLoaded = false;
+  state.adminTrialRequests = [];
+  state.adminTrialRequestsLoaded = false;
+  state.adminContactRequests = [];
+  state.adminContactRequestsLoaded = false;
+  state.sourceCoverage = [];
+  state.sourceCoverageLoaded = false;
+  state.adminCompanies = [];
+  state.adminCompaniesLoaded = false;
+  state.adminReviewMatches = [];
+  state.adminReviewLoaded = false;
+  state.importedTedOpportunities = [];
+  state.importedTedOpportunitiesLoaded = false;
+  state.selectedAdminReport = null;
+  state.selectedAdminReportId = null;
+  clearAdminCompanyDetailsState();
+}
+
 function createEmptyAdminOpportunityDraft() {
   return {
     title: "",
@@ -4268,6 +4292,7 @@ async function signOut() {
     state.authLoaded = true;
     state.adminLoaded = true;
     state.profileLoaded = true;
+    clearAdminAccessState();
     clearPendingInviteState();
     clearLocalProfileState();
     navigate("/");
@@ -4319,11 +4344,21 @@ function requireAuthPage() {
   `);
 }
 
+function requireAdminAuthPage() {
+  return renderShell(`
+    <section class="empty-state">
+      <h1>Stjórnborð VerkRadar</h1>
+      <p>Þessi síða er aðeins aðgengileg stjórnendum.</p>
+      <button class="btn btn-primary" data-action="go" data-href="/login">Innskráning</button>
+    </section>
+  `);
+}
+
 function requireAdminPage() {
   return renderShell(`
     <section class="empty-state">
-      <h1>You do not have access to this page.</h1>
-      <p>Admin access is limited to approved VerkRadar admin users.</p>
+      <h1>Aðgangur bannaður</h1>
+      <p>Þú hefur ekki stjórnendaaðgang að þessari síðu.</p>
     </section>
   `);
 }
@@ -4347,7 +4382,10 @@ async function loadCurrentSession() {
 
 async function checkAdminStatus() {
   state.adminLoaded = false;
-  await checkAdminAccess(state.currentUser || state.user);
+  state.isAdmin = false;
+  render();
+  const hasAdminAccess = await checkAdminAccess(state.currentUser || state.user);
+  if (!hasAdminAccess) clearAdminAccessState();
   state.adminLoaded = true;
 }
 
@@ -4449,6 +4487,7 @@ function registerAuthListener() {
     state.profileLoadError = null;
     state.companyId = null;
     state.storedMatches = [];
+    clearAdminAccessState();
     clearOpportunityDetailsState();
     state.reports = [];
     state.reportsLoaded = false;
@@ -6925,7 +6964,7 @@ function render() {
   else if (route === "/security") html = renderSecurityPage();
   else if (route === "/contact") html = renderContactPage();
   else if (route === "/settings") html = state.user ? renderSettings() : requireAuthPage();
-  else if (route === "/admin") html = state.user ? (state.isAdmin ? renderAdmin() : requireAdminPage()) : requireAuthPage();
+  else if (route === "/admin") html = state.user ? (state.isAdmin ? renderAdmin() : requireAdminPage()) : requireAdminAuthPage();
   else html = renderLanding();
 
   app.innerHTML = html;
