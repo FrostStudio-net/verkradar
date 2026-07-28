@@ -4365,6 +4365,7 @@ function requireAdminPage() {
 
 let hasBooted = false;
 let authListenerRegistered = false;
+let authRefreshSequence = 0;
 
 async function loadCurrentSession() {
   if (!supabaseClient) {
@@ -4441,9 +4442,10 @@ function registerAuthListener() {
   if (!supabaseClient || authListenerRegistered) return;
   authListenerRegistered = true;
 
-  supabaseClient.auth.onAuthStateChange(async (event, session) => {
+  supabaseClient.auth.onAuthStateChange((event, session) => {
     if (!hasBooted) return;
 
+    const refreshSequence = ++authRefreshSequence;
     state.inviteAuthEvent = event || "";
     state.user = session?.user || null;
     state.currentUser = state.user;
@@ -4457,22 +4459,27 @@ function registerAuthListener() {
         navigate("/reset-password");
         return;
       }
-      try {
-        await checkAdminStatus();
-        if (!(state.route === "/settings" && state.profileDraftDirty)) {
-          await loadProfileFromSupabase();
-        } else {
+      window.setTimeout(async () => {
+        if (refreshSequence !== authRefreshSequence || !state.user) return;
+        try {
+          await checkAdminStatus();
+          if (refreshSequence !== authRefreshSequence || !state.user) return;
+          if (!(state.route === "/settings" && state.profileDraftDirty)) {
+            await loadProfileFromSupabase();
+          } else {
+            state.profileLoaded = true;
+          }
+        } catch (error) {
+          console.error("Auth profile refresh failed:", error);
+          state.profileLoadError = formatSupabaseError(error);
+          state.adminLoaded = true;
           state.profileLoaded = true;
         }
-      } catch (error) {
-        console.error("Auth profile refresh failed:", error);
-        state.profileLoadError = formatSupabaseError(error);
-        state.adminLoaded = true;
-        state.profileLoaded = true;
-      }
-      if (redirectAuthenticatedPublicRoute()) return;
-      render();
-      afterRouteRender();
+        if (refreshSequence !== authRefreshSequence || !state.user) return;
+        if (redirectAuthenticatedPublicRoute()) return;
+        render();
+        afterRouteRender();
+      }, 0);
       return;
     }
 
