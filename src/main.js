@@ -47,6 +47,7 @@ export { cleanReportReasons, getReportEmailStatus, getReportScoreLabel, getRepor
 export { getAiReportPlacement, hasFutureDeadline, mergeAiReviewsIntoReportMatches, sortAiReportMatches } from "./services/reportAiRanking.js";
 export { SUPABASE_URL, SUPABASE_ANON_KEY, supabaseClient } from "./supabaseClient.js";
 export { daysUntilDeadline, formatDateTime, formatShortDate } from "./utils/dates.js";
+export { deriveActionableForSuppliers, isProcurementOpportunityEligible } from "../supabase/functions/_shared/procurement-stage.js";
 export {
   formatCurrencyAmount,
   formatCustomerLocation,
