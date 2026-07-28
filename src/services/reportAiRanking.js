@@ -1,3 +1,5 @@
+import { isProcurementOpportunityEligible } from "../../supabase/functions/_shared/procurement-stage.js";
+
 function normalizeFit(value) {
   return String(value || "").toLowerCase();
 }
@@ -69,7 +71,12 @@ export function isAiReportMatchEligible(match) {
 
 export function getReportCandidateKind(match) {
   const fit = normalizeFit(match?.aiReviewFit || match?.ai_review_fit);
-  if (!match?.deadline || isExpiredDeadline(match.deadline)) return "excluded";
+  const stage = String(match?.procurementStage || match?.procurement_stage || "");
+  if (stage && !isProcurementOpportunityEligible(match)) return "excluded";
+  if ((!stage || stage === "open_competition") && !match?.deadline) return "excluded";
+  if (match?.deadline && isExpiredDeadline(match.deadline)) return "excluded";
+  const safety = String(match?.safetyStatus || match?.safety_status || "auto_approved").toLowerCase();
+  if (stage && (safety === "hidden" || safety === "needs_review")) return "excluded";
   const sendToClient = match?.aiReviewSendToClient === true || match?.ai_review_send_to_client === true;
   const skippedReason = String(match?.aiReviewSkippedReason || match?.ai_review_skipped_reason || "").toLowerCase();
   if (skippedReason === "outside_service_area") return "excluded";
@@ -86,7 +93,6 @@ export function getReportCandidateKind(match) {
     return "excluded";
   }
 
-  const safety = String(match?.safetyStatus || match?.safety_status || "auto_approved").toLowerCase();
   if (safety === "hidden" || safety === "needs_review") return "excluded";
   const score = Number(match?.matchScore || match?.match_score || 0);
   const label = String(match?.matchLabel || match?.match_label || "").toLowerCase();
@@ -96,6 +102,8 @@ export function getReportCandidateKind(match) {
 
 export function getAiReportPlacement(match) {
   const kind = getReportCandidateKind(match);
+  const stage = String(match?.procurementStage || match?.procurement_stage || "");
+  if (["upcoming_procurement", "market_consultation"].includes(stage) && kind !== "excluded") return "early";
   if (hasFutureDeadline(match)) {
     if (kind === "ai_strong" || kind === "ai_possible" || kind === "rule_fallback") return "confirmed";
   }
