@@ -103,18 +103,40 @@ It runs server-side as a Supabase Edge Function. Do not put the
 `SUPABASE_SERVICE_ROLE_KEY` in `index.html`, `app.js`, or any other frontend
 file.
 
-Deploy outline:
+Phase 1 procurement-stage rollout order:
+
+1. Pause the TED cron job and stop manual imports, customer/admin match refreshes, and report generation.
+2. Apply the database migration while all opportunity writers and gate consumers are paused.
+3. Deploy `classify-procurement-stage`.
+4. Deploy gate consumers before any classified-data producer: `admin-company-actions` and `ai-review-match`. Keep `daily-pipeline` paused until every consumer and producer is ready.
+5. Deploy producers: `import-source-connectors` and `import-ted`.
+6. Deploy the frontend only after the backend consumers and producers are healthy.
+7. Smoke-test all five Edge Functions, the browser-side match refresh, and report exclusion behavior.
+8. Confirm `automation_url` targets the active `import-ted` function exactly, then resume automation and manual actions.
 
 ```bash
+supabase migration list
 supabase db push
 supabase functions deploy classify-procurement-stage
-supabase functions deploy import-ted
-supabase functions deploy import-source-connectors
 supabase functions deploy admin-company-actions
 supabase functions deploy ai-review-match
+supabase functions deploy import-source-connectors
+supabase functions deploy import-ted
 ```
 
-Production TED automation targets `import-ted`, which is the active TED path and owns the Phase 1 `form-type` classification mapping. `import-ted-notices` is a legacy importer retained unchanged for later cleanup; it must not be scheduled alongside `import-ted`.
+Production TED automation must target `import-ted`, which is the active TED path and owns the Phase 1 `form-type` classification mapping. `import-ted-notices` is disabled and returns HTTP 410; it must remain unscheduled and undeployed unless it is being replaced by the disabled implementation.
+
+Verify the configured target before resuming cron:
+
+```sql
+select key, value
+from public.automation_settings
+where key = 'automation_url';
+```
+
+The value must end with `/functions/v1/import-ted`. The database automation function rejects any other target.
+
+Rollback must begin by pausing cron, imports, match refreshes, and report generation. Do not restore old gate consumers while classified producers remain active. Prefer rolling forward with a corrected consumer; if producer rollback is unavoidable, keep the migration and current consumers in place so newly classified rows retain the stage-gate semantics. Resume imports only after all deployed consumers and producers agree on the gate.
 
 Required Edge Function environment:
 
