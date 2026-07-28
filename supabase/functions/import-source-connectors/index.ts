@@ -5,6 +5,7 @@ import {
   classifyProcurementStage,
   isProcurementOpportunityEligible,
   preserveAdminClassification,
+  processProcurementClassificationBatch,
 } from "../_shared/procurement-stage.js";
 
 type ConnectorType = "rss_feed" | "wordpress_rest" | "page_monitor_allowed";
@@ -181,6 +182,13 @@ type ImportDebugDetails = {
   updated: number;
   skipped: number;
   errors: string[];
+  ai_classification?: {
+    processed: number;
+    persisted: number;
+    ai_attempted: number;
+    ai_budget_exhausted: number;
+    ai_failed: number;
+  };
 };
 
 type DeadlineDebugSample = {
@@ -228,6 +236,10 @@ const DEFAULT_BATCH_LIMIT = 20;
 const DEFAULT_MAX_SOURCES_PER_RUN = 6;
 const SOURCE_FETCH_TIMEOUT_MS = 8000;
 const PROCUREMENT_CLASSIFIER_TIMEOUT_MS = 5000;
+const PROCUREMENT_AI_BUDGET_MS = 7000;
+const PROCUREMENT_AI_MAX_CLASSIFICATIONS = 2;
+const PROCUREMENT_PERSISTENCE_RESERVE_MS = 4000;
+const PROCUREMENT_PERSISTENCE_BATCH_SIZE = 10;
 const FUNCTION_TIME_BUDGET_MS = 18000;
 const MIN_MATCH_SCORE = 50;
 const MAX_MATCH_DEBUG_SAMPLES = 20;
@@ -366,6 +378,7 @@ Deno.serve(async (req) => {
 
   try {
     const startedAt = Date.now();
+    let aiClassificationsUsed = 0;
     const supabaseUrl = requiredEnv("SUPABASE_URL");
     const anonKey = requiredEnv("SUPABASE_ANON_KEY");
     const serviceRoleKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
@@ -599,60 +612,71 @@ Deno.serve(async (req) => {
             normalized.map((opportunity) => opportunity.external_id),
           );
 
-          const classifiedOpportunities: NormalizedOpportunity[] = [];
-          for (const opportunity of normalized) {
-            classifiedOpportunities.push(await classifyImportedOpportunity(opportunity, connector, source, {
+          const savedRows: Array<{ id: string; external_id: string }> = [];
+          const preparedOpportunities: NormalizedOpportunity[] = [];
+          const classificationStats = await processProcurementClassificationBatch(normalized, {
+            startedAt,
+            aiWindowStartedAt: startedAt,
+            functionBudgetMs: FUNCTION_TIME_BUDGET_MS,
+            functionReserveMs: PROCUREMENT_PERSISTENCE_RESERVE_MS,
+            aiBudgetMs: PROCUREMENT_AI_BUDGET_MS,
+            perCallTimeoutMs: PROCUREMENT_CLASSIFIER_TIMEOUT_MS,
+            maxAiClassifications: Math.max(0, PROCUREMENT_AI_MAX_CLASSIFICATIONS - aiClassificationsUsed),
+            classifyDeterministic: (opportunity: NormalizedOpportunity) => classifyImportedOpportunityDeterministically(opportunity, connector, source),
+            classifyAi: (opportunity: NormalizedOpportunity, timeoutMs: number) => classifyImportedOpportunityWithAi(opportunity, connector, source, {
               supabaseUrl,
               anonKey,
               authHeader,
               automationHeader,
-            }));
-          }
-          const preparedOpportunities = classifiedOpportunities
-            .map((opportunity) => preserveAdminClassification(opportunity, existing.get(opportunity.external_id)))
-            .map(applyMissingDeadlineSafety);
-          const { data: savedRows, error: upsertError } = await adminClient
-            .from("opportunities")
-            .upsert(preparedOpportunities.map(toOpportunityUpsertRow), { onConflict: "source_id,external_id" })
-            .select("id, external_id");
+            }, timeoutMs),
+            failClosed: (opportunity: NormalizedOpportunity, reason: string, _deterministic: unknown, error?: unknown) => {
+              if (error) console.warn(`AI procurement-stage classification failed for ${opportunity.external_id}: ${errorMessage(error)}`);
+              return failClosedImportedOpportunity(opportunity, reason);
+            },
+            persist: async (classified: NormalizedOpportunity) => {
+              const prepared = applyMissingDeadlineSafety(
+                preserveAdminClassification(classified, existing.get(classified.external_id)) as NormalizedOpportunity,
+              );
+              preparedOpportunities.push(prepared);
+            },
+          });
+          aiClassificationsUsed += classificationStats.ai_attempted;
+          runDetails.ai_classification = classificationStats;
 
-          if (upsertError) throw upsertError;
+          for (let offset = 0; offset < preparedOpportunities.length; offset += PROCUREMENT_PERSISTENCE_BATCH_SIZE) {
+            const preparedBatch = preparedOpportunities.slice(offset, offset + PROCUREMENT_PERSISTENCE_BATCH_SIZE);
+            const { data, error: upsertError } = await adminClient
+              .from("opportunities")
+              .upsert(preparedBatch.map(toOpportunityUpsertRow), { onConflict: "source_id,external_id" })
+              .select("id, external_id");
+            if (upsertError) throw upsertError;
 
-          const savedCount = savedRows?.length || 0;
-          const unsavedCount = normalized.length - savedCount;
-          sourceSummary.skipped += unsavedCount;
-          if (unsavedCount > 0) {
-            const savedIds = new Set((savedRows || []).map((row) => row.external_id));
-            for (const opportunity of preparedOpportunities) {
-              if (savedIds.has(opportunity.external_id)) continue;
-              recordImportSkip(runDetails, {
-                source_name: source.name,
-                title: opportunity.title,
-                reason: existing.has(opportunity.external_id) ? "duplicate_existing_opportunity" : "parse_failed",
-              });
+            const savedBatch = (data || []) as Array<{ id: string; external_id: string }>;
+            savedRows.push(...savedBatch);
+            for (const row of savedBatch) {
+              if (existing.has(row.external_id)) sourceSummary.updated += 1;
+              else sourceSummary.inserted += 1;
             }
-          }
-          for (const row of savedRows || []) {
-            if (existing.has(row.external_id)) sourceSummary.updated += 1;
-            else sourceSummary.inserted += 1;
-          }
-          await suppressNonActionableMatches(adminClient, preparedOpportunities, savedRows || []);
-          for (const opportunity of preparedOpportunities) {
-            if (!opportunity.deadline_debug) continue;
-            const debugSample: DeadlineDebugSample = {
-              ...opportunity.deadline_debug,
-              upsertAction: existing.has(opportunity.external_id) ? "update" : "insert",
-              upsertConflictKey: "source_id,external_id",
-              databaseDeadlineField: opportunity.deadline,
-              rawPayloadDeadlineFields: getDeadlineRawPayloadFields(opportunity.raw_payload),
-            };
-            runDetails.deadline_debug_samples.push(debugSample);
-            console.info("VerkRadar deadline debug", JSON.stringify(debugSample));
+            await suppressNonActionableMatches(adminClient, preparedBatch, savedBatch);
+
+            for (const prepared of preparedBatch) {
+              if (prepared.deadline_debug) {
+                const debugSample: DeadlineDebugSample = {
+                  ...prepared.deadline_debug,
+                  upsertAction: existing.has(prepared.external_id) ? "update" : "insert",
+                  upsertConflictKey: "source_id,external_id",
+                  databaseDeadlineField: prepared.deadline,
+                  rawPayloadDeadlineFields: getDeadlineRawPayloadFields(prepared.raw_payload),
+                };
+                runDetails.deadline_debug_samples.push(debugSample);
+                console.info("VerkRadar deadline debug", JSON.stringify(debugSample));
+              }
+            }
           }
 
           await resolveCrossSourceDuplicates(
             adminClient,
-            (savedRows || []).map((row) => String(row.id || "")).filter(Boolean),
+            savedRows.map((row) => String(row.id || "")).filter(Boolean),
           );
         }
 
@@ -1354,13 +1378,12 @@ async function suppressNonActionableMatches(
   if (error) throw error;
 }
 
-async function classifyImportedOpportunity(
+function getImportedOpportunityClassifierInput(
   opportunity: NormalizedOpportunity,
   connector: ConnectorRow,
   source: NonNullable<ConnectorRow["sources"]>,
-  auth: { supabaseUrl: string; anonKey: string; authHeader: string; automationHeader: string },
-): Promise<NormalizedOpportunity> {
-  const classifierInput = {
+): Record<string, unknown> {
+  return {
     source_type: source.source_type || "",
     connector_type: connector.connector_type,
     source_organisation: source.name,
@@ -1371,53 +1394,73 @@ async function classifyImportedOpportunity(
     category: opportunity.category,
     authoritative_metadata: getAuthoritativeProcurementMetadata(opportunity.raw_payload),
   };
+}
+
+function classifyImportedOpportunityDeterministically(
+  opportunity: NormalizedOpportunity,
+  connector: ConnectorRow,
+  source: NonNullable<ConnectorRow["sources"]>,
+) {
+  const classifierInput = getImportedOpportunityClassifierInput(opportunity, connector, source);
   const deterministic = classifyProcurementStage(classifierInput);
-  if (!deterministic.needs_ai) {
-    return {
+  return {
+    needsAi: deterministic.needs_ai === true,
+    value: deterministic.needs_ai ? opportunity : {
       ...opportunity,
       ...classificationColumns(deterministic, deterministic.classified_by),
-    };
-  }
+    },
+  };
+}
 
-  try {
-    const headers: Record<string, string> = {
-      "content-type": "application/json",
-      apikey: auth.anonKey,
-    };
-    if (auth.authHeader) headers.authorization = auth.authHeader;
-    if (auth.automationHeader) headers["x-automation-secret"] = auth.automationHeader;
-    const response = await fetchWithAbortTimeout(`${auth.supabaseUrl}/functions/v1/classify-procurement-stage`, PROCUREMENT_CLASSIFIER_TIMEOUT_MS, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(buildAiClassifierInput(classifierInput)),
-    });
-    const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
-    if (!response.ok) throw new Error(String(payload.error || `Classifier returned ${response.status}`));
-    return {
-      ...opportunity,
-      ...classificationColumns({
-        procurement_stage: payload.procurement_stage,
-        confidence: payload.confidence ?? payload.classification_confidence,
-        short_reason: payload.short_reason ?? payload.classification_reason,
-        positive_signals: payload.positive_signals,
-        negative_signals: payload.negative_signals,
-        requires_admin_review: payload.requires_admin_review,
-      }, "openai"),
-    };
-  } catch (error) {
-    console.warn(`AI procurement-stage classification failed for ${opportunity.external_id}: ${errorMessage(error)}`);
-    return {
-      ...opportunity,
-      ...classificationColumns({
-        procurement_stage: "uncertain",
-        confidence: 0,
-        short_reason: "AI classification was unavailable; admin review is required.",
-        positive_signals: [],
-        negative_signals: ["ai_classification_unavailable"],
-        requires_admin_review: true,
-      }, "deterministic_rule"),
-    };
-  }
+async function classifyImportedOpportunityWithAi(
+  opportunity: NormalizedOpportunity,
+  connector: ConnectorRow,
+  source: NonNullable<ConnectorRow["sources"]>,
+  auth: { supabaseUrl: string; anonKey: string; authHeader: string; automationHeader: string },
+  timeoutMs: number,
+): Promise<NormalizedOpportunity> {
+  const classifierInput = getImportedOpportunityClassifierInput(opportunity, connector, source);
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    apikey: auth.anonKey,
+  };
+  if (auth.authHeader) headers.authorization = auth.authHeader;
+  if (auth.automationHeader) headers["x-automation-secret"] = auth.automationHeader;
+  const response = await fetchWithAbortTimeout(`${auth.supabaseUrl}/functions/v1/classify-procurement-stage`, timeoutMs, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(buildAiClassifierInput(classifierInput)),
+  });
+  const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+  if (!response.ok) throw new Error(String(payload.error || `Classifier returned ${response.status}`));
+  return {
+    ...opportunity,
+    ...classificationColumns({
+      procurement_stage: payload.procurement_stage,
+      confidence: payload.confidence ?? payload.classification_confidence,
+      short_reason: payload.short_reason ?? payload.classification_reason,
+      positive_signals: payload.positive_signals,
+      negative_signals: payload.negative_signals,
+      requires_admin_review: payload.requires_admin_review,
+    }, "openai"),
+  };
+}
+
+function failClosedImportedOpportunity(opportunity: NormalizedOpportunity, reason: string): NormalizedOpportunity {
+  const budgetExhausted = reason === "ai_classification_budget_exhausted";
+  return {
+    ...opportunity,
+    ...classificationColumns({
+      procurement_stage: "uncertain",
+      confidence: 0,
+      short_reason: budgetExhausted
+        ? "AI classification budget was exhausted; admin review is required."
+        : "AI classification was unavailable; admin review is required.",
+      positive_signals: [],
+      negative_signals: [reason],
+      requires_admin_review: true,
+    }, "deterministic_rule"),
+  };
 }
 
 function getAuthoritativeProcurementMetadata(payload: Record<string, unknown>) {
@@ -4288,9 +4331,8 @@ function isVisibleOpportunity(opportunity: Record<string, unknown>) {
 }
 
 function isCustomerMatchEligibleOpportunity(opportunity: Record<string, unknown>) {
-  if (opportunity.procurement_stage) {
-    return isProcurementOpportunityEligible(opportunity);
-  }
+  if (!isProcurementOpportunityEligible(opportunity, { allowLegacyUnclassified: true, legacyEligibility: () => true })) return false;
+  if (opportunity.procurement_stage) return true;
   const payload = opportunity.raw_payload && typeof opportunity.raw_payload === "object"
     ? opportunity.raw_payload as Record<string, unknown>
     : {};
@@ -4563,7 +4605,7 @@ async function generateWeeklyReports(supabase: ReturnType<typeof createClient>) 
 
     const { data: matches, error: matchesError } = await supabase
       .from("opportunity_matches")
-      .select("match_score, safety_status, alert_eligible, opportunities(id, title, buyer, description, deadline, status, procurement_stage, actionable_for_suppliers, requires_admin_review, raw_payload, sources(name))")
+      .select("match_score, safety_status, alert_eligible, opportunities(id, title, buyer, description, deadline, status, procurement_stage, classification_grandfathered, actionable_for_suppliers, requires_admin_review, raw_payload, sources(name))")
       .eq("company_id", company.id)
       .gte("match_score", MIN_MATCH_SCORE)
       .eq("safety_status", "auto_approved")
@@ -4617,7 +4659,8 @@ function isCustomerReportMatch(match: Record<string, unknown>) {
   if (String(match.safety_status || "") !== "auto_approved" || match.alert_eligible === false) return false;
   const opportunity = match.opportunities as Record<string, unknown> | undefined;
   if (!opportunity?.id) return false;
-  if (opportunity.procurement_stage) return isProcurementOpportunityEligible(opportunity);
+  if (!isProcurementOpportunityEligible(opportunity, { allowLegacyUnclassified: true, legacyEligibility: () => true })) return false;
+  if (opportunity.procurement_stage) return true;
   if (String(opportunity.status || "open") !== "open") return false;
   const payload = (opportunity.raw_payload && typeof opportunity.raw_payload === "object")
     ? opportunity.raw_payload as Record<string, unknown>

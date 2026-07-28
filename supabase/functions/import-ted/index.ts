@@ -1261,9 +1261,8 @@ function isVisibleOpportunity(opportunity: Record<string, unknown>, sourceName =
 }
 
 function isCustomerMatchEligibleOpportunity(opportunity: Record<string, unknown>, sourceName = "") {
-  if (opportunity.procurement_stage) {
-    return isProcurementOpportunityEligible(opportunity);
-  }
+  if (!isProcurementOpportunityEligible(opportunity, { allowLegacyUnclassified: true, legacyEligibility: () => true })) return false;
+  if (opportunity.procurement_stage) return true;
   const payload = opportunity.raw_payload && typeof opportunity.raw_payload === "object"
     ? opportunity.raw_payload as Record<string, unknown>
     : {};

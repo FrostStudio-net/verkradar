@@ -16,6 +16,8 @@ export const ACTIONABLE_PROCUREMENT_STAGES = Object.freeze([
 ]);
 
 export const PROCUREMENT_CLASSIFIER_VERSION = "procurement-stage-v1";
+export const DEFAULT_AI_CLASSIFICATION_LIMIT = 2;
+export const DEFAULT_AI_CLASSIFICATION_BUDGET_MS = 7000;
 
 const ACTIONABLE_STAGE_SET = new Set(ACTIONABLE_PROCUREMENT_STAGES);
 const STAGE_SET = new Set(PROCUREMENT_STAGES);
@@ -30,7 +32,7 @@ const SIGNALS = Object.freeze({
   award: ["laegstbjodandi", "verktaki valinn", "tilbod var samthykkt", "utbodnidurstada", "contract awarded", "successful tenderer"],
   contractSigned: ["samningur undirritadur", "skrifad undir verksamning", "verksamningur undirritadur", "contract signed"],
   workStarted: ["framkvaemdir hofust", "framkvaemdir eru hafnar", "framkvaemdir hafnar", "vinna er hafin", "verkid er hafid", "work has started", "works are underway"],
-  workCompleted: ["framkvaemdum lokid", "verkinu lokid", "verkid er fullunnid", "works completed", "project completed"],
+  workCompleted: ["framkvaemdum lokid", "framkvaemdum er lokid", "verkinu lokid", "verkid er fullunnid", "works completed", "project completed"],
   disruption: ["umferd breytist", "lokun vegna framkvaemda", "hjaleid", "vegfarendur eru bednir", "ibuar eru bednir", "resident notice", "traffic disruption"],
   generalNews: ["fundargerd", "baejarstjornarfundur", "vidburdadagatal", "frettatilkynning", "opinn fundur", "community event"],
 });
@@ -145,7 +147,52 @@ export function isProcurementOpportunityEligible(opportunity, options = {}) {
     if (stage === "open_competition" && isExpired(opportunity.deadline, options.now)) return false;
     return true;
   }
-  return options.allowLegacyUnclassified === true && legacyOpportunityEligible(opportunity, options.now);
+  const grandfathered = opportunity.classification_grandfathered === true || opportunity.classificationGrandfathered === true;
+  if (options.allowLegacyUnclassified !== true || !grandfathered) return false;
+  if (typeof options.legacyEligibility === "function") return options.legacyEligibility(opportunity) === true;
+  return legacyOpportunityEligible(opportunity, options.now);
+}
+
+export async function processProcurementClassificationBatch(items, options) {
+  const now = options.now || Date.now;
+  const startedAt = Number(options.startedAt ?? now());
+  const aiWindowStartedAt = Number(options.aiWindowStartedAt ?? now());
+  const functionBudgetMs = Number(options.functionBudgetMs ?? 18000);
+  const functionReserveMs = Number(options.functionReserveMs ?? 4000);
+  const aiBudgetMs = Number(options.aiBudgetMs ?? DEFAULT_AI_CLASSIFICATION_BUDGET_MS);
+  const perCallTimeoutMs = Number(options.perCallTimeoutMs ?? 5000);
+  const maxAiClassifications = Number(options.maxAiClassifications ?? DEFAULT_AI_CLASSIFICATION_LIMIT);
+  const stats = { processed: 0, persisted: 0, ai_attempted: 0, ai_budget_exhausted: 0, ai_failed: 0 };
+
+  for (const item of items) {
+    const deterministic = await options.classifyDeterministic(item);
+    let classified = deterministic.value;
+
+    if (deterministic.needsAi) {
+      const remainingAiMs = aiBudgetMs - (now() - aiWindowStartedAt);
+      const remainingFunctionMs = functionBudgetMs - (now() - startedAt) - functionReserveMs;
+      const timeoutMs = Math.floor(Math.min(perCallTimeoutMs, remainingAiMs, remainingFunctionMs));
+
+      if (stats.ai_attempted >= maxAiClassifications || timeoutMs <= 0) {
+        stats.ai_budget_exhausted += 1;
+        classified = await options.failClosed(item, "ai_classification_budget_exhausted", deterministic);
+      } else {
+        stats.ai_attempted += 1;
+        try {
+          classified = await options.classifyAi(item, timeoutMs, deterministic);
+        } catch (error) {
+          stats.ai_failed += 1;
+          classified = await options.failClosed(item, "ai_classification_unavailable", deterministic, error);
+        }
+      }
+    }
+
+    stats.processed += 1;
+    await options.persist(classified, item);
+    stats.persisted += 1;
+  }
+
+  return stats;
 }
 
 export function preserveAdminClassification(incoming, existing) {
@@ -194,7 +241,12 @@ function classifyAuthoritativeMetadata(metadata, deadline) {
     "dir awa pre": "award_or_contract_signed",
     bri: "general_news",
   };
-  const stage = mapping[formType];
+  const isContractModification = formType === "contract modification" ||
+    formType.startsWith("contract modification ") ||
+    formType === "cont modif" ||
+    formType.startsWith("cont modif ") ||
+    formType.endsWith(" cont modif");
+  const stage = isContractModification ? "award_or_contract_signed" : mapping[formType];
   if (!stage) return null;
   const expiredCompetition = stage === "open_competition" && isExpired(deadline);
   return {
@@ -233,7 +285,8 @@ function result(stage, confidence, reason, positiveSignals, negativeSignals, req
 }
 
 function sanitizePublicText(value) {
-  return stripControl(value)
+  return String(value || "")
+    .replace(/\r\n?/g, "\n")
     .replace(/<(?:br|\/p|\/div|\/li)>/gi, "\n")
     .replace(/<[^>]*>/g, " ")
     .replace(/(?:^|\n)\s*(?:hofundur|höfundur|author|byline|tengilidur|tengiliður|contact|simi|sími|netfang)\s*:.*$/gim, " ")
@@ -241,6 +294,7 @@ function sanitizePublicText(value) {
     .replace(/\b[\w.%+-]+@[\w.-]+\.[A-Za-z]{2,}\b/g, "[redacted-email]")
     .replace(/\b(?:\+?354[ -]?)?(?:\d[ -]?){7}\b/g, "[redacted-phone]")
     .replace(/\b\d{6}[- ]?\d{4}\b/g, "[redacted-id]")
+    .replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -254,7 +308,7 @@ function stripControl(value) {
 }
 
 function normalizeText(value) {
-  return String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/ð/g, "d").replace(/þ/g, "th").replace(/[^a-z0-9]+/g, " ").trim();
+  return String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/æ/g, "ae").replace(/ð/g, "d").replace(/þ/g, "th").replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 function isExpired(value, now = new Date()) {
