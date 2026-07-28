@@ -107,9 +107,14 @@ Deploy outline:
 
 ```bash
 supabase db push
+supabase functions deploy classify-procurement-stage
 supabase functions deploy import-ted
 supabase functions deploy import-source-connectors
+supabase functions deploy admin-company-actions
+supabase functions deploy ai-review-match
 ```
+
+Production TED automation targets `import-ted`, which is the active TED path and owns the Phase 1 `form-type` classification mapping. `import-ted-notices` is a legacy importer retained unchanged for later cleanup; it must not be scheduled alongside `import-ted`.
 
 Required Edge Function environment:
 
@@ -117,6 +122,10 @@ Required Edge Function environment:
 SUPABASE_URL=...
 SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...
+AUTOMATION_SECRET=...
+OPENAI_API_KEY=...
+# Optional; falls back to OPENAI_MODEL, then gpt-4.1-mini.
+OPENAI_CLASSIFIER_MODEL=...
 ```
 
 Frontend configuration for the dev/admin dashboard button:

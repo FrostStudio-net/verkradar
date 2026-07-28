@@ -1,4 +1,11 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import {
+  buildAiClassifierInput,
+  classificationColumns,
+  classifyProcurementStage,
+  isProcurementOpportunityEligible,
+  preserveAdminClassification,
+} from "../_shared/procurement-stage.js";
 
 type ConnectorType = "rss_feed" | "wordpress_rest" | "page_monitor_allowed";
 
@@ -68,6 +75,16 @@ type NormalizedOpportunity = {
   difficulty: string;
   status: string;
   raw_payload: Record<string, unknown>;
+  procurement_stage?: string;
+  actionable_for_suppliers?: boolean;
+  classification_confidence?: number;
+  classification_reason?: string;
+  positive_signals?: string[];
+  negative_signals?: string[];
+  classified_by?: string;
+  classified_at?: string;
+  classifier_version?: string;
+  requires_admin_review?: boolean;
   deadline_debug?: DeadlineDebugSample;
 };
 
@@ -210,6 +227,7 @@ const DEFAULT_LIMIT = 50;
 const DEFAULT_BATCH_LIMIT = 20;
 const DEFAULT_MAX_SOURCES_PER_RUN = 6;
 const SOURCE_FETCH_TIMEOUT_MS = 8000;
+const PROCUREMENT_CLASSIFIER_TIMEOUT_MS = 5000;
 const FUNCTION_TIME_BUDGET_MS = 18000;
 const MIN_MATCH_SCORE = 50;
 const MAX_MATCH_DEBUG_SAMPLES = 20;
@@ -581,7 +599,18 @@ Deno.serve(async (req) => {
             normalized.map((opportunity) => opportunity.external_id),
           );
 
-          const preparedOpportunities = normalized.map(applyMissingDeadlineSafety);
+          const classifiedOpportunities: NormalizedOpportunity[] = [];
+          for (const opportunity of normalized) {
+            classifiedOpportunities.push(await classifyImportedOpportunity(opportunity, connector, source, {
+              supabaseUrl,
+              anonKey,
+              authHeader,
+              automationHeader,
+            }));
+          }
+          const preparedOpportunities = classifiedOpportunities
+            .map((opportunity) => preserveAdminClassification(opportunity, existing.get(opportunity.external_id)))
+            .map(applyMissingDeadlineSafety);
           const { data: savedRows, error: upsertError } = await adminClient
             .from("opportunities")
             .upsert(preparedOpportunities.map(toOpportunityUpsertRow), { onConflict: "source_id,external_id" })
@@ -607,6 +636,7 @@ Deno.serve(async (req) => {
             if (existing.has(row.external_id)) sourceSummary.updated += 1;
             else sourceSummary.inserted += 1;
           }
+          await suppressNonActionableMatches(adminClient, preparedOpportunities, savedRows || []);
           for (const opportunity of preparedOpportunities) {
             if (!opportunity.deadline_debug) continue;
             const debugSample: DeadlineDebugSample = {
@@ -1299,6 +1329,103 @@ function getConnectorItemTitle(item: Record<string, unknown>, connectorType: Con
 function toOpportunityUpsertRow(opportunity: NormalizedOpportunity) {
   const { deadline_debug: _deadlineDebug, ...row } = opportunity;
   return row;
+}
+
+async function suppressNonActionableMatches(
+  supabase: ReturnType<typeof createClient>,
+  opportunities: NormalizedOpportunity[],
+  savedRows: Array<{ id: string; external_id: string }>,
+) {
+  const savedByExternalId = new Map(savedRows.map((row) => [String(row.external_id || ""), String(row.id || "")]));
+  const ineligibleIds = opportunities
+    .filter((opportunity) => opportunity.actionable_for_suppliers !== true || opportunity.requires_admin_review === true)
+    .map((opportunity) => savedByExternalId.get(opportunity.external_id) || "")
+    .filter(Boolean);
+  if (!ineligibleIds.length) return;
+  const { error } = await supabase
+    .from("opportunity_matches")
+    .update({
+      safety_status: "hidden",
+      safety_reasons: ["Opportunity is not supplier-actionable at its current procurement stage"],
+      alert_eligible: false,
+      review_required: false,
+    })
+    .in("opportunity_id", ineligibleIds);
+  if (error) throw error;
+}
+
+async function classifyImportedOpportunity(
+  opportunity: NormalizedOpportunity,
+  connector: ConnectorRow,
+  source: NonNullable<ConnectorRow["sources"]>,
+  auth: { supabaseUrl: string; anonKey: string; authHeader: string; automationHeader: string },
+): Promise<NormalizedOpportunity> {
+  const classifierInput = {
+    source_type: source.source_type || "",
+    connector_type: connector.connector_type,
+    source_organisation: source.name,
+    title: opportunity.title,
+    body_text: opportunity.description,
+    publication_date: opportunity.published_date || "",
+    deadline: opportunity.deadline || "",
+    category: opportunity.category,
+    authoritative_metadata: getAuthoritativeProcurementMetadata(opportunity.raw_payload),
+  };
+  const deterministic = classifyProcurementStage(classifierInput);
+  if (!deterministic.needs_ai) {
+    return {
+      ...opportunity,
+      ...classificationColumns(deterministic, deterministic.classified_by),
+    };
+  }
+
+  try {
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      apikey: auth.anonKey,
+    };
+    if (auth.authHeader) headers.authorization = auth.authHeader;
+    if (auth.automationHeader) headers["x-automation-secret"] = auth.automationHeader;
+    const response = await fetchWithAbortTimeout(`${auth.supabaseUrl}/functions/v1/classify-procurement-stage`, PROCUREMENT_CLASSIFIER_TIMEOUT_MS, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(buildAiClassifierInput(classifierInput)),
+    });
+    const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+    if (!response.ok) throw new Error(String(payload.error || `Classifier returned ${response.status}`));
+    return {
+      ...opportunity,
+      ...classificationColumns({
+        procurement_stage: payload.procurement_stage,
+        confidence: payload.confidence ?? payload.classification_confidence,
+        short_reason: payload.short_reason ?? payload.classification_reason,
+        positive_signals: payload.positive_signals,
+        negative_signals: payload.negative_signals,
+        requires_admin_review: payload.requires_admin_review,
+      }, "openai"),
+    };
+  } catch (error) {
+    console.warn(`AI procurement-stage classification failed for ${opportunity.external_id}: ${errorMessage(error)}`);
+    return {
+      ...opportunity,
+      ...classificationColumns({
+        procurement_stage: "uncertain",
+        confidence: 0,
+        short_reason: "AI classification was unavailable; admin review is required.",
+        positive_signals: [],
+        negative_signals: ["ai_classification_unavailable"],
+        requires_admin_review: true,
+      }, "deterministic_rule"),
+    };
+  }
+}
+
+function getAuthoritativeProcurementMetadata(payload: Record<string, unknown>) {
+  return {
+    form_type: String(payload.form_type || payload["form-type"] || ""),
+    notice_type: String(payload.notice_type || payload["notice-type"] || ""),
+    notice_subtype: String(payload.notice_subtype || payload["notice-subtype"] || ""),
+  };
 }
 
 function applyMissingDeadlineSafety(opportunity: NormalizedOpportunity): NormalizedOpportunity {
@@ -3054,15 +3181,15 @@ function getExpiredResultKeywords(normalizedText: string) {
 }
 
 async function getExistingExternalIds(supabase: ReturnType<typeof createClient>, sourceId: string, externalIds: string[]) {
-  if (!externalIds.length) return new Set<string>();
+  if (!externalIds.length) return new Map<string, Record<string, unknown>>();
   const { data, error } = await supabase
     .from("opportunities")
-    .select("external_id")
+    .select("external_id, procurement_stage, actionable_for_suppliers, classification_confidence, classification_reason, positive_signals, negative_signals, classified_by, classified_at, classifier_version, requires_admin_review, raw_payload")
     .eq("source_id", sourceId)
     .in("external_id", externalIds);
 
   if (error) throw error;
-  return new Set((data || []).map((row) => row.external_id));
+  return new Map((data || []).map((row) => [String(row.external_id || ""), row as Record<string, unknown>]));
 }
 
 async function resolveCrossSourceDuplicates(
@@ -3969,11 +4096,13 @@ function classifyMatchSafety(
 
   const deadline = String(opportunity.deadline || "");
   const hasFutureDeadline = Boolean(deadline) && daysUntil(deadline) >= 0;
+  const stage = String(opportunity.procurement_stage || "");
+  const requiresSupplierDeadline = !stage || stage === "open_competition";
   const qualityText = getSafetyQualityText(opportunity);
   const risks = Array.isArray(match.risks) ? match.risks.map(String) : [];
   const hasStrongWorkTypeFit = hasStrongWorkTypeMatch(opportunity, match);
 
-  if (!deadline) reasons.push("No reliable deadline was found");
+  if (!deadline && requiresSupplierDeadline) reasons.push("No reliable deadline was found");
   if (isUnknownBuyer(opportunity)) reasons.push("Buyer is missing or generic");
   if (risks.some((risk) => /broad construction|low confidence/i.test(risk))) reasons.push("Match depends on broad or low-confidence terms");
   if (risks.some((risk) => /indoor|finishing|outside your core civil services/i.test(risk))) reasons.push("Possible service mismatch for this company profile");
@@ -3996,7 +4125,7 @@ function classifyMatchSafety(
     };
   }
 
-  const autoApproved = hasFutureDeadline &&
+  const autoApproved = (requiresSupplierDeadline ? hasFutureDeadline : true) &&
     hasStrongWorkTypeFit &&
     !reasons.some((reason) => /missing|generic|broad|mismatch|consulting|supervision|project management/i.test(reason));
 
@@ -4159,6 +4288,9 @@ function isVisibleOpportunity(opportunity: Record<string, unknown>) {
 }
 
 function isCustomerMatchEligibleOpportunity(opportunity: Record<string, unknown>) {
+  if (opportunity.procurement_stage) {
+    return isProcurementOpportunityEligible(opportunity);
+  }
   const payload = opportunity.raw_payload && typeof opportunity.raw_payload === "object"
     ? opportunity.raw_payload as Record<string, unknown>
     : {};
@@ -4431,7 +4563,7 @@ async function generateWeeklyReports(supabase: ReturnType<typeof createClient>) 
 
     const { data: matches, error: matchesError } = await supabase
       .from("opportunity_matches")
-      .select("match_score, safety_status, alert_eligible, opportunities(id, title, buyer, description, deadline, status, raw_payload, sources(name))")
+      .select("match_score, safety_status, alert_eligible, opportunities(id, title, buyer, description, deadline, status, procurement_stage, actionable_for_suppliers, requires_admin_review, raw_payload, sources(name))")
       .eq("company_id", company.id)
       .gte("match_score", MIN_MATCH_SCORE)
       .eq("safety_status", "auto_approved")
@@ -4485,6 +4617,7 @@ function isCustomerReportMatch(match: Record<string, unknown>) {
   if (String(match.safety_status || "") !== "auto_approved" || match.alert_eligible === false) return false;
   const opportunity = match.opportunities as Record<string, unknown> | undefined;
   if (!opportunity?.id) return false;
+  if (opportunity.procurement_stage) return isProcurementOpportunityEligible(opportunity);
   if (String(opportunity.status || "open") !== "open") return false;
   const payload = (opportunity.raw_payload && typeof opportunity.raw_payload === "object")
     ? opportunity.raw_payload as Record<string, unknown>
