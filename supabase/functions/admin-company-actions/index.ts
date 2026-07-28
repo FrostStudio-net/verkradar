@@ -1094,7 +1094,7 @@ function buildCompanyReportMatches(
     : matches;
   return sortAiReportMatches(modeMatches
     .filter((match) => !ignoredIds.has(String(match.id || "")))
-    .filter((match) => !(match.procurementStage || match.procurement_stage) || isCustomerMatchEligibleOpportunity(match))
+    .filter(isCustomerMatchEligibleOpportunity)
     .filter((match) => isReportModeSafetyEligible(match, reportMode))
   ).slice(0, 8);
 }
@@ -1195,7 +1195,7 @@ function isAiReportMatchEligible(match: Record<string, unknown>) {
 function getReportCandidateKind(match: Record<string, unknown>) {
   const fit = String(match.aiReviewFit || "").toLowerCase();
   const stage = String(match.procurementStage || match.procurement_stage || "");
-  if (stage && !isProcurementOpportunityEligible(match)) return "excluded";
+  if (!isProcurementOpportunityEligible(match, { allowLegacyUnclassified: true, legacyEligibility: () => true })) return "excluded";
   if ((!stage || stage === "open_competition") && !match.deadline) return "excluded";
   if (match.deadline && daysUntilDeadline(String(match.deadline || "")) < 0) return "excluded";
   const safety = getMatchSafetyStatus(match);
@@ -1304,6 +1304,7 @@ function mapOpportunity(row: Record<string, unknown>) {
     difficulty: String(row.difficulty || "medium"),
     status: String(row.status || "open"),
     procurementStage: row.procurement_stage ? String(row.procurement_stage) : "",
+    classificationGrandfathered: row.classification_grandfathered === true,
     actionableForSuppliers: row.actionable_for_suppliers === true,
     requiresAdminReview: row.requires_admin_review === true,
     classificationConfidence: row.classification_confidence == null ? null : Number(row.classification_confidence),
@@ -1891,9 +1892,8 @@ function companyExplicitlyAllowsReviewOnlyWork(profile: CompanyProfile) {
 }
 
 function isCustomerMatchEligibleOpportunity(opportunity: Record<string, unknown>) {
-  if (opportunity.procurementStage || opportunity.procurement_stage) {
-    return isProcurementOpportunityEligible(opportunity);
-  }
+  if (!isProcurementOpportunityEligible(opportunity, { allowLegacyUnclassified: true, legacyEligibility: () => true })) return false;
+  if (opportunity.procurementStage || opportunity.procurement_stage) return true;
   const payload = opportunity.rawPayload && typeof opportunity.rawPayload === "object"
     ? opportunity.rawPayload as Record<string, unknown>
     : {};
@@ -1974,10 +1974,8 @@ function getReportSections(company: CompanyProfile, matches: Array<Record<string
 }
 
 function isStrictCustomerReportEligible(company: CompanyProfile, opportunity: Record<string, unknown>) {
-  if (opportunity.procurementStage || opportunity.procurement_stage) {
-    return isProcurementOpportunityEligible(opportunity);
-  }
   if (!isCustomerMatchEligibleOpportunity(opportunity)) return false;
+  if (opportunity.procurementStage || opportunity.procurement_stage) return true;
   if (isAlreadyAwardedOrTenderedReportItem(opportunity)) return false;
   if (isDesignConsultingOnlyForProfile(company, opportunity)) return false;
   if (isNeedsReviewWrongTypeForProfile(company, opportunity)) return false;

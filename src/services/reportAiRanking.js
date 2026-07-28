@@ -72,7 +72,7 @@ export function isAiReportMatchEligible(match) {
 export function getReportCandidateKind(match) {
   const fit = normalizeFit(match?.aiReviewFit || match?.ai_review_fit);
   const stage = String(match?.procurementStage || match?.procurement_stage || "");
-  if (stage && !isProcurementOpportunityEligible(match)) return "excluded";
+  if (!isProcurementOpportunityEligible(match, { allowLegacyUnclassified: true, legacyEligibility: () => true })) return "excluded";
   if ((!stage || stage === "open_competition") && !match?.deadline) return "excluded";
   if (match?.deadline && isExpiredDeadline(match.deadline)) return "excluded";
   const safety = String(match?.safetyStatus || match?.safety_status || "auto_approved").toLowerCase();
