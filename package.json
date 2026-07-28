@@ -3,7 +3,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build && cp app.js dist/ && cp -R src dist/src",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:procurement-stage": "node --test supabase/functions/tests/procurement-stage.test.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",
