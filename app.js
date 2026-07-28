@@ -3222,6 +3222,7 @@ function mapSupabaseOpportunity(row) {
     difficulty: row.difficulty || "medium",
     status: row.status || "open",
     procurementStage: row.procurement_stage || "",
+    classificationGrandfathered: row.classification_grandfathered === true,
     actionableForSuppliers: row.actionable_for_suppliers === true,
     requiresAdminReview: row.requires_admin_review === true,
     classificationConfidence: row.classification_confidence == null ? null : Number(row.classification_confidence),
@@ -5070,6 +5071,7 @@ async function runMatchingForCurrentCompany() {
     const wasDraftDirty = state.profileDraftDirty;
     const matched = (opportunitiesResult.data || [])
       .map(mapSupabaseOpportunity)
+      .filter(isCustomerMatchEligibleOpportunity)
       .filter(isDashboardVisibleOpportunity)
       .map((opportunity) => calculateMatch(profile, opportunity))
       .filter((match) => match.matchScore >= 50);
@@ -5164,7 +5166,17 @@ async function addOpportunity(formData, formElement) {
       raw_payload: {
         created_from: "admin",
         source_name: sourceName
-      }
+      },
+      procurement_stage: "uncertain",
+      actionable_for_suppliers: false,
+      classification_confidence: 0.5,
+      classification_reason: "New manual opportunity requires an explicit admin procurement-stage review.",
+      positive_signals: [],
+      negative_signals: ["manual_opportunity_requires_classification"],
+      classified_by: "admin",
+      classified_at: new Date().toISOString(),
+      classifier_version: "procurement-stage-v1",
+      requires_admin_review: true
     };
 
     const { error } = await supabaseClient
@@ -10951,7 +10963,8 @@ function isStrictCustomerReportEligible(opp) {
   if (!opp || isDemoTestOpportunity(opp)) return false;
   if (getSafetyStatus(opp) === "hidden") return false;
   if (!isDashboardVisibleOpportunity(opp)) return false;
-  if (opp.procurementStage) return isProcurementOpportunityEligible(opp);
+  if (!isCustomerMatchEligibleOpportunity(opp)) return false;
+  if (opp.procurementStage) return true;
   if (isCustomerReportExcludedIntent(opp)) return false;
   if (isAlreadyAwardedOrTenderedReportItem(opp)) return false;
   if (isDesignConsultingOnlyForCurrentProfile(opp)) return false;
@@ -11203,7 +11216,11 @@ function containsReviewOnlyTerms(text) {
 
 function isCustomerMatchEligibleOpportunity(opp) {
   if (!opp) return false;
-  if (opp.procurementStage) return isProcurementOpportunityEligible(opp);
+  if (!isProcurementOpportunityEligible(opp, {
+    allowLegacyUnclassified: true,
+    legacyEligibility: () => true
+  })) return false;
+  if (opp.procurementStage) return true;
   const payload = opp.rawPayload || {};
   const adminStatus = String(payload.admin_report_status || "").toLowerCase();
   if (adminStatus === "include") return true;

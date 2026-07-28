@@ -176,6 +176,7 @@ async function loadReviewContext(supabase: ReturnType<typeof createClient>, matc
     type: String(match.opportunities.type || ""),
     status: String(match.opportunities.status || ""),
     procurementStage: String(match.opportunities.procurement_stage || ""),
+    classificationGrandfathered: match.opportunities.classification_grandfathered === true,
     actionableForSuppliers: match.opportunities.actionable_for_suppliers === true,
     requiresAdminReview: match.opportunities.requires_admin_review === true,
     rawPayload: match.opportunities.raw_payload && typeof match.opportunities.raw_payload === "object" ? match.opportunities.raw_payload : {},
@@ -464,6 +465,7 @@ async function loadBatchCandidates(supabase: ReturnType<typeof createClient>, co
         procurement_stage,
         actionable_for_suppliers,
         requires_admin_review,
+        classification_grandfathered,
         raw_payload
       )
     `)
@@ -666,7 +668,7 @@ function getKnownLocationTokens(text: string) {
 }
 
 function isBatchEligibleOpportunity(opportunity: Record<string, unknown>) {
-  if (opportunity.procurement_stage && !isProcurementOpportunityEligible(opportunity)) return false;
+  if (!isProcurementOpportunityEligible(opportunity, { allowLegacyUnclassified: true, legacyEligibility: () => true })) return false;
   const payload = opportunity.raw_payload && typeof opportunity.raw_payload === "object" ? opportunity.raw_payload as Record<string, unknown> : {};
   const deadline = String(opportunity.deadline || payload.deadline_at || payload.bid_deadline_at || "").trim();
   const stage = String(opportunity.procurement_stage || "");
@@ -698,7 +700,7 @@ function validateContextBeforeAi(context: Record<string, unknown>, options: { fo
   const match = context.match as Record<string, unknown>;
   const locationAssessment = context.locationAssessment as Record<string, unknown> | undefined;
   const rawPayload = opportunity.rawPayload && typeof opportunity.rawPayload === "object" ? opportunity.rawPayload as Record<string, unknown> : {};
-  if (opportunity.procurementStage && !isProcurementOpportunityEligible(opportunity)) {
+  if (!isProcurementOpportunityEligible(opportunity, { allowLegacyUnclassified: true, legacyEligibility: () => true })) {
     throw new Error("AI review skipped: opportunity is not supplier-actionable.");
   }
   const deadline = String(opportunity.deadline || opportunity.deadlineAt || rawPayload.deadline_at || rawPayload.bid_deadline_at || "").trim();
