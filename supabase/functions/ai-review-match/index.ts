@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { isProcurementOpportunityEligible } from "../_shared/procurement-stage.js";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -174,6 +175,9 @@ async function loadReviewContext(supabase: ReturnType<typeof createClient>, matc
     category: String(match.opportunities.category || ""),
     type: String(match.opportunities.type || ""),
     status: String(match.opportunities.status || ""),
+    procurementStage: String(match.opportunities.procurement_stage || ""),
+    actionableForSuppliers: match.opportunities.actionable_for_suppliers === true,
+    requiresAdminReview: match.opportunities.requires_admin_review === true,
     rawPayload: match.opportunities.raw_payload && typeof match.opportunities.raw_payload === "object" ? match.opportunities.raw_payload : {},
   };
   return {
@@ -457,6 +461,9 @@ async function loadBatchCandidates(supabase: ReturnType<typeof createClient>, co
         location,
         deadline,
         status,
+        procurement_stage,
+        actionable_for_suppliers,
+        requires_admin_review,
         raw_payload
       )
     `)
@@ -659,9 +666,12 @@ function getKnownLocationTokens(text: string) {
 }
 
 function isBatchEligibleOpportunity(opportunity: Record<string, unknown>) {
+  if (opportunity.procurement_stage && !isProcurementOpportunityEligible(opportunity)) return false;
   const payload = opportunity.raw_payload && typeof opportunity.raw_payload === "object" ? opportunity.raw_payload as Record<string, unknown> : {};
   const deadline = String(opportunity.deadline || payload.deadline_at || payload.bid_deadline_at || "").trim();
-  if (!deadline || daysUntil(deadline) < 0) return false;
+  const stage = String(opportunity.procurement_stage || "");
+  if ((!stage || stage === "open_competition") && !deadline) return false;
+  if (deadline && daysUntil(deadline) < 0) return false;
   if (String(opportunity.status || "").toLowerCase() === "hidden") return false;
   if (payload.hidden_from_reports === true) return false;
   if (["hidden", "noise", "deleted"].includes(String(payload.admin_report_status || "").toLowerCase())) return false;
@@ -688,13 +698,17 @@ function validateContextBeforeAi(context: Record<string, unknown>, options: { fo
   const match = context.match as Record<string, unknown>;
   const locationAssessment = context.locationAssessment as Record<string, unknown> | undefined;
   const rawPayload = opportunity.rawPayload && typeof opportunity.rawPayload === "object" ? opportunity.rawPayload as Record<string, unknown> : {};
+  if (opportunity.procurementStage && !isProcurementOpportunityEligible(opportunity)) {
+    throw new Error("AI review skipped: opportunity is not supplier-actionable.");
+  }
   const deadline = String(opportunity.deadline || opportunity.deadlineAt || rawPayload.deadline_at || rawPayload.bid_deadline_at || "").trim();
+  const stage = String(opportunity.procurementStage || "");
   const expired = deadline ? daysUntil(deadline) < 0 : false;
   const hidden = String(opportunity.status || "").toLowerCase() === "hidden"
     || String(match.safety_status || "").toLowerCase() === "hidden"
     || rawPayload.hidden_from_reports === true
     || ["hidden", "noise", "deleted"].includes(String(rawPayload.admin_report_status || "").toLowerCase());
-  if (!deadline) throw new Error("AI review skipped: missing deadline.");
+  if ((!stage || stage === "open_competition") && !deadline) throw new Error("AI review skipped: missing deadline.");
   if (expired) throw new Error("AI review skipped: expired opportunity.");
   if (hidden) throw new Error("AI review skipped: hidden opportunity.");
   if (locationAssessment?.outsideServiceArea === true && !(options.force && options.allowOutsideServiceArea)) {
@@ -996,7 +1010,7 @@ async function callOpenAiForReview(openAiKey: string, model: string, context: Re
               "If uncertain, fit should be possible or weak and send_to_client=false.",
             ],
           },
-          context,
+          context: buildAiReviewPromptContext(context),
         }),
       }],
     },
@@ -1041,6 +1055,47 @@ async function callOpenAiForReview(openAiKey: string, model: string, context: Re
   return {
     review: normalizeAiReview(parseOpenAiJson(payload)),
     usage: parseOpenAiUsage(payload),
+  };
+}
+
+function buildAiReviewPromptContext(context: Record<string, unknown>) {
+  const company = context.company as Record<string, unknown>;
+  const opportunity = context.opportunity as Record<string, unknown>;
+  const match = context.match as Record<string, unknown>;
+  return {
+    company: {
+      industry: String(company.industry || "").slice(0, 200),
+      services: toStringArray(company.services).slice(0, 30),
+      includeKeywords: toStringArray(company.includeKeywords).slice(0, 30),
+      excludeKeywords: toStringArray(company.excludeKeywords).slice(0, 30),
+      locations: toStringArray(company.locations).slice(0, 30),
+      baseLocation: String(company.baseLocation || "").slice(0, 200),
+      serviceAreas: toStringArray(company.serviceAreas).slice(0, 30),
+      willingToTravel: company.willingToTravel === true,
+      nationalProjects: company.nationalProjects === true,
+      remoteProjects: company.remoteProjects === true,
+    },
+    opportunity: {
+      title: String(opportunity.title || "").slice(0, 300),
+      description: String(opportunity.description || "").slice(0, 4000),
+      buyer: String(opportunity.buyer || "").slice(0, 200),
+      location: String(opportunity.location || "").slice(0, 200),
+      source: String(opportunity.source || "").slice(0, 200),
+      sourceType: String(opportunity.sourceType || "").slice(0, 100),
+      deadline: String(opportunity.deadline || "").slice(0, 40),
+      category: String(opportunity.category || "").slice(0, 200),
+      type: String(opportunity.type || "").slice(0, 100),
+      procurementStage: String(opportunity.procurementStage || "").slice(0, 80),
+    },
+    match: {
+      matchScore: Number(match.match_score || 0),
+      matchLabel: String(match.match_label || "").slice(0, 100),
+      matchReasons: toStringArray(match.match_reasons).slice(0, 12),
+      risks: toStringArray(match.risks).slice(0, 12),
+      safetyStatus: String(match.safety_status || "").slice(0, 80),
+      safetyReasons: toStringArray(match.safety_reasons).slice(0, 12),
+    },
+    locationAssessment: context.locationAssessment || {},
   };
 }
 

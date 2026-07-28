@@ -1,4 +1,10 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import {
+  classificationColumns,
+  classifyProcurementStage,
+  isProcurementOpportunityEligible,
+  preserveAdminClassification,
+} from "../_shared/procurement-stage.js";
 
 type ImportSummary = {
   fetched: number;
@@ -32,6 +38,16 @@ type OpportunityInsert = {
   difficulty: string;
   status: string;
   raw_payload: Record<string, unknown>;
+  procurement_stage: string;
+  actionable_for_suppliers: boolean;
+  classification_confidence: number;
+  classification_reason: string;
+  positive_signals: string[];
+  negative_signals: string[];
+  classified_by: string;
+  classified_at: string;
+  classifier_version: string;
+  requires_admin_review: boolean;
 };
 
 const TED_SEARCH_URL = "https://api.ted.europa.eu/v3/notices/search";
@@ -169,10 +185,13 @@ Deno.serve(async (req) => {
           sourceId,
           normalized.map((opportunity) => opportunity.external_id),
         );
+        const prepared = normalized.map((opportunity) =>
+          preserveAdminClassification(opportunity, existingExternalIds.get(opportunity.external_id)) as OpportunityInsert
+        );
 
         const { data: savedRows, error: upsertError } = await adminClient
           .from("opportunities")
-          .upsert(normalized, { onConflict: "source_id,external_id" })
+          .upsert(prepared, { onConflict: "source_id,external_id" })
           .select("id, external_id");
 
         if (upsertError) throw upsertError;
@@ -249,6 +268,9 @@ async function getOrCreateTedSource(supabase: ReturnType<typeof createClient>) {
 async function fetchTedNotices(query: string, limit: number) {
   let fields = [
     "publication-number",
+    "form-type",
+    "notice-type",
+    "notice-subtype",
     "notice-title",
     "buyer-name",
     "publication-date",
@@ -314,6 +336,20 @@ function normalizeTedNotice(notice: Record<string, unknown>, sourceId: string, i
   const cleanedDescription = description && description.trim() !== title.trim()
     ? description
     : `Imported from TED notice ${externalId}`;
+  const classification = classifyProcurementStage({
+    source_type: "ted",
+    source_organisation: TED_SOURCE_NAME,
+    title,
+    body_text: cleanedDescription,
+    publication_date: publishedDate,
+    deadline,
+    category: "Public procurement",
+    authoritative_metadata: {
+      form_type: firstString(notice, ["form-type", "formType"]),
+      notice_type: firstString(notice, ["notice-type", "noticeType"]),
+      notice_subtype: firstString(notice, ["notice-subtype", "noticeSubtype"]),
+    },
+  });
 
   return {
     source_id: sourceId,
@@ -346,20 +382,21 @@ function normalizeTedNotice(notice: Record<string, unknown>, sourceId: string, i
       verk_radar_import_mode: importMode,
       verk_radar_broad_test: isEuBroadTest,
     },
+    ...classificationColumns(classification, classification.classified_by),
   };
 }
 
 async function getExistingExternalIds(supabase: ReturnType<typeof createClient>, sourceId: string, externalIds: string[]) {
-  if (!externalIds.length) return new Set<string>();
+  if (!externalIds.length) return new Map<string, Record<string, unknown>>();
 
   const { data, error } = await supabase
     .from("opportunities")
-    .select("external_id")
+    .select("external_id, procurement_stage, actionable_for_suppliers, classification_confidence, classification_reason, positive_signals, negative_signals, classified_by, classified_at, classifier_version, requires_admin_review, raw_payload")
     .eq("source_id", sourceId)
     .in("external_id", externalIds);
 
   if (error) throw error;
-  return new Set((data || []).map((row) => row.external_id));
+  return new Map((data || []).map((row) => [String(row.external_id || ""), row as Record<string, unknown>]));
 }
 
 function buildRecentQuery() {
@@ -650,6 +687,9 @@ async function generateWeeklyReports(supabase: ReturnType<typeof createClient>) 
           category: String(opportunity.category || "Public procurement"),
           type: String(opportunity.type || "tender"),
           publishedDate: String(opportunity.published_date || ""),
+          procurementStage: String(opportunity.procurement_stage || ""),
+          actionableForSuppliers: opportunity.actionable_for_suppliers === true,
+          requiresAdminReview: opportunity.requires_admin_review === true,
           source: String((opportunity.sources as Record<string, unknown> | undefined)?.name || TED_SOURCE_NAME),
           matchScore: Number(row.match_score || 0),
           matchLabel: getMatchLabel(Number(row.match_score || 0)),
@@ -1054,16 +1094,18 @@ function classifyMatchSafety(profile: Record<string, unknown>, match: Record<str
   const reasons: string[] = [];
   const deadline = String(match.deadline || "");
   const hasFutureDeadline = Boolean(deadline) && daysUntilDeadline(deadline) >= 0;
+  const stage = String(match.procurement_stage || "");
+  const requiresSupplierDeadline = !stage || stage === "open_competition";
   const risks = Array.isArray(match.risks) ? match.risks.map(String) : [];
   const hasStrongWorkTypeFit = hasStrongWorkTypeMatch(match);
-  if (!deadline) reasons.push("No reliable deadline was found");
+  if (!deadline && requiresSupplierDeadline) reasons.push("No reliable deadline was found");
   if (risks.some((risk) => /broad construction|low confidence/i.test(risk))) reasons.push("Match depends on broad or low-confidence terms");
   if (risks.some((risk) => /indoor|finishing|outside your core civil services/i.test(risk))) reasons.push("Possible service mismatch for this company profile");
   if (containsReviewOnlyTerms(match) && !companyExplicitlyAllowsReviewOnlyWork(profile)) {
     reasons.push("Mentions design, consulting, supervision, or project management terms");
   }
 
-  const autoApproved = hasFutureDeadline &&
+  const autoApproved = (requiresSupplierDeadline ? hasFutureDeadline : true) &&
     hasStrongWorkTypeFit &&
     !reasons.some((reason) => /missing|generic|broad|mismatch|consulting|supervision|project management/i.test(reason));
 
@@ -1219,6 +1261,9 @@ function isVisibleOpportunity(opportunity: Record<string, unknown>, sourceName =
 }
 
 function isCustomerMatchEligibleOpportunity(opportunity: Record<string, unknown>, sourceName = "") {
+  if (opportunity.procurement_stage) {
+    return isProcurementOpportunityEligible(opportunity);
+  }
   const payload = opportunity.raw_payload && typeof opportunity.raw_payload === "object"
     ? opportunity.raw_payload as Record<string, unknown>
     : {};

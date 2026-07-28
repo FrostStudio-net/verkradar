@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { isProcurementOpportunityEligible } from "../_shared/procurement-stage.js";
 
 const MIN_MATCH_SCORE = 50;
 const corsHeaders = {
@@ -1093,6 +1094,7 @@ function buildCompanyReportMatches(
     : matches;
   return sortAiReportMatches(modeMatches
     .filter((match) => !ignoredIds.has(String(match.id || "")))
+    .filter((match) => !(match.procurementStage || match.procurement_stage) || isCustomerMatchEligibleOpportunity(match))
     .filter((match) => isReportModeSafetyEligible(match, reportMode))
   ).slice(0, 8);
 }
@@ -1192,7 +1194,12 @@ function isAiReportMatchEligible(match: Record<string, unknown>) {
 
 function getReportCandidateKind(match: Record<string, unknown>) {
   const fit = String(match.aiReviewFit || "").toLowerCase();
-  if (!match.deadline || daysUntilDeadline(String(match.deadline || "")) < 0) return "excluded";
+  const stage = String(match.procurementStage || match.procurement_stage || "");
+  if (stage && !isProcurementOpportunityEligible(match)) return "excluded";
+  if ((!stage || stage === "open_competition") && !match.deadline) return "excluded";
+  if (match.deadline && daysUntilDeadline(String(match.deadline || "")) < 0) return "excluded";
+  const safety = getMatchSafetyStatus(match);
+  if (stage && (safety === "hidden" || safety === "needs_review")) return "excluded";
   const riskText = [
     match.aiReviewReason,
     ...(Array.isArray(match.aiRisksOrQuestions) ? match.aiRisksOrQuestions : []),
@@ -1206,7 +1213,6 @@ function getReportCandidateKind(match: Record<string, unknown>) {
     return "excluded";
   }
 
-  const safety = getMatchSafetyStatus(match);
   if (safety === "hidden" || safety === "needs_review") return "excluded";
   const label = String(match.matchLabel || "").toLowerCase();
   const score = Number(match.matchScore || 0);
@@ -1297,6 +1303,16 @@ function mapOpportunity(row: Record<string, unknown>) {
     keywords: Array.isArray(row.keywords) ? row.keywords.map(String) : [],
     difficulty: String(row.difficulty || "medium"),
     status: String(row.status || "open"),
+    procurementStage: row.procurement_stage ? String(row.procurement_stage) : "",
+    actionableForSuppliers: row.actionable_for_suppliers === true,
+    requiresAdminReview: row.requires_admin_review === true,
+    classificationConfidence: row.classification_confidence == null ? null : Number(row.classification_confidence),
+    classificationReason: String(row.classification_reason || ""),
+    positiveSignals: Array.isArray(row.positive_signals) ? row.positive_signals.map(String) : [],
+    negativeSignals: Array.isArray(row.negative_signals) ? row.negative_signals.map(String) : [],
+    classifiedBy: String(row.classified_by || ""),
+    classifiedAt: String(row.classified_at || ""),
+    classifierVersion: String(row.classifier_version || ""),
     qualityStatus: String(rawPayload.quality_status || ""),
     rawPayload,
   };
@@ -1745,9 +1761,11 @@ function classifyMatchSafety(profile: CompanyProfile, match: Record<string, unkn
 
   const deadline = String(match.deadline || "");
   const hasFutureDeadline = Boolean(deadline) && daysUntilDeadline(deadline) >= 0;
+  const stage = String(match.procurementStage || match.procurement_stage || "");
+  const requiresSupplierDeadline = !stage || stage === "open_competition";
   const hasStrongWorkTypeFit = hasStrongWorkTypeMatch(match);
   const risks = Array.isArray(match.risks) ? match.risks.map(String) : [];
-  if (!deadline) reasons.push("No reliable deadline was found");
+  if (!deadline && requiresSupplierDeadline) reasons.push("No reliable deadline was found");
   if (isUnknownBuyer(match)) reasons.push("Buyer is missing or generic");
   if (risks.some((risk) => /broad construction|low confidence/i.test(risk))) reasons.push("Match depends on broad or low-confidence terms");
   if (risks.some((risk) => /indoor|finishing|outside your core civil services/i.test(risk))) reasons.push("Possible service mismatch for this company profile");
@@ -1764,7 +1782,7 @@ function classifyMatchSafety(profile: CompanyProfile, match: Record<string, unkn
     };
   }
 
-  const autoApproved = hasFutureDeadline &&
+  const autoApproved = (requiresSupplierDeadline ? hasFutureDeadline : true) &&
     hasStrongWorkTypeFit &&
     !reasons.some((reason) => /missing|generic|broad|mismatch|consulting|supervision|project management/i.test(reason));
 
@@ -1873,6 +1891,9 @@ function companyExplicitlyAllowsReviewOnlyWork(profile: CompanyProfile) {
 }
 
 function isCustomerMatchEligibleOpportunity(opportunity: Record<string, unknown>) {
+  if (opportunity.procurementStage || opportunity.procurement_stage) {
+    return isProcurementOpportunityEligible(opportunity);
+  }
   const payload = opportunity.rawPayload && typeof opportunity.rawPayload === "object"
     ? opportunity.rawPayload as Record<string, unknown>
     : {};
@@ -1953,6 +1974,9 @@ function getReportSections(company: CompanyProfile, matches: Array<Record<string
 }
 
 function isStrictCustomerReportEligible(company: CompanyProfile, opportunity: Record<string, unknown>) {
+  if (opportunity.procurementStage || opportunity.procurement_stage) {
+    return isProcurementOpportunityEligible(opportunity);
+  }
   if (!isCustomerMatchEligibleOpportunity(opportunity)) return false;
   if (isAlreadyAwardedOrTenderedReportItem(opportunity)) return false;
   if (isDesignConsultingOnlyForProfile(company, opportunity)) return false;
