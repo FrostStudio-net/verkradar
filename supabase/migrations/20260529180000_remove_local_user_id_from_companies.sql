@@ -1,5 +1,19 @@
-alter table public.companies
-  alter column local_user_id drop not null;
+do $$
+begin
+  if to_regclass('public.companies') is not null
+    and exists (
+      select 1
+      from information_schema.columns
+      where table_schema = 'public'
+        and table_name = 'companies'
+        and column_name = 'local_user_id'
+    )
+  then
+    alter table public.companies
+      alter column local_user_id drop not null;
+  end if;
+end
+$$;
 
 alter table public.companies
   drop column if exists local_user_id;
