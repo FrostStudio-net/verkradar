@@ -148,6 +148,8 @@ function setLanguage(language) {
 
 const defaultProfile = DEFAULT_PROFILE;
 
+const AUTH_SESSION_LOAD_TIMEOUT_MS = 8000;
+const ADMIN_ACCESS_LOAD_TIMEOUT_MS = 8000;
 const PROFILE_LOAD_TIMEOUT_MS = 12000;
 
 function getEmptyProfile() {
@@ -4304,11 +4306,15 @@ async function checkAdminAccess(user = state.user) {
   }
 
   try {
-    const { data, error } = await supabaseClient
-      .from("admin_users")
-      .select("user_id")
-      .eq("user_id", user.id)
-      .maybeSingle();
+    const { data, error } = await withTimeout(
+      supabaseClient
+        .from("admin_users")
+        .select("user_id")
+        .eq("user_id", user.id)
+        .maybeSingle(),
+      ADMIN_ACCESS_LOAD_TIMEOUT_MS,
+      "Admin access loading took too long."
+    );
 
     if (error) throw error;
     state.isAdmin = Boolean(data?.user_id);
@@ -4360,7 +4366,11 @@ async function loadCurrentSession() {
     return null;
   }
 
-  const { data, error } = await supabaseClient.auth.getSession();
+  const { data, error } = await withTimeout(
+    supabaseClient.auth.getSession(),
+    AUTH_SESSION_LOAD_TIMEOUT_MS,
+    "Session loading took too long. Please sign in again."
+  );
   if (error) throw error;
   state.user = data.session?.user || null;
   state.currentUser = state.user;
