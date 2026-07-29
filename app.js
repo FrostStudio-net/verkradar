@@ -336,6 +336,23 @@ function getRoutePath(route = state.route) {
   return String(route || "/").split("?")[0] || "/";
 }
 
+function isImmediatePublicRoute(route = state.route) {
+  return [
+    "/",
+    "/login",
+    "/signup",
+    "/forgot-password",
+    "/pricing",
+    "/trial",
+    "/privacy",
+    "/terms",
+    "/data-sources",
+    "/cookies",
+    "/security",
+    "/contact",
+  ].includes(getRoutePath(route));
+}
+
 function getRouteSearchParams(route = state.route) {
   const query = String(route || "").split("?")[1] || "";
   return new URLSearchParams(query);
@@ -4358,6 +4375,7 @@ function requireAdminPage() {
 
 let hasBooted = false;
 let authListenerRegistered = false;
+let authStateChangeQueue = Promise.resolve();
 
 async function loadCurrentSession() {
   if (!supabaseClient) {
@@ -4434,76 +4452,90 @@ async function retrySettingsProfileLoad() {
   }
 }
 
+async function handleAuthStateChange(event, session) {
+  state.inviteAuthEvent = event || "";
+  state.user = session?.user || null;
+  state.currentUser = state.user;
+
+  if (state.user) {
+    if (event === "PASSWORD_RECOVERY") {
+      state.authLoaded = true;
+      state.adminLoaded = true;
+      state.profileLoaded = true;
+      state.authMessage = null;
+      navigate("/reset-password");
+      return;
+    }
+    try {
+      await checkAdminStatus();
+      if (!(state.route === "/settings" && state.profileDraftDirty)) {
+        await loadProfileFromSupabase();
+      } else {
+        state.profileLoaded = true;
+      }
+    } catch (error) {
+      console.error("Auth profile refresh failed:", error);
+      state.profileLoadError = formatSupabaseError(error);
+      state.adminLoaded = true;
+      state.profileLoaded = true;
+    }
+    if (redirectAuthenticatedPublicRoute()) return;
+    render();
+    afterRouteRender();
+    return;
+  }
+
+  state.isAdmin = false;
+  state.opportunities = [];
+  state.opportunitiesLoaded = false;
+  state.profile = null;
+  state.companyMembership = null;
+  state.profileDraft = null;
+  state.profileDraftDirty = false;
+  state.profileLoading = false;
+  state.profileLoadError = null;
+  state.companyId = null;
+  state.storedMatches = [];
+  clearAdminAccessState();
+  clearOpportunityDetailsState();
+  state.reports = [];
+  state.reportsLoaded = false;
+  state.reportsLoadError = null;
+  state.selectedReportId = null;
+  state.authLoaded = true;
+  state.adminLoaded = true;
+  state.profileLoaded = true;
+  if (event === "SIGNED_OUT") navigate("/");
+  render();
+  afterRouteRender();
+}
+
 function registerAuthListener() {
   if (!supabaseClient || authListenerRegistered) return;
   authListenerRegistered = true;
 
-  supabaseClient.auth.onAuthStateChange(async (event, session) => {
+  supabaseClient.auth.onAuthStateChange((event, session) => {
     if (!hasBooted) return;
 
-    state.inviteAuthEvent = event || "";
-    state.user = session?.user || null;
-    state.currentUser = state.user;
-
-    if (state.user) {
-      if (event === "PASSWORD_RECOVERY") {
-        state.authLoaded = true;
-        state.adminLoaded = true;
-        state.profileLoaded = true;
-        state.authMessage = null;
-        navigate("/reset-password");
-        return;
-      }
-      try {
-        await checkAdminStatus();
-        if (!(state.route === "/settings" && state.profileDraftDirty)) {
-          await loadProfileFromSupabase();
-        } else {
-          state.profileLoaded = true;
-        }
-      } catch (error) {
-        console.error("Auth profile refresh failed:", error);
-        state.profileLoadError = formatSupabaseError(error);
-        state.adminLoaded = true;
-        state.profileLoaded = true;
-      }
-      if (redirectAuthenticatedPublicRoute()) return;
-      render();
-      afterRouteRender();
-      return;
-    }
-
-    state.isAdmin = false;
-    state.opportunities = [];
-    state.opportunitiesLoaded = false;
-    state.profile = null;
-    state.companyMembership = null;
-    state.profileDraft = null;
-    state.profileDraftDirty = false;
-    state.profileLoading = false;
-    state.profileLoadError = null;
-    state.companyId = null;
-    state.storedMatches = [];
-    clearAdminAccessState();
-    clearOpportunityDetailsState();
-    state.reports = [];
-    state.reportsLoaded = false;
-    state.reportsLoadError = null;
-    state.selectedReportId = null;
-    state.authLoaded = true;
-    state.adminLoaded = true;
-    state.profileLoaded = true;
-    if (event === "SIGNED_OUT") navigate("/");
-    render();
-    afterRouteRender();
+    // Supabase runs auth callbacks while holding its auth lock. Defer all
+    // Supabase work until after the callback returns so getSession and token
+    // refreshes cannot deadlock across tabs.
+    setTimeout(() => {
+      authStateChangeQueue = authStateChangeQueue
+        .then(() => handleAuthStateChange(event, session))
+        .catch((error) => {
+          console.error("Auth state refresh failed:", error);
+        });
+    }, 0);
   });
 }
 
 async function bootApp() {
-  state.isBooting = true;
-  state.authLoaded = false;
-  state.profileLoaded = false;
-  state.adminLoaded = false;
+  const publicRoute = isImmediatePublicRoute();
+  state.isBooting = !publicRoute;
+  state.authLoaded = publicRoute;
+  state.profileLoaded = publicRoute;
+  state.adminLoaded = publicRoute;
   state.bootError = null;
   render();
 
@@ -4543,8 +4575,10 @@ async function bootApp() {
       state.profileLoaded = true;
     }
   } catch (error) {
-    console.error("Boot failed:", error);
-    state.bootError = formatSupabaseError(error);
+    if (!isImmediatePublicRoute()) {
+      console.error("Boot failed:", error);
+      state.bootError = formatSupabaseError(error);
+    }
     state.authLoaded = true;
     state.adminLoaded = true;
     state.profileLoaded = true;
@@ -6881,7 +6915,8 @@ function render() {
   captureAdminCompanyDetailScroll();
 
   let html = "";
-  if (state.isBooting || !state.authLoaded || !state.profileLoaded || !state.adminLoaded) html = renderLoadingPage();
+  const authIsPending = state.isBooting || !state.authLoaded || !state.profileLoaded || !state.adminLoaded;
+  if (!isImmediatePublicRoute(state.route) && authIsPending) html = renderLoadingPage();
   else if (route === "/") html = renderLanding();
   else if (route === "/login") html = renderLogin();
   else if (route === "/signup") html = renderSignup();
