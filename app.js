@@ -127,6 +127,14 @@ import {
   validateContactRequestForm,
   clearContactRequestFieldError
 } from "./src/main.js";
+import { getStoredMatchedCompanyNames } from "./src/services/adminOpportunityMatches.js";
+import { getAuthenticatedRefreshDecision } from "./src/services/authRefreshPolicy.js";
+import {
+  renderAdminLoadingSkeleton,
+  renderAdminOpportunitiesLoadingSkeleton,
+  renderDashboardLoadingSkeleton,
+  renderSkeletonDetailPanel,
+} from "./src/components/skeletons.js";
 
 /* VerkRadar single-page app. Production data comes from Supabase; demo data must be explicitly isolated. */
 
@@ -1564,12 +1572,16 @@ document.addEventListener("submit", async (event) => {
   }
 });
 
+let lastAppFocusReturnAt = 0;
 window.addEventListener("focus", handleAppFocusReturn);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") handleAppFocusReturn();
 });
 
 function handleAppFocusReturn() {
+  const now = Date.now();
+  if (now - lastAppFocusReturnAt < 250) return;
+  lastAppFocusReturnAt = now;
   if (state.route !== "/settings") return;
   if (state.profileDraftDirty) {
     state.profileLoading = false;
@@ -1830,7 +1842,13 @@ async function loadOpportunities() {
 
     const { data, error } = await supabaseClient
       .from("opportunities")
-      .select("*, sources(name, source_type)")
+      .select(`
+        *,
+        sources(name, source_type),
+        opportunity_matches(
+          companies(company_name)
+        )
+      `)
       .eq("status", "open")
       .order("deadline", { ascending: true });
 
@@ -3275,6 +3293,7 @@ function mapSupabaseOpportunity(row) {
     classifiedBy: row.classified_by || "",
     classifiedAt: row.classified_at || "",
     classifierVersion: row.classifier_version || "",
+    matchedCompanyNames: getStoredMatchedCompanyNames(row.opportunity_matches),
     qualityStatus,
     intent,
     rawPayload
@@ -4172,9 +4191,8 @@ async function signUp(email, password) {
     state.currentUser = state.user;
     state.profileDraft = null;
     state.profileDraftDirty = false;
-    await checkAdminAccess(state.user);
     state.authMessage = { type: "success", text: t("signupCreatedConfirm") };
-    await loadProfileFromSupabase({ overwriteDraft: true });
+    await refreshAuthenticatedData({ overwriteDraft: true });
     clearAuthForm();
     navigate(getPostAuthRoute());
   } catch (error) {
@@ -4208,8 +4226,7 @@ async function signIn(email, password) {
     state.currentUser = state.user;
     state.profileDraft = null;
     state.profileDraftDirty = false;
-    await checkAdminAccess(state.user);
-    await loadProfileFromSupabase({ overwriteDraft: true });
+    await refreshAuthenticatedData({ overwriteDraft: true });
     clearAuthForm();
     navigate(getPostAuthRoute());
   } catch (error) {
@@ -4311,6 +4328,7 @@ async function signOut() {
     state.authLoaded = true;
     state.adminLoaded = true;
     state.profileLoaded = true;
+    lastAuthenticatedDataRefreshAt = 0;
     clearAdminAccessState();
     clearPendingInviteState();
     clearLocalProfileState();
@@ -4329,7 +4347,8 @@ async function getCurrentUser() {
   return data.user || null;
 }
 
-async function checkAdminAccess(user = state.user) {
+async function checkAdminAccess(user = state.user, options = {}) {
+  const preserveOnError = options.preserveOnError === true;
   if (!supabaseClient || !user) {
     state.isAdmin = false;
     return false;
@@ -4351,6 +4370,7 @@ async function checkAdminAccess(user = state.user) {
     return state.isAdmin;
   } catch (error) {
     console.error("Failed to check admin access:", error);
+    if (preserveOnError) return state.isAdmin;
     state.isAdmin = false;
     return false;
   }
@@ -4389,6 +4409,8 @@ function requireAdminPage() {
 let hasBooted = false;
 let authListenerRegistered = false;
 let authStateChangeQueue = Promise.resolve();
+let authenticatedDataRefreshPromise = null;
+let lastAuthenticatedDataRefreshAt = 0;
 
 async function loadCurrentSession() {
   if (!supabaseClient) {
@@ -4408,28 +4430,33 @@ async function loadCurrentSession() {
   return state.user;
 }
 
-async function checkAdminStatus() {
-  state.adminLoaded = false;
-  state.isAdmin = false;
-  render();
-  const hasAdminAccess = await checkAdminAccess(state.currentUser || state.user);
+async function checkAdminStatus(options = {}) {
+  const background = options.background === true;
+  if (!background) {
+    state.adminLoaded = false;
+    state.isAdmin = false;
+    render();
+  }
+  const hasAdminAccess = await checkAdminAccess(state.currentUser || state.user, { preserveOnError: background });
   if (!hasAdminAccess) clearAdminAccessState();
   state.adminLoaded = true;
 }
 
 async function loadProfileFromSupabase(options = {}) {
-  const { overwriteDraft = false, showGlobalLoading = false } = options;
+  const { overwriteDraft = false, showGlobalLoading = false, preserveExistingData = false } = options;
   const shouldShowGlobalLoading = showGlobalLoading || (!state.profile && !state.profileDraftDirty);
   if (shouldShowGlobalLoading) state.profileLoaded = false;
   state.profileLoading = true;
   state.profileLoadError = null;
+  let loaded = false;
 
   try {
     await withTimeout(
-      loadCompanyProfile({ overwriteDraft }),
+      loadCompanyProfile({ overwriteDraft, preserveExistingData }),
       PROFILE_LOAD_TIMEOUT_MS,
       "Profile loading took too long. Please retry."
     );
+    loaded = !state.profileLoadError;
   } catch (error) {
     console.error("Failed to load profile from Supabase:", error);
     state.profileLoadError = formatSupabaseError(error);
@@ -4437,6 +4464,25 @@ async function loadProfileFromSupabase(options = {}) {
     state.profileLoading = false;
     state.profileLoaded = true;
   }
+  return loaded;
+}
+
+async function refreshAuthenticatedData(options = {}) {
+  if (authenticatedDataRefreshPromise) return authenticatedDataRefreshPromise;
+  const background = options.background === true;
+  authenticatedDataRefreshPromise = (async () => {
+    await checkAdminStatus({ background });
+    const loaded = await loadProfileFromSupabase({
+      overwriteDraft: options.overwriteDraft === true,
+      showGlobalLoading: !background && options.showGlobalLoading === true,
+      preserveExistingData: background,
+    });
+    if (loaded) lastAuthenticatedDataRefreshAt = Date.now();
+    return loaded;
+  })().finally(() => {
+    authenticatedDataRefreshPromise = null;
+  });
+  return authenticatedDataRefreshPromise;
 }
 
 function withTimeout(promise, timeoutMs, message) {
@@ -4466,11 +4512,13 @@ async function retrySettingsProfileLoad() {
 }
 
 async function handleAuthStateChange(event, session) {
+  const previousUserId = state.user?.id || state.currentUser?.id || "";
   state.inviteAuthEvent = event || "";
   state.user = session?.user || null;
   state.currentUser = state.user;
 
   if (state.user) {
+    let shouldRenderAfterAuthEvent = false;
     if (event === "PASSWORD_RECOVERY") {
       state.authLoaded = true;
       state.adminLoaded = true;
@@ -4480,11 +4528,24 @@ async function handleAuthStateChange(event, session) {
       return;
     }
     try {
-      await checkAdminStatus();
+      const refreshDecision = getAuthenticatedRefreshDecision({
+        event,
+        previousUserId,
+        nextUserId: state.user.id,
+        authLoaded: state.authLoaded,
+        adminLoaded: state.adminLoaded,
+        profileLoaded: state.profileLoaded,
+        lastRefreshedAt: lastAuthenticatedDataRefreshAt,
+      });
+
       if (!(state.route === "/settings" && state.profileDraftDirty)) {
-        await loadProfileFromSupabase();
+        if (refreshDecision.refresh) {
+          await refreshAuthenticatedData({ background: refreshDecision.background });
+          shouldRenderAfterAuthEvent = true;
+        }
       } else {
         state.profileLoaded = true;
+        shouldRenderAfterAuthEvent = true;
       }
     } catch (error) {
       console.error("Auth profile refresh failed:", error);
@@ -4493,6 +4554,7 @@ async function handleAuthStateChange(event, session) {
       state.profileLoaded = true;
     }
     if (redirectAuthenticatedPublicRoute()) return;
+    if (!shouldRenderAfterAuthEvent) return;
     render();
     afterRouteRender();
     return;
@@ -4515,6 +4577,7 @@ async function handleAuthStateChange(event, session) {
   state.reportsLoaded = false;
   state.reportsLoadError = null;
   state.selectedReportId = null;
+  lastAuthenticatedDataRefreshAt = 0;
   state.authLoaded = true;
   state.adminLoaded = true;
   state.profileLoaded = true;
@@ -4572,8 +4635,7 @@ async function bootApp() {
         final_route: `/accept-invite?token=${encodeURIComponent(inviteToken)}`,
       });
     } else if (state.currentUser) {
-      await checkAdminStatus();
-      await loadProfileFromSupabase({ overwriteDraft: true, showGlobalLoading: true });
+      await refreshAuthenticatedData({ overwriteDraft: true, showGlobalLoading: true });
     } else {
       state.profile = null;
       state.companyMembership = null;
@@ -4631,7 +4693,7 @@ async function loadAuthenticatedCompany() {
 }
 
 async function loadCompanyProfile(options = {}) {
-  const { overwriteDraft = false } = options;
+  const { overwriteDraft = false, preserveExistingData = false } = options;
   if (!supabaseClient || !state.user) {
     state.profile = null;
     state.companyMembership = null;
@@ -4705,14 +4767,14 @@ async function loadCompanyProfile(options = {}) {
     }
     state.profileLoadError = null;
     saveProfile(state.profile);
-    await loadOpportunityActionsForCurrentCompany();
-    await loadStoredMatchesForCurrentCompany();
+    await loadOpportunityActionsForCurrentCompany({ preserveExistingData });
+    await loadStoredMatchesForCurrentCompany({ preserveExistingData });
     render();
     afterRouteRender();
   } catch (error) {
     console.error("Failed to load Supabase company profile:", error);
     state.profileLoadError = formatSupabaseError(error);
-    if (!state.profileDraftDirty) {
+    if (!preserveExistingData && !state.profileDraftDirty) {
       state.companyId = null;
       state.companyMembership = null;
       state.storedMatches = [];
@@ -4723,7 +4785,7 @@ async function loadCompanyProfile(options = {}) {
       state.selectedReportId = null;
       state.profile = null;
     }
-    if (!state.profileDraftDirty) state.profileDraft = null;
+    if (!preserveExistingData && !state.profileDraftDirty) state.profileDraft = null;
     render();
     afterRouteRender();
   }
@@ -4907,7 +4969,8 @@ function mapSupabaseCompanyProfile(company, services, locations, keywords) {
   };
 }
 
-async function loadStoredMatchesForCurrentCompany() {
+async function loadStoredMatchesForCurrentCompany(options = {}) {
+  const preserveExistingData = options.preserveExistingData === true;
   if (!supabaseClient || !state.companyId) {
     state.storedMatches = [];
     return;
@@ -4948,8 +5011,10 @@ async function loadStoredMatchesForCurrentCompany() {
     state.storedMatches = mergeAiReviewsIntoReportMatches(storedMatches, aiReviews);
   } catch (error) {
     console.error("Failed to load stored opportunity matches. Falling back to frontend matching:", error);
-    state.storedMatches = [];
-    state.lastMatchedAt = null;
+    if (!preserveExistingData) {
+      state.storedMatches = [];
+      state.lastMatchedAt = null;
+    }
   }
 }
 
@@ -6740,7 +6805,8 @@ function getDashboardFilterSummary({ visibleCount, storedMatchCount, filteredSto
   return `${storedMatchCount} opportunities may fit ${companyName}. Showing ${visibleCount} ${selected.toLowerCase()} opportunities.`;
 }
 
-async function loadOpportunityActionsForCurrentCompany() {
+async function loadOpportunityActionsForCurrentCompany(options = {}) {
+  const preserveExistingData = options.preserveExistingData === true;
   if (!supabaseClient || !state.companyId) {
     state.opportunityActions = [];
     return;
@@ -6762,9 +6828,11 @@ async function loadOpportunityActionsForCurrentCompany() {
       .map((action) => action.opportunity_id);
   } catch (error) {
     console.error("Failed to load company opportunity actions:", error);
-    state.opportunityActions = [];
-    state.saved = [];
-    state.ignored = [];
+    if (!preserveExistingData) {
+      state.opportunityActions = [];
+      state.saved = [];
+      state.ignored = [];
+    }
   }
 }
 
@@ -7078,11 +7146,15 @@ function cssEscape(value) {
 }
 
 function renderLoadingPage() {
+  const route = getRoutePath(state.route);
+  if (["/dashboard", "/opportunities", "/matches"].includes(route)) {
+    return renderShell(renderDashboardLoadingSkeleton());
+  }
+  if (route === "/admin") return renderShell(renderAdminLoadingSkeleton());
   return renderShell(`
-    <div class="app-loader">
-      <div class="loader-mark" aria-label="${escapeHtml(t("loadingLabel"))}">
-        <span></span>
-      </div>
+    <div class="skeleton-screen skeleton-generic-screen" role="status" aria-label="${escapeHtml(t("loadingLabel"))}">
+      ${renderSkeletonDetailPanel()}
+      <span class="sr-only">${escapeHtml(t("loadingLabel"))}</span>
     </div>
   `);
 }
@@ -8300,7 +8372,7 @@ function renderAdminReportDetails() {
             <button type="button" class="icon-btn modal-close-btn" data-action="close-admin-report" aria-label="Close report">×</button>
           </div>
           <div class="modal-body">
-            ${state.selectedAdminReportError ? `<div class="admin-message is-error">${escapeHtml(state.selectedAdminReportError)}</div>` : `<div class="empty-card">Loading saved report items...</div>`}
+            ${state.selectedAdminReportError ? `<div class="admin-message is-error">${escapeHtml(state.selectedAdminReportError)}</div>` : renderSkeletonDetailPanel({ modal: true })}
           </div>
         </div>
       </div>
@@ -8589,33 +8661,42 @@ function renderAdminOpportunityFilters(opportunities) {
   const countries = getAdminFilterOptions(state.opportunities || [], (opp) => getOpportunityCountryCode(opp) || opp.countryCode || "Unknown");
   const companies = state.adminCompanies || [];
   return `
-    <div class="admin-filters">
-      <input data-admin-filter="search" value="${escapeHtml(filters.search)}" placeholder="Search title, buyer, external ID..." />
-      <select data-admin-filter="source">
-        <option value="all">All sources</option>
-        ${sources.map((source) => `<option value="${escapeHtml(source)}" ${filters.source === source ? "selected" : ""}>${escapeHtml(source)}</option>`).join("")}
-      </select>
-      <select data-admin-filter="status">
-        <option value="all">All statuses</option>
-        ${statuses.map((status) => `<option value="${escapeHtml(status)}" ${filters.status === status ? "selected" : ""}>${escapeHtml(status)}</option>`).join("")}
-      </select>
-      <select data-admin-filter="country">
-        <option value="all">All countries</option>
-        ${countries.map((country) => `<option value="${escapeHtml(country)}" ${filters.country === country ? "selected" : ""}>${escapeHtml(country)}</option>`).join("")}
-      </select>
-      <select data-admin-filter="sortBy" aria-label="Röðun">
-        ${getAdminOpportunitySortOptions().map(([value, label]) => `<option value="${escapeHtml(value)}" ${normalizeAdminOpportunitySort(filters.sortBy) === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
-      </select>
-      <select data-admin-filter="addedWindow" aria-label="Bætt við">
-        ${getAdminOpportunityAddedWindowOptions().map(([value, label]) => `<option value="${escapeHtml(value)}" ${normalizeAdminOpportunityAddedWindow(filters.addedWindow) === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
-      </select>
-      <select data-admin-filter="debugCompanyId">
-        <option value="">Match debug company...</option>
-        ${companies.map((company) => `<option value="${escapeHtml(company.id)}" ${filters.debugCompanyId === company.id ? "selected" : ""}>${escapeHtml(company.companyName)}</option>`).join("")}
-      </select>
-      <label class="checkbox compact"><input type="checkbox" data-admin-filter="tedOnly" ${filters.tedOnly ? "checked" : ""}/><span>TED only</span></label>
-      <label class="checkbox compact"><input type="checkbox" data-admin-filter="manualOnly" ${filters.manualOnly ? "checked" : ""}/><span>Manual only</span></label>
-      <label class="checkbox compact"><input type="checkbox" data-admin-filter="showDemoTest" ${filters.showDemoTest ? "checked" : ""}/><span>Show demo/test opportunities</span></label>
+    <div class="admin-filters admin-opportunity-filters">
+      <div class="admin-opportunity-filter-fields">
+        <input data-admin-filter="search" value="${escapeHtml(filters.search)}" placeholder="Search title, buyer, external ID..." aria-label="Search opportunities" />
+        <select data-admin-filter="source" aria-label="Opportunity source">
+          <option value="all">All sources</option>
+          ${sources.map((source) => `<option value="${escapeHtml(source)}" ${filters.source === source ? "selected" : ""}>${escapeHtml(source)}</option>`).join("")}
+        </select>
+        <select data-admin-filter="status" aria-label="Opportunity status">
+          <option value="all">All statuses</option>
+          ${statuses.map((status) => `<option value="${escapeHtml(status)}" ${filters.status === status ? "selected" : ""}>${escapeHtml(status)}</option>`).join("")}
+        </select>
+        <select data-admin-filter="country" aria-label="Opportunity country">
+          <option value="all">All countries</option>
+          ${countries.map((country) => `<option value="${escapeHtml(country)}" ${filters.country === country ? "selected" : ""}>${escapeHtml(country)}</option>`).join("")}
+        </select>
+        <select data-admin-filter="sortBy" aria-label="Röðun">
+          ${getAdminOpportunitySortOptions().map(([value, label]) => `<option value="${escapeHtml(value)}" ${normalizeAdminOpportunitySort(filters.sortBy) === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
+        </select>
+        <select data-admin-filter="addedWindow" aria-label="Bætt við">
+          ${getAdminOpportunityAddedWindowOptions().map(([value, label]) => `<option value="${escapeHtml(value)}" ${normalizeAdminOpportunityAddedWindow(filters.addedWindow) === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
+        </select>
+      </div>
+      <div class="admin-opportunity-filter-secondary">
+        <fieldset class="admin-opportunity-source-filters" aria-label="Opportunity source and test filters">
+          <label class="admin-filter-toggle" title="Show only TED opportunities"><input type="checkbox" data-admin-filter="tedOnly" aria-label="Show only TED opportunities" ${filters.tedOnly ? "checked" : ""}/><span>TED only</span></label>
+          <label class="admin-filter-toggle" title="Show only manually added opportunities"><input type="checkbox" data-admin-filter="manualOnly" aria-label="Show only manually added opportunities" ${filters.manualOnly ? "checked" : ""}/><span>Manual only</span></label>
+          <label class="admin-filter-toggle" title="Show demo/test opportunities"><input type="checkbox" data-admin-filter="showDemoTest" aria-label="Show demo/test opportunities" ${filters.showDemoTest ? "checked" : ""}/><span>Show demo/test</span></label>
+        </fieldset>
+        <label class="admin-opportunity-debug-filter">
+          <span>Match debug</span>
+          <select data-admin-filter="debugCompanyId" aria-label="Match debug company">
+            <option value="">Select company...</option>
+            ${companies.map((company) => `<option value="${escapeHtml(company.id)}" ${filters.debugCompanyId === company.id ? "selected" : ""}>${escapeHtml(company.companyName)}</option>`).join("")}
+          </select>
+        </label>
+      </div>
     </div>
     <p class="admin-filter-count">${opportunities.length} of ${(state.opportunities || []).length} opportunities shown.</p>
   `;
@@ -10280,17 +10361,19 @@ function renderAdminOpportunitiesSection(opportunities) {
     ...(state.adminOpportunityDraft || {})
   };
   const hasLoadError = Boolean(state.opportunityLoadError);
+  const isInitialLoading = state.isLoadingOpportunities && !state.opportunitiesLoaded;
   return `
     <section class="admin-list">
       <div class="card-header">
         <div>
           <h2>Existing opportunities</h2>
-          <p>${hasLoadError ? "Ekki tókst að sækja tækifæri." : `${(state.opportunities || []).length} loaded from Supabase.`}</p>
+          <p>${hasLoadError ? "Ekki tókst að sækja tækifæri." : isInitialLoading ? "Loading opportunities..." : `${(state.opportunities || []).length} loaded from Supabase.`}</p>
         </div>
       </div>
       ${hasLoadError ? `<div class="admin-message is-error">Ekki tókst að sækja tækifæri. ${escapeHtml(state.opportunityLoadError)}</div>` : ""}
-      ${hasLoadError ? "" : renderAdminOpportunityFilters(opportunities)}
-      ${hasLoadError ? "" : opportunities.length ? opportunities.map(renderAdminOpportunityRow).join("") : `<div class="empty-card">No opportunities loaded.</div>`}
+      ${hasLoadError ? "" : isInitialLoading
+        ? renderAdminOpportunitiesLoadingSkeleton()
+        : `${renderAdminOpportunityFilters(opportunities)}${opportunities.length ? opportunities.map(renderAdminOpportunityRow).join("") : `<div class="empty-card">No opportunities loaded.</div>`}`}
     </section>
 
     <form class="form-card admin-form" id="admin-opportunity-form">
@@ -10469,24 +10552,32 @@ function renderAdminOpportunityRow(opp) {
   const staleReason = opp.rawPayload?.stale_reason || (staleInfo.isStale ? staleInfo.reason : "");
   const adminSourceUrl = getSafeExternalUrl(opp.url || opp.rawPayload?.source_url || "");
   return `
-    <div class="admin-row">
-      <div>
-        <h3>${escapeHtml(opp.title)}</h3>
-        <div class="admin-opportunity-review-meta">
+    <div class="admin-row admin-opportunity-row">
+      <div class="admin-opportunity-content">
+        <div class="admin-opportunity-heading">
+          <h3 class="admin-opportunity-title">${escapeHtml(opp.title)}</h3>
           ${renderAdminOpportunityChangeBadge(opp)}
-          <span><strong>Bætt við:</strong> ${escapeHtml(formatAdminOpportunityDateTime(opp.createdAt))}</span>
-          <span><strong>Síðast uppfært:</strong> ${escapeHtml(formatAdminOpportunityDateTime(opp.updatedAt))}</span>
-          <span><strong>Source:</strong> ${escapeHtml(opp.source || "Unknown source")}</span>
-          <span><strong>Deadline:</strong> ${escapeHtml(deadline.label || "Not listed")}</span>
-          <span><strong>External ID:</strong> ${escapeHtml(opp.externalId || "Not listed")}</span>
         </div>
-        <p><strong>Source:</strong> ${escapeHtml(opp.source || "Unknown source")} · <strong>Buyer:</strong> ${escapeHtml(formatAdminBuyer(opp))} · <strong>Region:</strong> ${escapeHtml(formatAdminLocation(opp))} · <strong>Status:</strong> ${escapeHtml(opp.status)}</p>
-        <p><strong>Source URL:</strong> ${adminSourceUrl ? `<a href="${escapeHtml(adminSourceUrl)}" target="_blank" rel="noreferrer">${escapeHtml(adminSourceUrl)}</a>` : "Not listed"} · <strong>External ID:</strong> ${escapeHtml(opp.externalId || "Not listed")}</p>
-        <p>Stage: ${escapeHtml(opp.procurementStage || "Legacy / unclassified")} · Quality: ${escapeHtml(getOpportunityQualityLabel(opp))} · Intent: ${escapeHtml(formatOpportunityIntent(intent))}${hiddenFromReports ? " · Hidden from reports" : ""}${duplicateReason ? ` · Duplicate: ${escapeHtml(duplicateReason)}` : ""}${staleReason ? ` · Stale / expired: ${escapeHtml(staleReason)}` : ""}</p>
-        <p>Debug: hidden_from_reports=${opp.rawPayload?.hidden_from_reports === true ? "true" : "false"} · admin_report_status=${escapeHtml(opp.rawPayload?.admin_report_status || "none")} · stale_status=${escapeHtml(opp.rawPayload?.stale_status || "none")}</p>
+        <dl class="admin-opportunity-facts">
+          <div><dt>Added</dt><dd>${escapeHtml(formatAdminOpportunityDateTime(opp.createdAt))}</dd></div>
+          <div><dt>Last updated</dt><dd>${escapeHtml(formatAdminOpportunityDateTime(opp.updatedAt))}</dd></div>
+          <div><dt>Deadline</dt><dd>${escapeHtml(deadline.label || "Not listed")}</dd></div>
+          <div><dt>Source</dt><dd>${escapeHtml(opp.source || "Unknown source")}</dd></div>
+          <div><dt>External ID</dt><dd class="is-breakable">${escapeHtml(opp.externalId || "Not listed")}</dd></div>
+          <div><dt>Buyer</dt><dd>${escapeHtml(formatAdminBuyer(opp))}</dd></div>
+          <div><dt>Region</dt><dd>${escapeHtml(formatAdminLocation(opp))}</dd></div>
+          <div><dt>Status</dt><dd>${escapeHtml(opp.status)}</dd></div>
+          <div class="is-wide"><dt>Source URL</dt><dd class="is-breakable">${adminSourceUrl ? `<a href="${escapeHtml(adminSourceUrl)}" target="_blank" rel="noreferrer">${escapeHtml(adminSourceUrl)}</a>` : "Not listed"}</dd></div>
+          <div><dt>Stage</dt><dd>${escapeHtml(opp.procurementStage || "Legacy / unclassified")}</dd></div>
+          <div><dt>Quality</dt><dd>${escapeHtml(getOpportunityQualityLabel(opp))}</dd></div>
+          <div><dt>Intent</dt><dd>${escapeHtml(formatOpportunityIntent(intent))}</dd></div>
+        </dl>
+        ${renderAdminOpportunityMatchedCompanies(opp)}
+        <p class="admin-opportunity-flags">${hiddenFromReports ? "Hidden from reports" : "Visible under current report rules"}${duplicateReason ? ` · Duplicate: ${escapeHtml(duplicateReason)}` : ""}${staleReason ? ` · Stale / expired: ${escapeHtml(staleReason)}` : ""}</p>
+        <p class="admin-opportunity-debug">Debug: hidden_from_reports=${opp.rawPayload?.hidden_from_reports === true ? "true" : "false"} · admin_report_status=${escapeHtml(opp.rawPayload?.admin_report_status || "none")} · stale_status=${escapeHtml(opp.rawPayload?.stale_status || "none")}</p>
         ${renderAdminOpportunityMatchDebug(opp)}
       </div>
-      <div class="admin-row-actions">
+      <div class="admin-row-actions admin-opportunity-actions">
         <button class="btn btn-ghost btn-small" data-action="admin-report-override" data-override="confirmed_tender" data-id="${escapeHtml(opp.id)}" ${isUpdating ? "disabled" : ""}>Confirmed tender</button>
         <button class="btn btn-ghost btn-small" data-action="admin-report-override" data-override="early_opportunity" data-id="${escapeHtml(opp.id)}" ${isUpdating ? "disabled" : ""}>Early opportunity</button>
         <button class="btn btn-ghost btn-small" data-action="admin-report-override" data-override="market_consultation" data-id="${escapeHtml(opp.id)}" ${isUpdating ? "disabled" : ""}>Market consultation</button>
@@ -10505,6 +10596,18 @@ function renderAdminOpportunityRow(opp) {
         </button>
       </div>
     </div>
+  `;
+}
+
+function renderAdminOpportunityMatchedCompanies(opp) {
+  const companyNames = Array.isArray(opp.matchedCompanyNames) ? opp.matchedCompanyNames : [];
+  return `
+    <section class="admin-opportunity-matches" aria-label="Matched companies">
+      <strong>Matched companies</strong>
+      ${companyNames.length
+        ? `<div class="admin-opportunity-match-chips">${companyNames.map((name) => `<span>${escapeHtml(name)}</span>`).join("")}</div>`
+        : `<span class="admin-opportunity-no-matches">No company matches</span>`}
+    </section>
   `;
 }
 
