@@ -63,7 +63,7 @@ export const translations = {
     pricingTrialPrice: "0 kr.",
     pricingTrialSubtext: "í prufu",
     pricingMonitoringPlan: "Grunnur",
-    pricingMonitoringPrice: "9.900 kr/mán.",
+    pricingMonitoringPrice: "4.900 kr/mán.",
     pricingMonitoringSubtext: "fyrir fyrstu fyrirtækin",
     pricingCustomPlan: "Sérsniðið",
     pricingCustomPrice: "Hafa samband",
