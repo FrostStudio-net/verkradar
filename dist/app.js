@@ -35,6 +35,7 @@ import {
   buildCompanyDraftFromTrialRequest,
   createCompanyFromTrialRequest,
   deleteTrialRequest,
+  deriveActionableForSuppliers,
   getReportEmailStatus,
   getReportScoreLabel,
   getReportStatusBadge,
@@ -55,6 +56,7 @@ import {
   getStoredPendingInviteTokenSource,
   inferLocationFromSourceName,
   isInviteDebugEnabled,
+  isProcurementOpportunityEligible,
   isUuid,
   localizeLegacyReportContent,
   loadActiveCompanyMemberships,
@@ -565,6 +567,30 @@ function clearLocalProfileState() {
   state.adminCompaniesError = null;
   clearAdminCompanyDetailsState();
   state.lastMatchedAt = null;
+}
+
+function clearAdminAccessState() {
+  state.opportunities = [];
+  state.opportunitiesLoaded = false;
+  state.importRuns = [];
+  state.importRunsLoaded = false;
+  state.adminReports = [];
+  state.adminReportsLoaded = false;
+  state.adminTrialRequests = [];
+  state.adminTrialRequestsLoaded = false;
+  state.adminContactRequests = [];
+  state.adminContactRequestsLoaded = false;
+  state.sourceCoverage = [];
+  state.sourceCoverageLoaded = false;
+  state.adminCompanies = [];
+  state.adminCompaniesLoaded = false;
+  state.adminReviewMatches = [];
+  state.adminReviewLoaded = false;
+  state.importedTedOpportunities = [];
+  state.importedTedOpportunitiesLoaded = false;
+  state.selectedAdminReport = null;
+  state.selectedAdminReportId = null;
+  clearAdminCompanyDetailsState();
 }
 
 function createEmptyAdminOpportunityDraft() {
@@ -3219,6 +3245,17 @@ function mapSupabaseOpportunity(row) {
     keywords: Array.isArray(row.keywords) ? row.keywords : [],
     difficulty: row.difficulty || "medium",
     status: row.status || "open",
+    procurementStage: row.procurement_stage || "",
+    classificationGrandfathered: row.classification_grandfathered === true,
+    actionableForSuppliers: row.actionable_for_suppliers === true,
+    requiresAdminReview: row.requires_admin_review === true,
+    classificationConfidence: row.classification_confidence == null ? null : Number(row.classification_confidence),
+    classificationReason: row.classification_reason || "",
+    positiveSignals: Array.isArray(row.positive_signals) ? row.positive_signals : [],
+    negativeSignals: Array.isArray(row.negative_signals) ? row.negative_signals : [],
+    classifiedBy: row.classified_by || "",
+    classifiedAt: row.classified_at || "",
+    classifierVersion: row.classifier_version || "",
     qualityStatus,
     intent,
     rawPayload
@@ -4255,6 +4292,7 @@ async function signOut() {
     state.authLoaded = true;
     state.adminLoaded = true;
     state.profileLoaded = true;
+    clearAdminAccessState();
     clearPendingInviteState();
     clearLocalProfileState();
     navigate("/");
@@ -4306,17 +4344,28 @@ function requireAuthPage() {
   `);
 }
 
+function requireAdminAuthPage() {
+  return renderShell(`
+    <section class="empty-state">
+      <h1>Stjórnborð VerkRadar</h1>
+      <p>Þessi síða er aðeins aðgengileg stjórnendum.</p>
+      <button class="btn btn-primary" data-action="go" data-href="/login">Innskráning</button>
+    </section>
+  `);
+}
+
 function requireAdminPage() {
   return renderShell(`
     <section class="empty-state">
-      <h1>You do not have access to this page.</h1>
-      <p>Admin access is limited to approved VerkRadar admin users.</p>
+      <h1>Aðgangur bannaður</h1>
+      <p>Þú hefur ekki stjórnendaaðgang að þessari síðu.</p>
     </section>
   `);
 }
 
 let hasBooted = false;
 let authListenerRegistered = false;
+let authRefreshSequence = 0;
 
 async function loadCurrentSession() {
   if (!supabaseClient) {
@@ -4334,7 +4383,10 @@ async function loadCurrentSession() {
 
 async function checkAdminStatus() {
   state.adminLoaded = false;
-  await checkAdminAccess(state.currentUser || state.user);
+  state.isAdmin = false;
+  render();
+  const hasAdminAccess = await checkAdminAccess(state.currentUser || state.user);
+  if (!hasAdminAccess) clearAdminAccessState();
   state.adminLoaded = true;
 }
 
@@ -4390,9 +4442,10 @@ function registerAuthListener() {
   if (!supabaseClient || authListenerRegistered) return;
   authListenerRegistered = true;
 
-  supabaseClient.auth.onAuthStateChange(async (event, session) => {
+  supabaseClient.auth.onAuthStateChange((event, session) => {
     if (!hasBooted) return;
 
+    const refreshSequence = ++authRefreshSequence;
     state.inviteAuthEvent = event || "";
     state.user = session?.user || null;
     state.currentUser = state.user;
@@ -4406,22 +4459,27 @@ function registerAuthListener() {
         navigate("/reset-password");
         return;
       }
-      try {
-        await checkAdminStatus();
-        if (!(state.route === "/settings" && state.profileDraftDirty)) {
-          await loadProfileFromSupabase();
-        } else {
+      window.setTimeout(async () => {
+        if (refreshSequence !== authRefreshSequence || !state.user) return;
+        try {
+          await checkAdminStatus();
+          if (refreshSequence !== authRefreshSequence || !state.user) return;
+          if (!(state.route === "/settings" && state.profileDraftDirty)) {
+            await loadProfileFromSupabase();
+          } else {
+            state.profileLoaded = true;
+          }
+        } catch (error) {
+          console.error("Auth profile refresh failed:", error);
+          state.profileLoadError = formatSupabaseError(error);
+          state.adminLoaded = true;
           state.profileLoaded = true;
         }
-      } catch (error) {
-        console.error("Auth profile refresh failed:", error);
-        state.profileLoadError = formatSupabaseError(error);
-        state.adminLoaded = true;
-        state.profileLoaded = true;
-      }
-      if (redirectAuthenticatedPublicRoute()) return;
-      render();
-      afterRouteRender();
+        if (refreshSequence !== authRefreshSequence || !state.user) return;
+        if (redirectAuthenticatedPublicRoute()) return;
+        render();
+        afterRouteRender();
+      }, 0);
       return;
     }
 
@@ -4436,6 +4494,7 @@ function registerAuthListener() {
     state.profileLoadError = null;
     state.companyId = null;
     state.storedMatches = [];
+    clearAdminAccessState();
     clearOpportunityDetailsState();
     state.reports = [];
     state.reportsLoaded = false;
@@ -5058,6 +5117,7 @@ async function runMatchingForCurrentCompany() {
     const wasDraftDirty = state.profileDraftDirty;
     const matched = (opportunitiesResult.data || [])
       .map(mapSupabaseOpportunity)
+      .filter(isCustomerMatchEligibleOpportunity)
       .filter(isDashboardVisibleOpportunity)
       .map((opportunity) => calculateMatch(profile, opportunity))
       .filter((match) => match.matchScore >= 50);
@@ -5152,7 +5212,17 @@ async function addOpportunity(formData, formElement) {
       raw_payload: {
         created_from: "admin",
         source_name: sourceName
-      }
+      },
+      procurement_stage: "uncertain",
+      actionable_for_suppliers: false,
+      classification_confidence: 0.5,
+      classification_reason: "New manual opportunity requires an explicit admin procurement-stage review.",
+      positive_signals: [],
+      negative_signals: ["manual_opportunity_requires_classification"],
+      classified_by: "admin",
+      classified_at: new Date().toISOString(),
+      classifier_version: "procurement-stage-v1",
+      requires_admin_review: true
     };
 
     const { error } = await supabaseClient
@@ -5269,36 +5339,48 @@ async function updateOpportunityReportOverride(id, override) {
 
   const overrideMap = {
     include: {
-      opportunity_intent: "confirmed_tender",
-      quality_status: "confirmed_tender",
-      hidden_from_reports: false,
-      admin_report_status: "include"
+      stage: "open_competition",
+      legacy: { opportunity_intent: "confirmed_tender", quality_status: "confirmed_tender", hidden_from_reports: false, admin_report_status: "include" }
     },
     hide: {
-      hidden_from_reports: true,
-      admin_report_status: "hidden"
+      stage: "uncertain",
+      legacy: { hidden_from_reports: true, admin_report_status: "hidden" }
     },
     noise: {
-      opportunity_intent: "not_opportunity",
-      quality_status: "needs_review",
-      hidden_from_reports: true,
-      admin_report_status: "noise"
+      stage: "general_news",
+      legacy: { opportunity_intent: "not_opportunity", quality_status: "needs_review", hidden_from_reports: true, admin_report_status: "noise" }
     },
     confirmed_tender: {
-      opportunity_intent: "confirmed_tender",
-      quality_status: "confirmed_tender",
-      hidden_from_reports: false,
-      admin_report_status: "include"
+      stage: "open_competition",
+      legacy: { opportunity_intent: "confirmed_tender", quality_status: "confirmed_tender", hidden_from_reports: false, admin_report_status: "include" }
     },
     early_opportunity: {
-      opportunity_intent: "early_opportunity",
-      quality_status: "early_signal",
-      hidden_from_reports: false,
-      admin_report_status: "include"
-    }
+      stage: "upcoming_procurement",
+      legacy: { opportunity_intent: "early_opportunity", quality_status: "early_signal", hidden_from_reports: false, admin_report_status: "include" }
+    },
+    market_consultation: {
+      stage: "market_consultation",
+      legacy: { opportunity_intent: "early_opportunity", quality_status: "early_signal", hidden_from_reports: false, admin_report_status: "include" }
+    },
+    award_or_contract_signed: {
+      stage: "award_or_contract_signed",
+      legacy: { opportunity_intent: "not_opportunity", quality_status: "needs_review", hidden_from_reports: true, admin_report_status: "hidden", tender_state: "awarded" }
+    },
+    work_underway: {
+      stage: "work_underway",
+      legacy: { opportunity_intent: "not_opportunity", quality_status: "needs_review", hidden_from_reports: true, admin_report_status: "hidden", tender_state: "work_underway" }
+    },
+    completed: {
+      stage: "completed",
+      legacy: { opportunity_intent: "not_opportunity", quality_status: "needs_review", hidden_from_reports: true, admin_report_status: "hidden", tender_state: "completed" }
+    },
+    uncertain: {
+      stage: "uncertain",
+      legacy: { opportunity_intent: "market_signal", quality_status: "needs_review", hidden_from_reports: true, admin_report_status: "hidden" }
+    },
   };
-  const patch = overrideMap[override];
-  if (!patch) return;
+  const selection = overrideMap[override];
+  if (!selection) return;
 
   state.adminUpdatingId = id;
   state.adminMessage = null;
@@ -5311,14 +5393,52 @@ async function updateOpportunityReportOverride(id, override) {
 
     const rawPayload = {
       ...(opp.rawPayload || {}),
-      ...patch,
+      ...selection.legacy,
       admin_reviewed_at: new Date().toISOString()
     };
+    const requiresAdminReview = selection.stage === "uncertain";
+    const actionableForSuppliers = !requiresAdminReview && deriveActionableForSuppliers(selection.stage);
     const { error } = await supabaseClient
       .from("opportunities")
-      .update({ raw_payload: rawPayload })
+      .update({
+        raw_payload: rawPayload,
+        procurement_stage: selection.stage,
+        actionable_for_suppliers: actionableForSuppliers,
+        classification_confidence: requiresAdminReview ? 0.5 : 1,
+        classification_reason: `Admin selected procurement stage: ${selection.stage}.`,
+        positive_signals: actionableForSuppliers ? ["admin_confirmed_supplier_action"] : [],
+        negative_signals: actionableForSuppliers ? [] : ["admin_confirmed_non_actionable_or_uncertain"],
+        classified_by: "admin",
+        classified_at: new Date().toISOString(),
+        classifier_version: "procurement-stage-v1",
+        requires_admin_review: requiresAdminReview
+      })
       .eq("id", id);
     if (error) throw error;
+
+    if (!actionableForSuppliers) {
+      const { error: matchesError } = await supabaseClient
+        .from("opportunity_matches")
+        .update({
+          safety_status: "hidden",
+          safety_reasons: [`Procurement stage is ${selection.stage}`],
+          alert_eligible: false,
+          review_required: requiresAdminReview
+        })
+        .eq("opportunity_id", id);
+      if (matchesError) throw matchesError;
+    } else {
+      const { error: matchesError } = await supabaseClient
+        .from("opportunity_matches")
+        .update({
+          safety_status: "needs_review",
+          safety_reasons: ["Procurement stage changed; refresh company relevance before reporting"],
+          alert_eligible: false,
+          review_required: true
+        })
+        .eq("opportunity_id", id);
+      if (matchesError) throw matchesError;
+    }
 
     state.adminMessage = { type: "success", text: "Report visibility updated." };
     await loadOpportunities();
@@ -6851,7 +6971,7 @@ function render() {
   else if (route === "/security") html = renderSecurityPage();
   else if (route === "/contact") html = renderContactPage();
   else if (route === "/settings") html = state.user ? renderSettings() : requireAuthPage();
-  else if (route === "/admin") html = state.user ? (state.isAdmin ? renderAdmin() : requireAdminPage()) : requireAuthPage();
+  else if (route === "/admin") html = state.user ? (state.isAdmin ? renderAdmin() : requireAdminPage()) : requireAdminAuthPage();
   else html = renderLanding();
 
   app.innerHTML = html;
@@ -9185,6 +9305,7 @@ function formatOpportunityIntent(intent) {
 }
 
 function getOpportunityQualityLabel(opp) {
+  if (opp?.procurementStage) return formatProcurementStage(opp.procurementStage);
   const intent = getOpportunityIntent(opp);
   if (intent === "news_context" || intent === "not_opportunity" || intent === "market_signal") {
     return formatOpportunityIntent(intent);
@@ -9196,8 +9317,31 @@ function getOpportunityQualityLabel(opp) {
 }
 
 function renderQualityBadge(opp) {
-  const status = getOpportunityIntent(opp) || normalizeOpportunityQualityStatus(opp.qualityStatus, opp);
+  const status = opp?.procurementStage || getOpportunityIntent(opp) || normalizeOpportunityQualityStatus(opp.qualityStatus, opp);
   return `<span class="source-pill source-badge quality-badge ${escapeHtml(status)}">${escapeHtml(formatReportQualityLabel(getOpportunityQualityLabel(opp)))}</span>`;
+}
+
+function formatProcurementStage(stage) {
+  const labels = state.language === "is" ? {
+    open_competition: "Opið útboð",
+    upcoming_procurement: "Væntanlegt útboð",
+    market_consultation: "Markaðssamráð",
+    award_or_contract_signed: "Úthlutað / samningur undirritaður",
+    work_underway: "Framkvæmdir hafnar",
+    completed: "Lokið",
+    general_news: "Almenn frétt",
+    uncertain: "Þarfnast yfirferðar"
+  } : {
+    open_competition: "Open competition",
+    upcoming_procurement: "Upcoming procurement",
+    market_consultation: "Market consultation",
+    award_or_contract_signed: "Awarded / contract signed",
+    work_underway: "Work underway",
+    completed: "Completed",
+    general_news: "General news",
+    uncertain: "Needs review"
+  };
+  return labels[stage] || capitalize(String(stage || "").replace(/_/g, " "));
 }
 
 function renderSafetyBadge(opp) {
@@ -10300,16 +10444,19 @@ function renderAdminOpportunityRow(opp) {
         </div>
         <p><strong>Source:</strong> ${escapeHtml(opp.source || "Unknown source")} · <strong>Buyer:</strong> ${escapeHtml(formatAdminBuyer(opp))} · <strong>Region:</strong> ${escapeHtml(formatAdminLocation(opp))} · <strong>Status:</strong> ${escapeHtml(opp.status)}</p>
         <p><strong>Source URL:</strong> ${adminSourceUrl ? `<a href="${escapeHtml(adminSourceUrl)}" target="_blank" rel="noreferrer">${escapeHtml(adminSourceUrl)}</a>` : "Not listed"} · <strong>External ID:</strong> ${escapeHtml(opp.externalId || "Not listed")}</p>
-        <p>Quality: ${escapeHtml(getOpportunityQualityLabel(opp))} · Intent: ${escapeHtml(formatOpportunityIntent(intent))}${hiddenFromReports ? " · Hidden from reports" : ""}${duplicateReason ? ` · Duplicate: ${escapeHtml(duplicateReason)}` : ""}${staleReason ? ` · Stale / expired: ${escapeHtml(staleReason)}` : ""}</p>
+        <p>Stage: ${escapeHtml(opp.procurementStage || "Legacy / unclassified")} · Quality: ${escapeHtml(getOpportunityQualityLabel(opp))} · Intent: ${escapeHtml(formatOpportunityIntent(intent))}${hiddenFromReports ? " · Hidden from reports" : ""}${duplicateReason ? ` · Duplicate: ${escapeHtml(duplicateReason)}` : ""}${staleReason ? ` · Stale / expired: ${escapeHtml(staleReason)}` : ""}</p>
         <p>Debug: hidden_from_reports=${opp.rawPayload?.hidden_from_reports === true ? "true" : "false"} · admin_report_status=${escapeHtml(opp.rawPayload?.admin_report_status || "none")} · stale_status=${escapeHtml(opp.rawPayload?.stale_status || "none")}</p>
         ${renderAdminOpportunityMatchDebug(opp)}
       </div>
       <div class="admin-row-actions">
         <button class="btn btn-ghost btn-small" data-action="admin-report-override" data-override="confirmed_tender" data-id="${escapeHtml(opp.id)}" ${isUpdating ? "disabled" : ""}>Confirmed tender</button>
         <button class="btn btn-ghost btn-small" data-action="admin-report-override" data-override="early_opportunity" data-id="${escapeHtml(opp.id)}" ${isUpdating ? "disabled" : ""}>Early opportunity</button>
-        <button class="btn btn-ghost btn-small" data-action="admin-report-override" data-override="include" data-id="${escapeHtml(opp.id)}" ${isUpdating ? "disabled" : ""}>Include in reports</button>
+        <button class="btn btn-ghost btn-small" data-action="admin-report-override" data-override="market_consultation" data-id="${escapeHtml(opp.id)}" ${isUpdating ? "disabled" : ""}>Market consultation</button>
+        <button class="btn btn-ghost btn-small" data-action="admin-report-override" data-override="award_or_contract_signed" data-id="${escapeHtml(opp.id)}" ${isUpdating ? "disabled" : ""}>Awarded / signed</button>
+        <button class="btn btn-ghost btn-small" data-action="admin-report-override" data-override="work_underway" data-id="${escapeHtml(opp.id)}" ${isUpdating ? "disabled" : ""}>Work underway</button>
+        <button class="btn btn-ghost btn-small" data-action="admin-report-override" data-override="completed" data-id="${escapeHtml(opp.id)}" ${isUpdating ? "disabled" : ""}>Completed</button>
         <button class="btn btn-ghost btn-small" data-action="admin-report-override" data-override="noise" data-id="${escapeHtml(opp.id)}" ${isUpdating ? "disabled" : ""}>News/noise</button>
-        <button class="btn btn-ghost btn-small" data-action="admin-report-override" data-override="hide" data-id="${escapeHtml(opp.id)}" ${isUpdating ? "disabled" : ""}>Hide from reports</button>
+        <button class="btn btn-ghost btn-small" data-action="admin-report-override" data-override="uncertain" data-id="${escapeHtml(opp.id)}" ${isUpdating ? "disabled" : ""}>Uncertain</button>
         <button
           class="btn btn-ghost btn-small"
           data-action="delete-opportunity"
@@ -10830,9 +10977,12 @@ function getReportSections(matches) {
 }
 
 function getReportOpportunityPlacement(opp) {
+  if (opp.procurementStage && !isStrictCustomerReportEligible(opp)) return "excluded";
   const aiPlacement = getAiReportPlacement(opp);
   if (aiPlacement !== "excluded" || opp?.aiReviewFit || opp?.ai_review_fit) return aiPlacement;
   if (!isStrictCustomerReportEligible(opp)) return "excluded";
+  if (opp.procurementStage === "open_competition") return "confirmed";
+  if (["upcoming_procurement", "market_consultation"].includes(opp.procurementStage)) return "early";
   if (hasFutureDeadline(opp)) return "confirmed";
   const intent = getOpportunityIntent(opp);
   if (intent === "confirmed_tender") return "confirmed";
@@ -10859,6 +11009,8 @@ function isStrictCustomerReportEligible(opp) {
   if (!opp || isDemoTestOpportunity(opp)) return false;
   if (getSafetyStatus(opp) === "hidden") return false;
   if (!isDashboardVisibleOpportunity(opp)) return false;
+  if (!isCustomerMatchEligibleOpportunity(opp)) return false;
+  if (opp.procurementStage) return true;
   if (isCustomerReportExcludedIntent(opp)) return false;
   if (isAlreadyAwardedOrTenderedReportItem(opp)) return false;
   if (isDesignConsultingOnlyForCurrentProfile(opp)) return false;
@@ -11110,6 +11262,11 @@ function containsReviewOnlyTerms(text) {
 
 function isCustomerMatchEligibleOpportunity(opp) {
   if (!opp) return false;
+  if (!isProcurementOpportunityEligible(opp, {
+    allowLegacyUnclassified: true,
+    legacyEligibility: () => true
+  })) return false;
+  if (opp.procurementStage) return true;
   const payload = opp.rawPayload || {};
   const adminStatus = String(payload.admin_report_status || "").toLowerCase();
   if (adminStatus === "include") return true;
@@ -11264,8 +11421,8 @@ function renderReportOpportunityItem(opp) {
 
 function renderReportQualityBadge(opp) {
   return renderReportQualityBadgePage({
-    status: "verify",
-    label: getReportStatusBadge(opp, state.language),
+    status: opp.procurementStage || "verify",
+    label: opp.procurementStage ? formatProcurementStage(opp.procurementStage) : getReportStatusBadge(opp, state.language),
     escapeHtml
   });
 }
