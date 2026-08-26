@@ -404,6 +404,13 @@ test("same-window replay is read-only and reports conservative identity results"
   assert.ok(result.results.every((row) => ["pending", "needs_review"].includes(row.decision)));
 });
 
+test("comparison persistence keeps comparison_state on observations only", async () => {
+  const source = await readFile(functionUrl, "utf8");
+  assert.match(source, /const \{ comparison_state, \.\.\.comparisonRecord \} = comparison/);
+  assert.match(source, /v2_legacy_comparisons.*comparisonRecord/s);
+  assert.match(source, /v2_ingestion_observations.*comparison_state/s);
+});
+
 async function sampleObservation(overrides = {}) {
   return createObservation({
     external_id: "source-123",
