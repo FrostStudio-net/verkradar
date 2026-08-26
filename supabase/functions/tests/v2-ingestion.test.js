@@ -13,6 +13,7 @@ import { fetchWithRetry, isRetryableStatus, parseRetryAfter } from "../_shared/i
 import { resolveIdentity } from "../_shared/ingestion-v2/identity.js";
 import { detectZeroItemAnomaly } from "../_shared/ingestion-v2/metrics.js";
 import { promoteObservation } from "../_shared/ingestion-v2/promotion.js";
+import { renderAdminV2IngestionPanel } from "../../../src/pages/adminV2Ingestion.js";
 
 const fixtureRoot = new URL("../import-source-connectors-v2/_fixtures/", import.meta.url);
 const migrationUrl = new URL("../../migrations/20260826120000_parallel_source_ingestion_v2_phase_a.sql", import.meta.url);
@@ -361,6 +362,12 @@ test("admin v2 panel exposes only safe shadow actions", async () => {
   assert.match(panel, /v2-run-shadow/);
   assert.doesNotMatch(panel, /v2-promote|data-action="promote"/);
   assert.match(panel, /read-only fixture\/shadow health/i);
+});
+
+test("admin v2 panel render path resolves control gating without free variables", () => {
+  const html = renderAdminV2IngestionPanel({ rows: [{ source_key: "akranes-utbod-v2", display_name: "Akranes", mode: "shadow" }], escapeHtml: (v) => String(v), formatDateTime: () => "", controlsEnabled: true });
+  assert.match(html, /v2-run-shadow/);
+  assert.doesNotMatch(html, /Promote/);
 });
 
 async function sampleObservation(overrides = {}) {
