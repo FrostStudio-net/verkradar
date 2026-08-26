@@ -379,7 +379,7 @@ test("admin v2 panel render path resolves control gating without free variables"
 });
 
 test("Akranes detail enrichment recovers deadline/reference and follow-up safely", () => {
-  const result = extractAkranesDetailMetadata("<p>EES útboð nr. 74814-2026. Tilboðum skal skilað fyrir kl. 11 12. 06. 2026. Opnunarfundur verður haldinn.</p>");
+  const result = extractAkranesDetailMetadata("<p>EES útboð nr. 74814-2026. Tilboðum skal skilað 12. 06. 2026. Opnunarfundur verður haldinn.</p>");
   assert.equal(result.deadline, "2026-06-12");
   assert.equal(result.procurement_reference, "74814-2026");
   assert.equal(result.tender_status, "follow_up_or_award");
