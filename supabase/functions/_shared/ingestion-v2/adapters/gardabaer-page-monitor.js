@@ -4,12 +4,27 @@ export const gardabaerPageMonitorAdapter = {
   parserName: "gardabaer-page-monitor",
   parserVersion: "1.0.0",
   parse(html) {
-    const cards = [...String(html || "").matchAll(/<article\b([^>]*)>([\s\S]*?)<\/article>/gi)]
+    const source = String(html || "");
+    const cards = [...source.matchAll(/<article\b([^>]*)>([\s\S]*?)<\/article>/gi)]
       .filter((match) => /\bdata-v2-tender\b/i.test(match[1]))
       .map((match) => parseCard(match[1], match[2]));
-    return assertParsedArray(cards, this.parserName);
+    if (cards.length) return assertParsedArray(cards, this.parserName);
+    const seen = new Set();
+    const liveCards = [...source.matchAll(/href=["'](\/framkvaemdir\/utbod\/[^"'#?]+)["']/gi)]
+      .map((match) => match[1])
+      .filter((relativeUrl) => { if (seen.has(relativeUrl)) return false; seen.add(relativeUrl); return true; })
+      .map((relativeUrl) => parseLiveLink(source, relativeUrl));
+    return assertParsedArray(liveCards, this.parserName);
   },
 };
+
+function parseLiveLink(source, relativeUrl) {
+  const url = new URL(relativeUrl, "https://www.gardabaer.is").toString();
+  const slug = relativeUrl.split("/").filter(Boolean).pop() || "";
+  const title = slug.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const context = source.slice(Math.max(0, source.indexOf(relativeUrl) - 500), source.indexOf(relativeUrl) + 1200);
+  return { external_id: `gardabaer:${slug}`, procurement_reference: null, discovered_url: url, canonical_url: url, title, description: stripHtml(context).slice(0, 1000), buyer: "Garðabær", deadline: extractDate(context, ["Útboð lýkur", "Tilboðsfrestur", "Skilafrestur"]), publication_date: null, source_published_at: null, location: "Garðabær", safe_source_payload: safeSourcePayload({ source: "next-rsc", relativeUrl }, ["source", "relativeUrl"]) };
+}
 
 function parseCard(attributes, body) {
   const externalId = firstMatch(attributes, [/data-external-id=["']([^"']+)["']/i]);
