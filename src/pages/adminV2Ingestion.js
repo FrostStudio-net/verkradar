@@ -1,4 +1,5 @@
 export function renderAdminV2IngestionPanel({ rows = [], loading = false, error = "", escapeHtml, formatDateTime, controlsEnabled = false }) {
+  const canMutate = controlsEnabled === true;
   return `
     <section class="ops-card v2-ingestion-panel">
       <div class="card-header">

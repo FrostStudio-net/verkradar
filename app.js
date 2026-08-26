@@ -1,4 +1,5 @@
 import {
+  // Phase B shadow controls are explicitly staging-gated at render time.
   STORAGE_KEYS,
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
