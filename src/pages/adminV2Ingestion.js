@@ -25,7 +25,7 @@ export function renderAdminV2IngestionPanel({ rows = [], loading = false, error 
                 <th>Comparison</th>
               </tr>
             </thead>
-            <tbody>${rows.map((row) => renderRow(row, escapeHtml, formatDateTime)).join("")}</tbody>
+            <tbody>${rows.map((row) => renderRow(row, escapeHtml, formatDateTime, canMutate)).join("")}</tbody>
           </table>
         </div>
       ` : error ? "" : `<div class="empty-card">No v2 sources configured. Apply the Phase A migration to create the isolated control plane.</div>`}
@@ -33,7 +33,7 @@ export function renderAdminV2IngestionPanel({ rows = [], loading = false, error 
   `;
 }
 
-function renderRow(row, escapeHtml, formatDateTime) {
+function renderRow(row, escapeHtml, formatDateTime, canMutate = false) {
   const run = row.latestShadowRun || row.latestFixtureRun || row.latestRun || {};
   const health = row.health || {};
   const parserHealth = health.parser_health || {};
