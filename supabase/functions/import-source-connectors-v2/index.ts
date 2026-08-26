@@ -5,6 +5,7 @@ import { assertCircuitAllowsRun, detectZeroItemAnomaly, nextCircuitState } from 
 import { assertRunDeadline, createRunLease, heartbeatLease } from "../_shared/ingestion-v2/run-control.js";
 import { fetchWithRetry } from "../_shared/ingestion-v2/fetching.js";
 import { compareObservationToLegacy } from "../_shared/ingestion-v2/comparison.js";
+import { classifyProcurementStage, classificationColumns } from "../_shared/procurement-stage.js";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -272,6 +273,11 @@ async function runShadow({ body, config, adminClient }) {
     const observations = await Promise.all(candidates.map((candidate) => createObservation(candidate, { run_id: run.id, source_config_id: config.id, source_id: config.source_id, source_key: config.source_key, source_name: config.display_name, parser_name: config.parser_name, parser_version: config.parser_version, fetched_at: new Date().toISOString(), fetch_metadata: { live_request: true, http_status: fetched.response.status, content_type: fetched.response.headers.get("content-type"), attempts: fetched.attempts, latency_ms: fetched.latencyMs, mode: "shadow" } })));
     let storedObservations = observations;
     if (observations.length) { const { data, error } = await adminClient.from("v2_ingestion_observations").insert(observations).select("*"); if (error) throw error; storedObservations = data || observations; }
+    for (const observation of storedObservations) {
+      const prediction = classificationColumns(classifyProcurementStage({ title: observation.title, description: observation.description, buyer: observation.buyer, deadline: observation.deadline, publication_date: observation.publication_date, authoritative_metadata: observation.safe_source_payload || {} }));
+      const { error: predictionError } = await adminClient.from("v2_ingestion_observations").update({ predicted_procurement_stage: prediction.procurement_stage, predicted_actionable: prediction.actionable_for_suppliers, predicted_confidence: prediction.classification_confidence, predicted_reason: prediction.classification_reason, predicted_requires_admin_review: prediction.requires_admin_review }).eq("id", observation.id);
+      if (predictionError) throw predictionError;
+    }
     const { data: legacy } = await adminClient.from(LEGACY_TABLE).select("id,source_id,external_id,procurement_reference,canonical_url,url,title,description,buyer,deadline,publication_date,location").eq("source_id", config.source_id);
     for (const observation of storedObservations) { const comparison = await compareObservationToLegacy(observation, legacy || []); await adminClient.from("v2_legacy_comparisons").upsert({ observation_id: observation.id, ...comparison }, { onConflict: "observation_id,legacy_opportunity_id,match_type" }); }
     const finished = new Date().toISOString();
