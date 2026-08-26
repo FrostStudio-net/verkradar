@@ -344,6 +344,13 @@ test("migration enforces advisory locking, service-role promotion, and classific
   assert.doesNotMatch(enrichmentBlock, /opportunity_matches/);
 });
 
+test("Phase B shadow trigger type is narrowly added", async () => {
+  const sql = await readFile(new URL("../../migrations/20260826210000_parallel_source_ingestion_v2_shadow_trigger_type.sql", import.meta.url), "utf8");
+  assert.match(sql, /drop constraint if exists v2_ingestion_runs_trigger_type_check/i);
+  assert.match(sql, /'fixture'.*'replay'.*'manual'.*'automation'.*'shadow'/s);
+  assert.doesNotMatch(sql, /'promote'/);
+});
+
 test("Phase A function has no live fetch, promotion RPC, or opportunities write path", async () => {
   const source = await readFile(functionUrl, "utf8");
   assert.doesNotMatch(source, /\bfetch\s*\(/);

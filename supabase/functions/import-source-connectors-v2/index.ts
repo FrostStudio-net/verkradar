@@ -251,7 +251,7 @@ Deno.serve(async (req) => {
       suspicious_zero_items: zeroItem.suspicious,
     }, runStatus === "succeeded" ? 200 : 207);
   } catch (error) {
-    console.error("V2 Phase A fixture run failed:", error);
+    console.error("V2 ingestion run failed:", error);
     if (runId) await markRunFailed(requiredEnv("SUPABASE_URL"), requiredEnv("SUPABASE_SERVICE_ROLE_KEY"), runId, error);
     return json({ ok: false, phase: "A", fixture_only: true, customer_visible_writes: 0, error: errorMessage(error), code: errorCode(error) }, 500);
   }
