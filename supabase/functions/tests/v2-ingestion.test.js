@@ -14,6 +14,7 @@ import { resolveIdentity } from "../_shared/ingestion-v2/identity.js";
 import { detectZeroItemAnomaly } from "../_shared/ingestion-v2/metrics.js";
 import { promoteObservation } from "../_shared/ingestion-v2/promotion.js";
 import { renderAdminV2IngestionPanel } from "../../../src/pages/adminV2Ingestion.js";
+import { extractAkranesDetailMetadata } from "../_shared/ingestion-v2/adapters/akranes-enrichment.js";
 
 const fixtureRoot = new URL("../import-source-connectors-v2/_fixtures/", import.meta.url);
 const migrationUrl = new URL("../../migrations/20260826120000_parallel_source_ingestion_v2_phase_a.sql", import.meta.url);
@@ -375,6 +376,21 @@ test("admin v2 panel render path resolves control gating without free variables"
   const html = renderAdminV2IngestionPanel({ rows: [{ source_key: "akranes-utbod-v2", display_name: "Akranes", mode: "shadow" }], escapeHtml: (v) => String(v), formatDateTime: () => "", controlsEnabled: true });
   assert.match(html, /v2-run-shadow/);
   assert.doesNotMatch(html, /Promote/);
+});
+
+test("Akranes detail enrichment recovers deadline/reference and follow-up safely", () => {
+  const result = extractAkranesDetailMetadata("<p>EES útboð nr. 74814-2026. Tilboðum skal skilað fyrir kl. 11 12. 06. 2026. Opnunarfundur verður haldinn.</p>");
+  assert.equal(result.deadline, "2026-06-12");
+  assert.equal(result.procurement_reference, "74814-2026");
+  assert.equal(result.tender_status, "follow_up_or_award");
+  assert.equal(result.enrichment_status, "enriched");
+});
+
+test("Akranes enrichment returns safe no-op for malformed/empty detail", () => {
+  const result = extractAkranesDetailMetadata("<broken");
+  assert.equal(result.deadline, null);
+  assert.equal(result.procurement_reference, null);
+  assert.equal(result.enrichment_status, "no_supported_fields");
 });
 
 async function sampleObservation(overrides = {}) {
