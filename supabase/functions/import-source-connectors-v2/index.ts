@@ -6,6 +6,7 @@ import { assertRunDeadline, createRunLease, heartbeatLease } from "../_shared/in
 import { fetchWithRetry } from "../_shared/ingestion-v2/fetching.js";
 import { compareObservationToLegacy } from "../_shared/ingestion-v2/comparison.js";
 import { classifyProcurementStage, classificationColumns } from "../_shared/procurement-stage.js";
+import { extractAkranesDetailMetadata } from "../_shared/ingestion-v2/adapters/akranes-enrichment.js";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -269,7 +270,14 @@ async function runShadow({ body, config, adminClient }) {
   try {
     fetched = await fetchWithRetry(config.endpoint_url, { maxAttempts: config.max_attempts, timeoutMs: config.request_timeout_ms, deadlineAt: Date.parse(lease.run_deadline_at), request: { headers } });
     const text = await fetched.response.text();
-    const candidates = parseWithV2Adapter(config.parser_name, config.parser_version, text);
+    let candidates = parseWithV2Adapter(config.parser_name, config.parser_version, text);
+    if (config.source_key === "akranes-utbod-v2") {
+      const enriched = [];
+      for (const candidate of candidates.slice(0, 25)) {
+        try { const detail = await fetchWithRetry(candidate.canonical_url || candidate.discovered_url, { maxAttempts: 2, timeoutMs: 5000, deadlineAt: Date.parse(lease.run_deadline_at), request: { headers } }); const metadata = extractAkranesDetailMetadata(await detail.response.text()); enriched.push({ ...candidate, deadline: candidate.deadline || metadata.deadline, procurement_reference: candidate.procurement_reference || metadata.procurement_reference, safe_source_payload: { ...(candidate.safe_source_payload || {}), shadow_enrichment: metadata } }); } catch { enriched.push({ ...candidate, safe_source_payload: { ...(candidate.safe_source_payload || {}), shadow_enrichment: { enrichment_status: "failed" } } }); }
+      }
+      candidates = enriched;
+    }
     const observations = await Promise.all(candidates.map((candidate) => createObservation(candidate, { run_id: run.id, source_config_id: config.id, source_id: config.source_id, source_key: config.source_key, source_name: config.display_name, parser_name: config.parser_name, parser_version: config.parser_version, fetched_at: new Date().toISOString(), fetch_metadata: { live_request: true, http_status: fetched.response.status, content_type: fetched.response.headers.get("content-type"), attempts: fetched.attempts, latency_ms: fetched.latencyMs, mode: "shadow" } })));
     let storedObservations = observations;
     if (observations.length) { const { data, error } = await adminClient.from("v2_ingestion_observations").insert(observations).select("*"); if (error) throw error; storedObservations = data || observations; }
