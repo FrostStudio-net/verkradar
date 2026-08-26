@@ -14,6 +14,7 @@ const corsHeaders = {
 const LEGACY_TABLE = "opportunities";
 const STAGING_PROJECT_REF = "ipixuxznqtrcdpzoxric";
 const PRODUCTION_PROJECT_REF = "asojxjbsgqbfpbepojzh";
+const ALLOWED_SOURCES = new Set(["akranes-utbod-v2", "borgarbyggd-utbod-v2", "gardabaer-utbod-v2"]);
 
 const PHASE_A_FIXTURES: Record<string, { sourceKey: string; file: URL; contentType: string }> = {
   "akranes-rss": {
@@ -62,6 +63,8 @@ Deno.serve(async (req) => {
     if (!adminRow) return json({ error: "Admin access required" }, 403);
 
     const body = await safeJson(req);
+    if (body.action === "set_mode") return await setShadowMode({ body, adminClient });
+    if (body.action === "diagnostics") return await diagnostics({ adminClient });
     const fixtureName = String(body.fixture || body.fixtureName || "").trim();
     const requestedSource = String(body.source_key || body.source || "").trim();
     if (!fixtureName && requestedSource) {
@@ -271,6 +274,25 @@ async function runShadow({ body, config, adminClient }) {
     await adminClient.from("v2_ingestion_runs").update({ status: error.code === "V2_RUN_DEADLINE" ? "timed_out" : "failed", error_count: 1, error_code: error.code || "V2_SHADOW_ERROR", error_message: error.message, finished_at: new Date().toISOString() }).eq("id", run.id);
     throw error;
   }
+}
+
+async function setShadowMode({ body, adminClient }) {
+  const sourceKey = String(body.source_key || "");
+  const mode = String(body.mode || "");
+  if (!ALLOWED_SOURCES.has(sourceKey)) return json({ error: "Source is not allowlisted", code: "V2_SOURCE_NOT_ALLOWED" }, 403);
+  if (!["shadow", "fixture_only"].includes(mode)) return json({ error: "Only shadow and fixture_only are supported", code: "V2_MODE_FORBIDDEN" }, 400);
+  const { data: config, error } = await adminClient.from("v2_source_configs").select("id,source_key,mode").eq("source_key", sourceKey).single();
+  if (error) throw error;
+  if (!((config.mode === "fixture_only" && mode === "shadow") || (config.mode === "shadow" && mode === "fixture_only"))) return json({ error: "Invalid mode transition", code: "V2_MODE_TRANSITION_FORBIDDEN" }, 409);
+  const { error: updateError } = await adminClient.from("v2_source_configs").update({ mode, updated_at: new Date().toISOString() }).eq("id", config.id).eq("mode", config.mode);
+  if (updateError) throw updateError;
+  return json({ ok: true, source_key: sourceKey, mode, customer_visible_writes: 0 });
+}
+
+async function diagnostics({ adminClient }) {
+  const { data, error } = await adminClient.from("v2_source_configs").select("id,source_key,display_name,mode,parser_name,parser_version,v2_source_health(*),v2_ingestion_runs(id,status,parsed_count,observation_count,error_count,finished_at),v2_ingestion_observations(validation_state,comparison_state,predicted_procurement_stage)").in("source_key", [...ALLOWED_SOURCES]);
+  if (error) throw error;
+  return json({ ok: true, sources: data || [], secrets: false });
 }
 
 async function markRunFailed(supabaseUrl: string, serviceRoleKey: string, runId: string, error: unknown) {
