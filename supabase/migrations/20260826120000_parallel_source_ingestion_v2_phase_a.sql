@@ -201,7 +201,7 @@ language sql
 immutable
 parallel safe
 as $$
-  select encode(digest(
+  select encode(extensions.digest(
     public.v2_normalize_identity_text(buyer) || '|' ||
     public.v2_normalize_identity_text(title) || '|' ||
     coalesce(deadline::text, '') || '|' ||

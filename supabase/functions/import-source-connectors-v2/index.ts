@@ -3,6 +3,11 @@ import { createObservation } from "../_shared/ingestion-v2/contracts.js";
 import { parseWithV2Adapter } from "../_shared/ingestion-v2/adapters/index.js";
 import { assertCircuitAllowsRun, detectZeroItemAnomaly, nextCircuitState } from "../_shared/ingestion-v2/metrics.js";
 import { assertRunDeadline, createRunLease, heartbeatLease } from "../_shared/ingestion-v2/run-control.js";
+import {
+  AKRANES_RSS_FIXTURE,
+  BORGARBYGGD_WORDPRESS_FIXTURE,
+  GARDABAER_PAGE_MONITOR_FIXTURE,
+} from "./_fixtures/fixture-data.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -10,20 +15,20 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const PHASE_A_FIXTURES: Record<string, { sourceKey: string; file: URL; contentType: string }> = {
+const PHASE_A_FIXTURES: Record<string, { sourceKey: string; content: string; contentType: string }> = {
   "akranes-rss": {
     sourceKey: "akranes-utbod-v2",
-    file: new URL("./_fixtures/akranes-rss.xml", import.meta.url),
+    content: AKRANES_RSS_FIXTURE,
     contentType: "application/rss+xml",
   },
   "borgarbyggd-wordpress": {
     sourceKey: "borgarbyggd-utbod-v2",
-    file: new URL("./_fixtures/borgarbyggd-wordpress.json", import.meta.url),
+    content: BORGARBYGGD_WORDPRESS_FIXTURE,
     contentType: "application/json",
   },
   "gardabaer-page-monitor": {
     sourceKey: "gardabaer-utbod-v2",
-    file: new URL("./_fixtures/gardabaer-page-monitor.html", import.meta.url),
+    content: GARDABAER_PAGE_MONITOR_FIXTURE,
     contentType: "text/html",
   },
 };
@@ -117,8 +122,7 @@ Deno.serve(async (req) => {
     runId = String(run.id || "");
 
     assertRunDeadline(lease.run_deadline_at);
-    const fixtureText = await Deno.readTextFile(fixture.file);
-    const candidates = parseWithV2Adapter(config.parser_name, config.parser_version, fixtureText);
+    const candidates = parseWithV2Adapter(config.parser_name, config.parser_version, fixture.content);
     const zeroItem = detectZeroItemAnomaly({
       httpOk: true,
       parsedCount: candidates.length,
