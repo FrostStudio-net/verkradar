@@ -352,11 +352,14 @@ test("Phase A function has no live fetch, promotion RPC, or opportunities write 
   assert.match(source, /Phase A permits fixture\/replay input only/);
 });
 
-test("admin v2 data service and panel are read-only", async () => {
+test("admin v2 panel exposes only safe shadow actions", async () => {
   const service = await readFile(new URL("../../../src/services/adminV2Ingestion.js", import.meta.url), "utf8");
   const panel = await readFile(new URL("../../../src/pages/adminV2Ingestion.js", import.meta.url), "utf8");
   assert.doesNotMatch(service, /\.(insert|update|upsert|delete|rpc)\s*\(/);
-  assert.doesNotMatch(panel, /data-action=/);
+  assert.match(panel, /v2-enable-shadow/);
+  assert.match(panel, /v2-disable-shadow/);
+  assert.match(panel, /v2-run-shadow/);
+  assert.doesNotMatch(panel, /v2-promote|data-action="promote"/);
   assert.match(panel, /read-only fixture\/shadow health/i);
 });
 

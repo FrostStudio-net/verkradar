@@ -62,6 +62,7 @@ import {
   loadActiveCompanyMemberships,
   loadAdminContactRequests,
   loadAdminV2IngestionOverview,
+  invokeAdminV2Action,
   loadAdminTrialRequests,
   logClientCompanyProfileChange,
   mergeAiReviewsIntoReportMatches,
@@ -669,7 +670,7 @@ window.addEventListener("hashchange", () => {
   afterRouteRender();
 });
 
-document.addEventListener("click", (event) => {
+document.addEventListener("click", async (event) => {
   if (state.dropdown.openKey && !event.target.closest?.(".custom-select")) {
     closeDropdown();
   }
@@ -724,6 +725,19 @@ document.addEventListener("click", (event) => {
 
   const name = action.dataset.action;
   const id = action.dataset.id;
+
+  if (name === "v2-enable-shadow" || name === "v2-disable-shadow" || name === "v2-run-shadow") {
+    event.preventDefault();
+    if (!supabaseClient) return;
+    action.disabled = true;
+    try {
+      const source = action.dataset.sourceKey;
+      if (name === "v2-run-shadow") await invokeAdminV2Action(supabaseClient, "run_shadow", source);
+      else await invokeAdminV2Action(supabaseClient, "set_mode", source, name === "v2-enable-shadow" ? "shadow" : "fixture_only");
+      await loadV2IngestionForAdmin();
+    } catch (error) { console.error(error); state.v2IngestionError = formatSupabaseError(error); render(); }
+    return;
+  }
 
   if (name === "close-modal") {
     event.preventDefault();
@@ -9620,7 +9634,8 @@ function renderAdminActiveTab(opportunities) {
         loading: Boolean(state.v2IngestionLoading),
         error: state.v2IngestionError || "",
         escapeHtml,
-        formatDateTime
+        formatDateTime,
+        controlsEnabled: SUPABASE_URL.includes("ipixuxznqtrcdpzoxric") && !SUPABASE_URL.includes("asojxjbsgqbfpbepojzh")
       })}
       ${renderLatestImportRunsTable()}
       ${renderLatestTedOpportunities()}

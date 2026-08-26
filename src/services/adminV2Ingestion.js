@@ -55,3 +55,11 @@ export async function loadAdminV2IngestionOverview(supabase) {
     };
   });
 }
+
+export async function invokeAdminV2Action(supabase, action, source_key = null, mode = null) {
+  if (!supabase) throw new Error("Supabase client is not configured");
+  const { data, error } = await supabase.functions.invoke("import-source-connectors-v2", { body: { action, ...(source_key ? { source_key } : {}), ...(action === "set_mode" ? { mode: mode || "shadow" } : {}) } });
+  if (error) throw error;
+  if (!data?.ok) throw new Error(data?.error || "V2 action failed");
+  return data;
+}
