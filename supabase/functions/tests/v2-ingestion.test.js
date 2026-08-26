@@ -15,6 +15,7 @@ import { detectZeroItemAnomaly } from "../_shared/ingestion-v2/metrics.js";
 import { promoteObservation } from "../_shared/ingestion-v2/promotion.js";
 import { renderAdminV2IngestionPanel } from "../../../src/pages/adminV2Ingestion.js";
 import { extractAkranesDetailMetadata } from "../_shared/ingestion-v2/adapters/akranes-enrichment.js";
+import { compareSameWindow } from "../_shared/ingestion-v2/replay.js";
 
 const fixtureRoot = new URL("../import-source-connectors-v2/_fixtures/", import.meta.url);
 const migrationUrl = new URL("../../migrations/20260826120000_parallel_source_ingestion_v2_phase_a.sql", import.meta.url);
@@ -391,6 +392,16 @@ test("Akranes enrichment returns safe no-op for malformed/empty detail", () => {
   assert.equal(result.deadline, null);
   assert.equal(result.procurement_reference, null);
   assert.equal(result.enrichment_status, "no_supported_fields");
+});
+
+test("same-window replay is read-only and reports conservative identity results", async () => {
+  const rss = await readFile(new URL("akranes-rss.xml", fixtureRoot), "utf8");
+  const result = await compareSameWindow({ rssText: rss });
+  assert.equal(result.raw_items, 2);
+  assert.equal(result.legacy_candidates, 2);
+  assert.equal(result.v2_candidates, 2);
+  assert.equal(result.results.length, 2);
+  assert.ok(result.results.every((row) => ["pending", "needs_review"].includes(row.decision)));
 });
 
 async function sampleObservation(overrides = {}) {
