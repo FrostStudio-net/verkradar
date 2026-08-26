@@ -411,6 +411,13 @@ test("comparison persistence keeps comparison_state on observations only", async
   assert.match(source, /v2_ingestion_observations.*comparison_state/s);
 });
 
+test("baseline_unavailable is an observation-only comparison state", async () => {
+  const sql = await readFile(new URL("../../migrations/20260826230000_v2_observation_baseline_unavailable_state.sql", import.meta.url), "utf8");
+  assert.match(sql, /baseline_unavailable/);
+  assert.match(sql, /not_compared.*legacy_match.*legacy_only.*v2_only.*conflict.*review_required/s);
+  assert.doesNotMatch(sql, /legacy_comparisons/);
+});
+
 async function sampleObservation(overrides = {}) {
   return createObservation({
     external_id: "source-123",
