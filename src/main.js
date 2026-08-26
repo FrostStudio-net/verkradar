@@ -6,10 +6,12 @@ export { logClientCompanyProfileChange } from "./services/companyProfileAudit.js
 export { getLegalPageData } from "./services/legal.js";
 export { acceptCompanyInvite, buildCompanyInviteLink, claimInvitedCompanyMemberships, clearStoredPendingInviteToken, getAuthCallbackInfo, getAuthCallbackRedirectUrl, getInitialPendingInviteToken, getInviteAuthDiagnostics, getInviteRouteDiagnostics, getInviteTokenFromRoute, getStoredPendingInviteToken, getStoredPendingInviteTokenSource, isInviteDebugEnabled, loadActiveCompanyMemberships, normalizeAccessEmail, previewCompanyInvite, replaceUrlWithInviteRoute, sanitizeInviteToken, setStoredPendingInviteToken, shouldPreserveInviteForRoute } from "./services/companyAccess.js";
 export { requestDailyPipelineRun } from "./services/adminAutomation.js";
+export { loadAdminV2IngestionOverview } from "./services/adminV2Ingestion.js";
 export { buildAdminCompanyProfilePayload, saveAdminCompanyProfile } from "./services/adminCompanyProfile.js";
 export { formatAiUsageCost, loadTodayAiUsageSummary, requestAiMatchReview, requestAutomaticAiReviewRun, requestCompanyAiReviewBatch, updateCompanyAutoAiReviewEnabled } from "./services/aiReviews.js";
 export { mergeAiReviewsIntoAdminMatches } from "./services/matchDisplay.js";
 export { renderAdminDailyPipelinePanel } from "./pages/adminAutomation.js";
+export { renderAdminV2IngestionPanel } from "./pages/adminV2Ingestion.js";
 export { renderAdminCompanyAccessPanel } from "./pages/adminCompanyAccess.js";
 export { renderAdminCompanyProfilePanel } from "./pages/adminCompanyProfile.js";
 export { renderAdminMatchingProfilePanel, renderMatchDecisionControls } from "./pages/adminHybridMatching.js";

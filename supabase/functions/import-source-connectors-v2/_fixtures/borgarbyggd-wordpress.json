@@ -1,0 +1,24 @@
+[
+  {
+    "id": 4201,
+    "date": "2026-08-17T08:15:00+00:00",
+    "date_gmt": "2026-08-17T08:15:00",
+    "slug": "utbod-gatnagerd-borgarnesi",
+    "status": "publish",
+    "type": "post",
+    "link": "https://dev.borgarbyggd.is/utbod-gatnagerd-borgarnesi/",
+    "title": { "rendered": "Útboð – Gatnagerð í Borgarnesi" },
+    "content": { "rendered": "<p>Verknúmer: BOR-2026-09. Tilboðsfrestur: 21.09.2026. Verkið felur í sér lagnir og malbikun.</p>" }
+  },
+  {
+    "id": 4202,
+    "date": "2026-08-20T12:00:00+00:00",
+    "date_gmt": "2026-08-20T12:00:00",
+    "slug": "utbod-skolalod",
+    "status": "publish",
+    "type": "post",
+    "link": "https://dev.borgarbyggd.is/utbod-skolalod/",
+    "title": { "rendered": "Útboð á endurbótum skólalóðar" },
+    "content": { "rendered": "<p>Tilvísun: BOR-2026-10. Skilafrestur: 24.09.2026.</p>" }
+  }
+]

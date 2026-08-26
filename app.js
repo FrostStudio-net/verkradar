@@ -61,6 +61,7 @@ import {
   localizeLegacyReportContent,
   loadActiveCompanyMemberships,
   loadAdminContactRequests,
+  loadAdminV2IngestionOverview,
   loadAdminTrialRequests,
   logClientCompanyProfileChange,
   mergeAiReviewsIntoReportMatches,
@@ -78,6 +79,7 @@ import {
   mergeAiReviewsIntoAdminMatches,
   normalizeReportRisk,
   renderAdminDailyPipelinePanel,
+  renderAdminV2IngestionPanel,
   renderAdminCompanyAccessPanel,
   renderAdminCompanyProfilePanel,
   renderMatchDecisionControls,
@@ -260,6 +262,10 @@ let state = {
   sourceCoverageLoading: false,
   sourceCoverageLoaded: false,
   sourceCoverageError: null,
+  v2IngestionRows: [],
+  v2IngestionLoading: false,
+  v2IngestionLoaded: false,
+  v2IngestionError: null,
   expandedSourceId: null,
   adminCompanies: [],
   adminCompaniesLoading: false,
@@ -561,6 +567,10 @@ function clearLocalProfileState() {
   state.sourceCoverageLoading = false;
   state.sourceCoverageLoaded = false;
   state.sourceCoverageError = null;
+  state.v2IngestionRows = [];
+  state.v2IngestionLoading = false;
+  state.v2IngestionLoaded = false;
+  state.v2IngestionError = null;
   state.adminCompanies = [];
   state.adminCompaniesLoading = false;
   state.adminCompaniesLoaded = false;
@@ -582,6 +592,8 @@ function clearAdminAccessState() {
   state.adminContactRequestsLoaded = false;
   state.sourceCoverage = [];
   state.sourceCoverageLoaded = false;
+  state.v2IngestionRows = [];
+  state.v2IngestionLoaded = false;
   state.adminCompanies = [];
   state.adminCompaniesLoaded = false;
   state.adminReviewMatches = [];
@@ -1770,6 +1782,7 @@ function afterRouteRender() {
     if (!state.adminTrialRequestsLoaded && !state.adminTrialRequestsLoading) loadTrialRequestsForAdmin();
     if (!state.adminContactRequestsLoaded && !state.adminContactRequestsLoading) loadContactRequestsForAdmin();
     if (!state.sourceCoverageLoaded && !state.sourceCoverageLoading) loadSourceCoverageForAdmin();
+    if (!state.v2IngestionLoaded && !state.v2IngestionLoading) loadV2IngestionForAdmin();
     if (!state.adminCompaniesLoaded && !state.adminCompaniesLoading) loadAdminCompanies();
     if (!state.adminReviewLoaded && !state.adminReviewLoading) loadAdminReviewQueue();
     if (!state.importedTedOpportunitiesLoaded && !state.importedTedOpportunitiesLoading) loadNewestImportedTedOpportunities().then(render).catch((error) => {
@@ -2264,6 +2277,28 @@ async function loadSourceCoverageForAdmin() {
   } finally {
     state.sourceCoverageLoading = false;
     state.sourceCoverageLoaded = true;
+    render();
+  }
+}
+
+async function loadV2IngestionForAdmin() {
+  if (!supabaseClient || !state.isAdmin) {
+    state.v2IngestionRows = [];
+    state.v2IngestionLoaded = true;
+    return;
+  }
+  state.v2IngestionLoading = true;
+  state.v2IngestionError = null;
+  render();
+  try {
+    state.v2IngestionRows = await loadAdminV2IngestionOverview(supabaseClient);
+  } catch (error) {
+    console.error("Failed to load v2 ingestion status:", error);
+    state.v2IngestionRows = [];
+    state.v2IngestionError = formatSupabaseError(error);
+  } finally {
+    state.v2IngestionLoading = false;
+    state.v2IngestionLoaded = true;
     render();
   }
 }
@@ -3193,6 +3228,7 @@ async function refreshAdminOperationsData({ notify = true } = {}) {
     loadTrialRequestsForAdmin(),
     loadContactRequestsForAdmin(),
     loadSourceCoverageForAdmin(),
+    loadV2IngestionForAdmin(),
     loadAdminCompanies(),
     loadAdminReviewQueue()
   ]);
@@ -9579,6 +9615,13 @@ function renderAdminActiveTab(opportunities) {
       ${renderAutomationStatusCard()}
       ${renderAutomationActions()}
       ${renderSourceCoverageSection()}
+      ${renderAdminV2IngestionPanel({
+        rows: state.v2IngestionRows || [],
+        loading: Boolean(state.v2IngestionLoading),
+        error: state.v2IngestionError || "",
+        escapeHtml,
+        formatDateTime
+      })}
       ${renderLatestImportRunsTable()}
       ${renderLatestTedOpportunities()}
     `;
