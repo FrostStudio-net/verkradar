@@ -3,8 +3,8 @@ export function renderAdminV2IngestionPanel({ rows = [], loading = false, error 
     <section class="ops-card v2-ingestion-panel">
       <div class="card-header">
         <div>
-          <h2>Parallel ingestion v2 — Phase A</h2>
-          <p>Read-only fixture/shadow health. This panel has no production-ingestion controls.</p>
+          <h2>V2 shadow — not customer visible</h2>
+          <p>Read-only fixture/shadow health. This panel has no promotion or production-ingestion controls.</p>
         </div>
         <span class="status-pill is-running">Isolated</span>
       </div>

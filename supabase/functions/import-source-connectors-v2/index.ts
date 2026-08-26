@@ -3,32 +3,32 @@ import { createObservation } from "../_shared/ingestion-v2/contracts.js";
 import { parseWithV2Adapter } from "../_shared/ingestion-v2/adapters/index.js";
 import { assertCircuitAllowsRun, detectZeroItemAnomaly, nextCircuitState } from "../_shared/ingestion-v2/metrics.js";
 import { assertRunDeadline, createRunLease, heartbeatLease } from "../_shared/ingestion-v2/run-control.js";
-import {
-  AKRANES_RSS_FIXTURE,
-  BORGARBYGGD_WORDPRESS_FIXTURE,
-  GARDABAER_PAGE_MONITOR_FIXTURE,
-} from "./_fixtures/fixture-data.ts";
+import { fetchWithRetry } from "../_shared/ingestion-v2/fetching.js";
+import { compareObservationToLegacy } from "../_shared/ingestion-v2/comparison.js";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
+const LEGACY_TABLE = "opportunities";
+const STAGING_PROJECT_REF = "ipixuxznqtrcdpzoxric";
+const PRODUCTION_PROJECT_REF = "asojxjbsgqbfpbepojzh";
 
-const PHASE_A_FIXTURES: Record<string, { sourceKey: string; content: string; contentType: string }> = {
+const PHASE_A_FIXTURES: Record<string, { sourceKey: string; file: URL; contentType: string }> = {
   "akranes-rss": {
     sourceKey: "akranes-utbod-v2",
-    content: AKRANES_RSS_FIXTURE,
+    file: new URL("./_fixtures/akranes-rss.xml", import.meta.url),
     contentType: "application/rss+xml",
   },
   "borgarbyggd-wordpress": {
     sourceKey: "borgarbyggd-utbod-v2",
-    content: BORGARBYGGD_WORDPRESS_FIXTURE,
+    file: new URL("./_fixtures/borgarbyggd-wordpress.json", import.meta.url),
     contentType: "application/json",
   },
   "gardabaer-page-monitor": {
     sourceKey: "gardabaer-utbod-v2",
-    content: GARDABAER_PAGE_MONITOR_FIXTURE,
+    file: new URL("./_fixtures/gardabaer-page-monitor.html", import.meta.url),
     contentType: "text/html",
   },
 };
@@ -40,6 +40,9 @@ Deno.serve(async (req) => {
   let runId = "";
   try {
     const supabaseUrl = requiredEnv("SUPABASE_URL");
+    if (supabaseUrl.includes(PRODUCTION_PROJECT_REF) || !supabaseUrl.includes(STAGING_PROJECT_REF)) {
+      return json({ error: "V2 shadow controls are staging-only", code: "V2_ENVIRONMENT_BLOCKED" }, 409);
+    }
     const anonKey = requiredEnv("SUPABASE_ANON_KEY");
     const serviceRoleKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
     const authHeader = req.headers.get("authorization") || "";
@@ -60,6 +63,14 @@ Deno.serve(async (req) => {
 
     const body = await safeJson(req);
     const fixtureName = String(body.fixture || body.fixtureName || "").trim();
+    const requestedSource = String(body.source_key || body.source || "").trim();
+    if (!fixtureName && requestedSource) {
+      const { data: shadowConfig, error: shadowError } = await adminClient.from("v2_source_configs").select("*").eq("source_key", requestedSource).single();
+      if (shadowError) throw shadowError;
+      if (shadowConfig.mode === "shadow") return await runShadow({ req, body, config: shadowConfig, adminClient });
+      if (shadowConfig.mode === "disabled") return json({ error: "Source is disabled", code: "V2_SOURCE_DISABLED" }, 409);
+      return json({ error: "Live fetch requires explicit shadow mode", code: "V2_SHADOW_MODE_REQUIRED" }, 409);
+    }
     const fixture = PHASE_A_FIXTURES[fixtureName];
     if (!fixture) return json({ error: "A known Phase A fixture is required", code: "V2_FIXTURE_REQUIRED" }, 400);
     if (body.live === true || body.trigger_type === "shadow" || body.trigger_type === "automation") {
@@ -122,7 +133,8 @@ Deno.serve(async (req) => {
     runId = String(run.id || "");
 
     assertRunDeadline(lease.run_deadline_at);
-    const candidates = parseWithV2Adapter(config.parser_name, config.parser_version, fixture.content);
+    const fixtureText = await Deno.readTextFile(fixture.file);
+    const candidates = parseWithV2Adapter(config.parser_name, config.parser_version, fixtureText);
     const zeroItem = detectZeroItemAnomaly({
       httpOk: true,
       parsedCount: candidates.length,
@@ -233,6 +245,33 @@ Deno.serve(async (req) => {
     return json({ ok: false, phase: "A", fixture_only: true, customer_visible_writes: 0, error: errorMessage(error), code: errorCode(error) }, 500);
   }
 });
+
+async function runShadow({ body, config, adminClient }) {
+  const started = Date.now();
+  const now = new Date();
+  const lease = createRunLease({ now, leaseMs: 30000, deadlineMs: Number(config.run_deadline_ms || 30000) });
+  const { data: run, error: runError } = await adminClient.from("v2_ingestion_runs").insert({ source_config_id: config.id, mode: "shadow", trigger_type: "shadow", status: "running", attempt_count: 1, started_at: now.toISOString(), ...lease, details: { phase: "B", live_requests_allowed: true, customer_visible_writes: 0, promotion_allowed: false } }).select("id").single();
+  if (runError) throw runError;
+  const headers = { "user-agent": "VerkRadar/2 shadow ingestion (+https://verkradar.is)" };
+  let fetched;
+  try {
+    fetched = await fetchWithRetry(config.endpoint_url, { maxAttempts: config.max_attempts, timeoutMs: config.request_timeout_ms, deadlineAt: Date.parse(lease.run_deadline_at), request: { headers } });
+    const text = await fetched.response.text();
+    const candidates = parseWithV2Adapter(config.parser_name, config.parser_version, text);
+    const observations = await Promise.all(candidates.map((candidate) => createObservation(candidate, { run_id: run.id, source_config_id: config.id, source_id: config.source_id, source_key: config.source_key, source_name: config.display_name, parser_name: config.parser_name, parser_version: config.parser_version, fetched_at: new Date().toISOString(), fetch_metadata: { live_request: true, http_status: fetched.response.status, content_type: fetched.response.headers.get("content-type"), attempts: fetched.attempts, latency_ms: fetched.latencyMs, mode: "shadow" } })));
+    let storedObservations = observations;
+    if (observations.length) { const { data, error } = await adminClient.from("v2_ingestion_observations").insert(observations).select("*"); if (error) throw error; storedObservations = data || observations; }
+    const { data: legacy } = await adminClient.from(LEGACY_TABLE).select("id,source_id,external_id,procurement_reference,canonical_url,url,title,description,buyer,deadline,publication_date,location").eq("source_id", config.source_id);
+    for (const observation of storedObservations) { const comparison = await compareObservationToLegacy(observation, legacy || []); await adminClient.from("v2_legacy_comparisons").upsert({ observation_id: observation.id, ...comparison }, { onConflict: "observation_id,legacy_opportunity_id,match_type" }); }
+    const finished = new Date().toISOString();
+    await adminClient.from("v2_ingestion_runs").update({ status: "succeeded", fetched_count: 1, parsed_count: candidates.length, observation_count: observations.length, finished_at: finished, lease_expires_at: finished, updated_at: finished }).eq("id", run.id);
+    await adminClient.from("v2_source_health").upsert({ source_config_id: config.id, status: "healthy", circuit_state: "closed", last_run_id: run.id, last_run_at: finished, last_shadow_at: finished, last_http_status: fetched.response.status, last_latency_ms: fetched.latencyMs, last_observation_count: observations.length, updated_at: finished }, { onConflict: "source_config_id" });
+    return json({ ok: true, phase: "B", mode: "shadow", run_id: run.id, source: config.display_name, parsed: candidates.length, observations: observations.length, live_requests_made: 1, customer_visible_writes: 0, promote_count: 0, latency_ms: Date.now() - started }, 200);
+  } catch (error) {
+    await adminClient.from("v2_ingestion_runs").update({ status: error.code === "V2_RUN_DEADLINE" ? "timed_out" : "failed", error_count: 1, error_code: error.code || "V2_SHADOW_ERROR", error_message: error.message, finished_at: new Date().toISOString() }).eq("id", run.id);
+    throw error;
+  }
+}
 
 async function markRunFailed(supabaseUrl: string, serviceRoleKey: string, runId: string, error: unknown) {
   const client = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
