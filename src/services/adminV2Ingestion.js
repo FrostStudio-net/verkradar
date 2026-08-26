@@ -59,7 +59,13 @@ export async function loadAdminV2IngestionOverview(supabase) {
 export async function invokeAdminV2Action(supabase, action, source_key = null, mode = null) {
   if (!supabase) throw new Error("Supabase client is not configured");
   const { data, error } = await supabase.functions.invoke("import-source-connectors-v2", { body: { action, ...(source_key ? { source_key } : {}), ...(action === "set_mode" ? { mode: mode || "shadow" } : {}) } });
-  if (error) throw error;
+  if (error) {
+    let detail = error.message || "Edge Function request failed";
+    const response = error.context;
+    if (response?.status) detail = `HTTP ${response.status}: ${detail}`;
+    try { const body = await response?.clone?.().json(); if (body?.error) detail += ` (${body.code || "V2_ERROR"}: ${body.error})`; } catch { /* non-JSON response */ }
+    throw new Error(`${action}${source_key ? ` [${source_key}]` : ""}: ${detail}`);
+  }
   if (!data?.ok) throw new Error(data?.error || "V2 action failed");
   return data;
 }

@@ -65,6 +65,14 @@ Deno.serve(async (req) => {
     const body = await safeJson(req);
     if (body.action === "set_mode") return await setShadowMode({ body, adminClient });
     if (body.action === "diagnostics") return await diagnostics({ adminClient });
+    if (body.action === "run_shadow") {
+      const requestedSource = String(body.source_key || "");
+      if (!ALLOWED_SOURCES.has(requestedSource)) return json({ error: "Source is not allowlisted", code: "V2_SOURCE_NOT_ALLOWED", action: "run_shadow", source_key: requestedSource }, 403);
+      const { data: shadowConfig, error: shadowError } = await adminClient.from("v2_source_configs").select("*").eq("source_key", requestedSource).single();
+      if (shadowError) throw shadowError;
+      if (shadowConfig.mode !== "shadow") return json({ error: "Source must be in shadow mode", code: "V2_SHADOW_MODE_REQUIRED", action: "run_shadow", source_key: requestedSource }, 409);
+      return await runShadow({ req, body, config: shadowConfig, adminClient });
+    }
     const fixtureName = String(body.fixture || body.fixtureName || "").trim();
     const requestedSource = String(body.source_key || body.source || "").trim();
     if (!fixtureName && requestedSource) {
