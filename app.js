@@ -64,6 +64,7 @@ import {
   loadAdminContactRequests,
   loadAdminV2IngestionOverview,
   invokeAdminV2Action,
+  verifyPhaseC1PromotionIdempotency,
   isPhaseC1StagingRuntime,
   PHASE_C1_CANARY_OBSERVATION_ID,
   PHASE_C1_REYKJAVIK_SOURCE_KEY,
@@ -273,6 +274,7 @@ let state = {
   v2IngestionError: null,
   v2CanaryAction: "",
   v2CanaryAssertions: null,
+  v2CanaryIdempotency: null,
   expandedSourceId: null,
   adminCompanies: [],
   adminCompaniesLoading: false,
@@ -580,6 +582,7 @@ function clearLocalProfileState() {
   state.v2IngestionError = null;
   state.v2CanaryAction = "";
   state.v2CanaryAssertions = null;
+  state.v2CanaryIdempotency = null;
   state.adminCompanies = [];
   state.adminCompaniesLoading = false;
   state.adminCompaniesLoaded = false;
@@ -605,6 +608,7 @@ function clearAdminAccessState() {
   state.v2IngestionLoaded = false;
   state.v2CanaryAction = "";
   state.v2CanaryAssertions = null;
+  state.v2CanaryIdempotency = null;
   state.adminCompanies = [];
   state.adminCompaniesLoaded = false;
   state.adminReviewMatches = [];
@@ -749,12 +753,13 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
-  if (["v2-c1-approve-source", "v2-c1-revoke-source", "v2-c1-approve-observation", "v2-c1-promote", "v2-c1-assertions", "v2-c1-rollback"].includes(name)) {
+  if (["v2-c1-approve-source", "v2-c1-revoke-source", "v2-c1-approve-observation", "v2-c1-promote", "v2-c1-test-idempotency", "v2-c1-assertions", "v2-c1-rollback"].includes(name)) {
     event.preventDefault();
     if (!supabaseClient || !state.isAdmin || !isPhaseC1StagingRuntime(SUPABASE_URL)) return;
     action.disabled = true;
     state.v2CanaryAction = name;
     state.v2IngestionError = null;
+    if (name === "v2-c1-test-idempotency") state.v2CanaryIdempotency = null;
     render();
     try {
       let result;
@@ -764,6 +769,10 @@ document.addEventListener("click", async (event) => {
         result = await invokeAdminV2Action(supabaseClient, "approve_promotion", null, null, { observation_id: PHASE_C1_CANARY_OBSERVATION_ID, note: "Phase C1 Reykjavík staging canary" });
       } else if (name === "v2-c1-promote") {
         result = await invokeAdminV2Action(supabaseClient, "promote_canary", null, null, { observation_id: PHASE_C1_CANARY_OBSERVATION_ID });
+      } else if (name === "v2-c1-test-idempotency") {
+        const expectedOpportunityId = action.dataset.opportunityId;
+        result = await invokeAdminV2Action(supabaseClient, "promote_canary", null, null, { observation_id: PHASE_C1_CANARY_OBSERVATION_ID });
+        state.v2CanaryIdempotency = await verifyPhaseC1PromotionIdempotency(supabaseClient, result, expectedOpportunityId);
       } else if (name === "v2-c1-assertions") {
         result = await invokeAdminV2Action(supabaseClient, "canary_assertions", null, null, { opportunity_id: action.dataset.opportunityId });
         state.v2CanaryAssertions = result.assertions || null;
@@ -771,7 +780,7 @@ document.addEventListener("click", async (event) => {
         result = await invokeAdminV2Action(supabaseClient, "rollback_canary", null, null, { observation_id: PHASE_C1_CANARY_OBSERVATION_ID, reason: "Phase C1 staging canary rollback" });
         state.v2CanaryAssertions = result.rollback?.assertions || null;
       }
-      if (name !== "v2-c1-assertions") await loadV2IngestionForAdmin();
+      if (!["v2-c1-assertions", "v2-c1-test-idempotency"].includes(name)) await loadV2IngestionForAdmin();
     } catch (error) {
       console.error(error);
       state.v2IngestionError = formatSupabaseError(error);
@@ -9681,7 +9690,8 @@ function renderAdminActiveTab(opportunities) {
         controlsEnabled: isPhaseC1StagingRuntime(SUPABASE_URL),
         canaryControlsEnabled: state.isAdmin && isPhaseC1StagingRuntime(SUPABASE_URL),
         canaryAction: state.v2CanaryAction || "",
-        canaryAssertions: state.v2CanaryAssertions || null
+        canaryAssertions: state.v2CanaryAssertions || null,
+        canaryIdempotency: state.v2CanaryIdempotency || null
       })}
       ${renderLatestImportRunsTable()}
       ${renderLatestTedOpportunities()}

@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
 import { getKnownCanaryEligibility, renderAdminV2IngestionPanel } from "../../../src/pages/adminV2Ingestion.js";
-import { invokeAdminV2Action, isPhaseC1StagingRuntime } from "../../../src/services/adminV2Ingestion.js";
+import { invokeAdminV2Action, isPhaseC1StagingRuntime, verifyPhaseC1PromotionIdempotency } from "../../../src/services/adminV2Ingestion.js";
 
 const escapeHtml = (value) => String(value ?? "");
 const formatDateTime = (value) => String(value || "");
@@ -94,8 +94,61 @@ test("quarantined state exposes assertions and rollback but never release or dow
   const html = renderAdminV2IngestionPanel({ rows: [promoted], escapeHtml, formatDateTime, controlsEnabled: true, canaryControlsEnabled: true });
   assert.match(html, /QUARANTINED CANARY/);
   assert.match(html, /data-action="v2-c1-assertions"/);
+  assert.match(html, /data-action="v2-c1-test-idempotency"/);
+  assert.match(html, /Test promotion idempotency/);
   assert.match(html, /data-action="v2-c1-rollback"/);
   assert.doesNotMatch(html, /data-action="[^"]*(release|match|ai-review|report|send)/i);
+});
+
+test("idempotency control is absent until the observation is an already-promoted quarantined canary", () => {
+  const html = render({ canaryControlsEnabled: true });
+  assert.doesNotMatch(html, /v2-c1-test-idempotency/);
+});
+
+test("idempotency verifier passes only for one unchanged quarantined identity and zero downstream", async () => {
+  const opportunityId = "11111111-1111-4111-8111-111111111111";
+  const responses = {
+    v2_ingestion_observations: [{
+      id: "a5ded8dc-a745-4297-9dc7-e2783b374630",
+      source_id: "22222222-2222-4222-8222-222222222222",
+      external_id: "16200",
+      procurement_reference: "16200",
+      canonical_url: "https://reykjavik.is/utbod/16200-test",
+      promoted_opportunity_id: opportunityId,
+      promotion_state: "promoted",
+    }],
+    opportunities: [{
+      id: opportunityId,
+      status: "hidden",
+      raw_payload: {
+        procurement_reference: "16200",
+        promotion_quarantine: "phase_c_canary",
+        hidden_from_reports: true,
+        admin_report_status: "hidden",
+        promotion_release_allowed: false,
+      },
+    }],
+    opportunity_ingestion_provenance: [{ id: "33333333-3333-4333-8333-333333333333", opportunity_id: opportunityId, observation_id: "a5ded8dc-a745-4297-9dc7-e2783b374630", provenance_type: "v2_created" }],
+  };
+  const builder = (table) => {
+    const result = { data: responses[table], error: null };
+    const chain = {
+      select: () => chain,
+      eq: () => chain,
+      contains: () => chain,
+      single: async () => ({ data: responses[table][0], error: null }),
+      then: (resolve) => Promise.resolve(result).then(resolve),
+    };
+    return chain;
+  };
+  const supabase = {
+    from: builder,
+    functions: { invoke: async (_name, { body }) => ({ data: body.action === "canary_assertions" ? { ok: true, assertions: { quarantined: true, zero_downstream: true } } : null, error: null }) },
+  };
+  const result = await verifyPhaseC1PromotionIdempotency(supabase, { opportunity_id: opportunityId }, opportunityId);
+  assert.equal(result.pass, true);
+  assert.equal(result.opportunity_count, 1);
+  assert.equal(result.provenance_count, 1);
 });
 
 test("page-load service is select-only and canary mutations use authenticated Edge actions", async () => {

@@ -128,3 +128,68 @@ export async function invokeAdminV2Action(supabase, action, source_key = null, m
   if (!data?.ok) throw new Error(`${data?.code || "V2_ERROR"}: ${data?.error || "V2 action failed"}`);
   return data;
 }
+
+export async function verifyPhaseC1PromotionIdempotency(supabase, promotionResult, expectedOpportunityId) {
+  if (!supabase) throw new Error("Supabase client is not configured");
+  const returnedOpportunityId = String(promotionResult?.opportunity_id || "").trim();
+  if (!returnedOpportunityId) throw new Error("Promotion response did not include an opportunity ID");
+
+  const observationResult = await supabase.from("v2_ingestion_observations")
+    .select("id,source_id,external_id,procurement_reference,canonical_url,promoted_opportunity_id,promotion_state")
+    .eq("id", PHASE_C1_CANARY_OBSERVATION_ID).single();
+  if (observationResult.error) throw observationResult.error;
+  const observation = observationResult.data;
+
+  const identityQueries = [
+    supabase.from("opportunities").select("id,status,raw_payload")
+      .eq("source_id", observation.source_id).eq("external_id", observation.external_id),
+  ];
+  if (observation.canonical_url) {
+    identityQueries.push(supabase.from("opportunities").select("id,status,raw_payload").eq("url", observation.canonical_url));
+  }
+  if (observation.procurement_reference) {
+    identityQueries.push(supabase.from("opportunities").select("id,status,raw_payload").contains("raw_payload", { procurement_reference: observation.procurement_reference }));
+  }
+
+  const [identityResults, provenanceResult] = await Promise.all([
+    Promise.all(identityQueries),
+    supabase.from("opportunity_ingestion_provenance")
+      .select("id,opportunity_id,observation_id,provenance_type")
+      .eq("observation_id", PHASE_C1_CANARY_OBSERVATION_ID),
+  ]);
+  for (const result of [...identityResults, provenanceResult]) {
+    if (result.error) throw result.error;
+  }
+
+  const opportunitiesById = new Map();
+  for (const result of identityResults) {
+    for (const opportunity of result.data || []) opportunitiesById.set(opportunity.id, opportunity);
+  }
+  const opportunity = opportunitiesById.get(returnedOpportunityId) || null;
+  const payload = opportunity?.raw_payload || {};
+  const quarantineIntact = opportunity?.status === "hidden"
+    && payload.promotion_quarantine === "phase_c_canary"
+    && payload.hidden_from_reports === true
+    && payload.admin_report_status === "hidden"
+    && payload.promotion_release_allowed === false;
+  const assertionsResult = await invokeAdminV2Action(supabase, "canary_assertions", null, null, { opportunity_id: returnedOpportunityId });
+  const downstream = assertionsResult.assertions || {};
+  const result = {
+    returned_opportunity_id: returnedOpportunityId,
+    expected_opportunity_id: expectedOpportunityId,
+    same_opportunity_id: returnedOpportunityId === expectedOpportunityId,
+    opportunity_count: opportunitiesById.size,
+    provenance_count: (provenanceResult.data || []).length,
+    observation_points_to_same_opportunity: observation.promoted_opportunity_id === returnedOpportunityId,
+    quarantine_intact: quarantineIntact,
+    downstream_assertions: downstream,
+  };
+  result.pass = result.same_opportunity_id
+    && result.opportunity_count === 1
+    && result.provenance_count === 1
+    && result.observation_points_to_same_opportunity
+    && result.quarantine_intact
+    && downstream.quarantined === true
+    && downstream.zero_downstream === true;
+  return result;
+}

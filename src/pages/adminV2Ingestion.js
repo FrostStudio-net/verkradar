@@ -1,4 +1,4 @@
-export function renderAdminV2IngestionPanel({ rows = [], loading = false, error = "", escapeHtml, formatDateTime, controlsEnabled = false, canaryControlsEnabled = false, canaryAction = "", canaryAssertions = null }) {
+export function renderAdminV2IngestionPanel({ rows = [], loading = false, error = "", escapeHtml, formatDateTime, controlsEnabled = false, canaryControlsEnabled = false, canaryAction = "", canaryAssertions = null, canaryIdempotency = null }) {
   const canMutate = controlsEnabled === true;
   const reykjavik = rows.find((row) => row.source_key === "reykjavik-utbod-v2") || null;
   return `
@@ -31,12 +31,12 @@ export function renderAdminV2IngestionPanel({ rows = [], loading = false, error 
           </table>
         </div>
       ` : error ? "" : `<div class="empty-card">No v2 sources configured. Apply the Phase A migration to create the isolated control plane.</div>`}
-      ${canaryControlsEnabled && reykjavik ? renderPhaseCCanary(reykjavik, escapeHtml, formatDateTime, canaryAction, canaryAssertions) : ""}
+      ${canaryControlsEnabled && reykjavik ? renderPhaseCCanary(reykjavik, escapeHtml, formatDateTime, canaryAction, canaryAssertions, canaryIdempotency) : ""}
     </section>
   `;
 }
 
-function renderPhaseCCanary(row, escapeHtml, formatDateTime, canaryAction, assertions) {
+function renderPhaseCCanary(row, escapeHtml, formatDateTime, canaryAction, assertions, idempotency) {
   const canary = row.phaseCCanary || {};
   const observation = canary.observation || null;
   const provenance = canary.provenance || null;
@@ -48,6 +48,13 @@ function renderPhaseCCanary(row, escapeHtml, formatDateTime, canaryAction, asser
   const canPromote = sourceApproved && observationApproved && eligibility.ready && !opportunity && !observation?.promoted_opportunity_id;
   const payload = opportunity?.raw_payload || {};
   const quarantine = payload.promotion_quarantine === "phase_c_canary";
+  const alreadyPromotedCanary = Boolean(
+    opportunity
+    && provenance
+    && observation?.promotion_state === "promoted"
+    && observation?.promoted_opportunity_id === opportunity.id
+    && quarantine
+  );
   return `
     <section class="phase-c-canary" aria-labelledby="phase-c-canary-title">
       <div class="card-header">
@@ -104,14 +111,34 @@ function renderPhaseCCanary(row, escapeHtml, formatDateTime, canaryAction, asser
             <dt>Provenance type</dt><dd>${escapeHtml(provenance?.provenance_type || "—")}</dd>
           </dl>
           <div class="admin-inline-actions">
+            ${alreadyPromotedCanary ? `<button type="button" data-action="v2-c1-test-idempotency" data-opportunity-id="${escapeHtml(opportunity.id)}" ${busy ? "disabled" : ""}>Test promotion idempotency</button>` : ""}
             <button type="button" data-action="v2-c1-assertions" data-opportunity-id="${escapeHtml(opportunity.id)}" ${busy ? "disabled" : ""}>Run downstream safety assertions</button>
             <button type="button" data-action="v2-c1-rollback" ${busy ? "disabled" : ""}>Roll back canary</button>
           </div>
+          ${idempotency ? renderIdempotencyResult(idempotency, escapeHtml) : ""}
           ${assertions ? `<pre class="phase-c-canary-assertions">${escapeHtml(JSON.stringify(assertions, null, 2))}</pre>` : ""}
         </div>
       ` : ""}
       ${canaryAction ? `<p class="admin-message">Running ${escapeHtml(canaryAction)}…</p>` : ""}
     </section>
+  `;
+}
+
+function renderIdempotencyResult(result, escapeHtml) {
+  const status = result.pass === true ? "IDEMPOTENCY PASS" : "IDEMPOTENCY FAIL";
+  return `
+    <div class="admin-message ${result.pass === true ? "" : "is-error"}" role="status">
+      <strong>${status}</strong>
+      <dl>
+        <dt>Returned opportunity ID</dt><dd><code>${escapeHtml(result.returned_opportunity_id || "—")}</code></dd>
+        <dt>Opportunity count for deterministic identity</dt><dd>${Number(result.opportunity_count ?? 0)}</dd>
+        <dt>Provenance count</dt><dd>${Number(result.provenance_count ?? 0)}</dd>
+        <dt>Observation points to same opportunity</dt><dd>${result.observation_points_to_same_opportunity === true ? "yes" : "no"}</dd>
+        <dt>Quarantine intact</dt><dd>${result.quarantine_intact === true ? "yes" : "no"}</dd>
+        <dt>Downstream assertion</dt><dd>${result.downstream_assertions?.zero_downstream === true ? "zero downstream" : "FAILED"}</dd>
+      </dl>
+      <pre class="phase-c-canary-assertions">${escapeHtml(JSON.stringify(result, null, 2))}</pre>
+    </div>
   `;
 }
 
