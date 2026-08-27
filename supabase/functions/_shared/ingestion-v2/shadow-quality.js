@@ -5,12 +5,14 @@ export const THREE_SOURCE_KEYS = Object.freeze({
   RIKISKAUP: "rikiskaup-utbod-v2",
   VEGAGERDIN: "vegagerdin-utbod-v2",
   ISAFJORDUR: "isafjordur-utbod-v2",
+  REYKJAVIK: "reykjavik-utbod-v2",
 });
 
 export const DETAIL_ENRICHMENT_LIMITS = Object.freeze({
   [THREE_SOURCE_KEYS.RIKISKAUP]: 20,
   [THREE_SOURCE_KEYS.VEGAGERDIN]: 12,
   [THREE_SOURCE_KEYS.ISAFJORDUR]: 15,
+  [THREE_SOURCE_KEYS.REYKJAVIK]: 12,
 });
 
 export function getSourceClassificationContext(config) {
@@ -23,6 +25,9 @@ export function getSourceClassificationContext(config) {
   }
   if (sourceKey === THREE_SOURCE_KEYS.ISAFJORDUR) {
     return { source_type: "municipal", connector_type: "rss_feed", source_organisation: "Ísafjarðarbær" };
+  }
+  if (sourceKey === THREE_SOURCE_KEYS.REYKJAVIK) {
+    return { source_type: "municipal_procurement_portal", connector_type: "municipal_html_index", source_organisation: "Reykjavíkurborg procurement" };
   }
   if (["akranes-utbod-v2", "borgarbyggd-utbod-v2", "gardabaer-utbod-v2"].includes(sourceKey)) {
     return { source_type: "municipal", connector_type: "rss_feed", source_organisation: String(config?.display_name || sourceKey) };
@@ -80,7 +85,9 @@ export async function fetchBoundedWordpressPages(options) {
 
 export async function enrichCandidatesBounded(candidates, options) {
   const sourceKey = String(options.sourceKey || "");
-  const limit = Math.min(positiveInt(options.limit, DETAIL_ENRICHMENT_LIMITS[sourceKey] || 0), candidates.length);
+  const configuredLimit = DETAIL_ENRICHMENT_LIMITS[sourceKey] || 0;
+  const requestedLimit = positiveInt(options.limit, configuredLimit);
+  const limit = Math.min(configuredLimit ? Math.min(requestedLimit, configuredLimit) : requestedLimit, candidates.length);
   const metrics = { attempted: 0, succeeded: 0, failed: 0, enriched: 0, no_supported_fields: 0, skipped: 0, limit };
   const enriched = [];
 
@@ -107,6 +114,8 @@ export async function enrichCandidatesBounded(candidates, options) {
       else metrics.no_supported_fields += 1;
       enriched.push(withEnrichment({
         ...candidate,
+        title: candidate.title || metadata.title,
+        description: candidate.description || metadata.description,
         deadline: candidate.deadline || metadata.deadline,
         buyer: candidate.buyer || metadata.buyer,
         procurement_reference: candidate.procurement_reference || metadata.procurement_reference,
@@ -123,6 +132,16 @@ export async function enrichCandidatesBounded(candidates, options) {
 }
 
 export function isLikelyProcurementCandidate(candidate, sourceKey, now = new Date()) {
+  if (sourceKey === THREE_SOURCE_KEYS.REYKJAVIK) {
+    try {
+      const url = new URL(candidate?.canonical_url || candidate?.discovered_url || "");
+      return ["reykjavik.is", "www.reykjavik.is"].includes(url.hostname.toLowerCase()) &&
+        /^\/utbod\/\d{4,}-/i.test(url.pathname) &&
+        candidate?.safe_source_payload?.listing_context === "current_procurement";
+    } catch {
+      return false;
+    }
+  }
   const text = normalize(`${candidate?.title || ""} ${candidate?.description || ""}`);
   const procurementSignal = /\b(utbod\w*|tilbod\w*|markadskonnun\w*|rammasamning\w*|verdkonnun\w*|bjod\w*|innkaup\w*|tender\w*|procurement|rfi)\b/.test(text);
   if (!procurementSignal) return false;
@@ -138,6 +157,8 @@ export function applySourcePredictionPolicy(prediction, observation, config, now
   const sourceKey = String(config?.source_key || "");
   let adjusted = sourceKey === THREE_SOURCE_KEYS.RIKISKAUP
     ? applyRikiskaupProcurementType(prediction, observation)
+    : sourceKey === THREE_SOURCE_KEYS.REYKJAVIK
+      ? applyReykjavikProcurementType(prediction, observation)
     : { ...prediction };
   adjusted = applyDeadlineActionabilityGuard(adjusted, observation?.deadline, now);
   const category = categorizeShadowObservation(observation, adjusted, sourceKey, now);
@@ -149,6 +170,25 @@ export function applySourcePredictionPolicy(prediction, observation, config, now
     adjusted.requires_admin_review = true;
   }
   return { prediction: adjusted, category };
+}
+
+function applyReykjavikProcurementType(prediction, observation) {
+  const procurementType = String(observation?.safe_source_payload?.shadow_enrichment?.procurement_type || "");
+  if (procurementType === "market_consultation") {
+    return mappedPrediction(prediction, "market_consultation", true, false, "Explicit Reykjavík RFI/market-consultation evidence on the current procurement listing.");
+  }
+  if (["open_tender", "prequalification"].includes(procurementType)) {
+    return mappedPrediction(prediction, "open_competition", true, false, procurementType === "prequalification"
+      ? "Explicit Reykjavík prequalification accepting supplier applications."
+      : "Explicit Reykjavík tender accepting supplier bids.");
+  }
+  if (procurementType === "transparency_notice") {
+    return mappedPrediction(prediction, "uncertain", false, true, "Reykjavík transparency/direct-award notice is not an open competition.");
+  }
+  if (procurementType === "award_or_followup") {
+    return mappedPrediction(prediction, "award_or_contract_signed", false, false, "Explicit Reykjavík procurement award/follow-up evidence.");
+  }
+  return { ...prediction };
 }
 
 function applyRikiskaupProcurementType(prediction, observation) {
@@ -197,7 +237,7 @@ export function categorizeShadowObservation(observation, prediction, sourceKey, 
 
 /** @param {any} input */
 export function buildShadowParserHealth(input) {
-  const { config, fetched, parsed, valid, invalid, duplicates, parserErrors = [], enrichment, suspiciousZero, pagination } = input;
+  const { config, fetched, parsed, valid, invalid, duplicates, parserErrors = [], enrichment, suspiciousZero, pagination, classification } = input;
   return {
     parser_name: config.parser_name,
     parser_version: config.parser_version,
@@ -210,6 +250,7 @@ export function buildShadowParserHealth(input) {
     enrichment: enrichment || { attempted: 0, succeeded: 0, failed: 0, enriched: 0, skipped: 0 },
     suspicious_zero_items: suspiciousZero === true,
     pagination: pagination || null,
+    classification: classification || { stage_distribution: {}, actionable: 0, non_actionable: 0 },
     fixture_only: false,
   };
 }

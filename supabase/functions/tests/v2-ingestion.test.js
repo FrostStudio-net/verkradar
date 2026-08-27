@@ -20,6 +20,10 @@ import { extractProcurementDetailMetadata, extractProcurementReference } from ".
 import { extractRikiskaupDetailMetadata } from "../_shared/ingestion-v2/adapters/rikiskaup-enrichment.js";
 import { extractIsafjordurDetailMetadata } from "../_shared/ingestion-v2/adapters/isafjordur-enrichment.js";
 import {
+  classifyReykjavikProcurementType,
+  extractReykjavikDetailMetadata,
+} from "../_shared/ingestion-v2/adapters/reykjavik-enrichment.js";
+import {
   applySourcePredictionPolicy,
   buildShadowParserHealth,
   countSemanticDuplicates,
@@ -33,7 +37,9 @@ import { classifyProcurementStage, classificationColumns } from "../_shared/proc
 import { buildAdminV2OverviewRows } from "../../../src/services/adminV2Ingestion.js";
 
 const fixtureRoot = new URL("../import-source-connectors-v2/_fixtures/", import.meta.url);
+const detailFixtureRoot = new URL("./fixtures/", import.meta.url);
 const migrationUrl = new URL("../../migrations/20260826120000_parallel_source_ingestion_v2_phase_a.sql", import.meta.url);
+const reykjavikMigrationUrl = new URL("../../migrations/20260827163000_v2_reykjavik_fixture_source.sql", import.meta.url);
 const functionUrl = new URL("../import-source-connectors-v2/index.ts", import.meta.url);
 
 const context = {
@@ -82,6 +88,123 @@ for (const [name, parser, file] of [["Ríkiskaup", "rikiskaup-wordpress", "rikis
     assert.ok(rows.every((row) => row.canonical_url && row.title));
   });
 }
+
+test("parses only current Reykjavík procurement detail links from the public index", async () => {
+  const input = await readFile(new URL("reykjavik-html-index.html", fixtureRoot), "utf8");
+  const rows = parseWithV2Adapter("reykjavik-html-index", "1.0.0", input);
+  assert.equal(rows.length, 5);
+  assert.deepEqual(rows.map((row) => row.procurement_reference), ["16347", "16200", "16322", "16341", "16344"]);
+  assert.ok(rows.every((row) => row.external_id === row.procurement_reference));
+  assert.ok(rows.every((row) => row.canonical_url.startsWith("https://reykjavik.is/utbod/")));
+  assert.ok(rows.every((row) => row.safe_source_payload.listing_context === "current_procurement"));
+  assert.equal(rows.some((row) => row.canonical_url.includes("frettir")), false);
+  const duplicated = parseWithV2Adapter("reykjavik-html-index", "1.0.0", `${input}<a href="/utbod/16347-second-render">Duplicate rendering</a>`);
+  assert.equal(duplicated.length, 5);
+});
+
+test("Reykjavík index reports structural drift but permits a genuine empty listing", () => {
+  assert.deepEqual(parseWithV2Adapter("reykjavik-html-index", "1.0.0", "<main><h1>Útboðsauglýsingar</h1><p>Engin útboð eru í auglýsingu.</p></main>"), []);
+  assert.throws(
+    () => parseWithV2Adapter("reykjavik-html-index", "1.0.0", "<main><h1>Útboðsauglýsingar</h1><div>Útboð nr. 16347</div></main>"),
+    { code: "V2_REYKJAVIK_STRUCTURE_MISMATCH" },
+  );
+});
+
+test("Reykjavík detail parser extracts an open tender from the public Drupal article", async () => {
+  const metadata = extractReykjavikDetailMetadata(await readFile(new URL("reykjavik-detail-open.html", detailFixtureRoot), "utf8"));
+  assert.equal(metadata.title, "16200 Rammasamningur um mötuneytisþjónustu SFS");
+  assert.equal(metadata.procurement_reference, "16200");
+  assert.equal(metadata.buyer, "Skóla- og frístundasviðs Reykjavíkurborgar");
+  assert.equal(metadata.deadline, "2026-10-06");
+  assert.equal(metadata.procurement_type, "open_tender");
+  assert.equal(metadata.form_type, "competition");
+  assert.match(metadata.description, /fulla mötuneytisþjónustu/);
+  assert.match(metadata.estimated_value, /2\.200 milljónir kr\./);
+  assert.equal(metadata.portal_url, "https://utbod.reykjavik.is/");
+});
+
+test("Reykjavík detail parser distinguishes forval and RFI metadata", async () => {
+  const forval = extractReykjavikDetailMetadata(await readFile(new URL("reykjavik-detail-forval.html", detailFixtureRoot), "utf8"));
+  assert.equal(forval.procurement_reference, "16341");
+  assert.equal(forval.buyer, "Almenningssamgangna höfuðborgarsvæðisins ohf.");
+  assert.equal(forval.deadline, "2026-09-17");
+  assert.equal(forval.procurement_type, "prequalification");
+  const rfi = extractReykjavikDetailMetadata(await readFile(new URL("reykjavik-detail-rfi.html", detailFixtureRoot), "utf8"));
+  assert.equal(rfi.procurement_reference, "16347");
+  assert.equal(rfi.buyer, "Þjónustu- og nýsköpunarsvið Reykjavíkurborgar");
+  assert.equal(rfi.deadline, "2026-09-17");
+  assert.equal(rfi.procurement_type, "market_consultation");
+});
+
+test("Reykjavík detail parser fails closed for ordinary pages and absent optional metadata", async () => {
+  const missing = extractReykjavikDetailMetadata(await readFile(new URL("reykjavik-detail-missing.html", detailFixtureRoot), "utf8"));
+  assert.equal(missing.procurement_reference, "16344");
+  assert.equal(missing.deadline, null);
+  assert.equal(missing.buyer, null);
+  assert.equal(missing.contact, null);
+  assert.equal(missing.cpv, null);
+  assert.equal(missing.estimated_value, null);
+  const news = extractReykjavikDetailMetadata("<html><body class=\"node-news\"><article><h1>Sumarhátíð</h1><p>Útboð nr. 99999 í leiðarkerfi.</p></article></body></html>");
+  assert.equal(news.enrichment_status, "no_supported_fields");
+  assert.equal(news.procurement_reference, null);
+  assert.equal(news.procurement_type, "unknown");
+});
+
+test("Reykjavík source mapping is explicit and the shared deadline guard wins", async () => {
+  assert.equal(classifyReykjavikProcurementType("Gagnsæistilkynning (VEAT) vegna fyrirhugaðrar beinnar samningsgerðar"), "transparency_notice");
+  const base = { procurement_stage: "uncertain", actionable_for_suppliers: false, requires_admin_review: true, classification_confidence: 0.35 };
+  const map = (procurement_type, deadline = "2026-09-30") => applySourcePredictionPolicy(base, {
+    deadline,
+    safe_source_payload: { shadow_enrichment: { procurement_type } },
+  }, { source_key: THREE_SOURCE_KEYS.REYKJAVIK }, new Date("2026-08-27T12:00:00Z")).prediction;
+  assert.equal(map("open_tender").procurement_stage, "open_competition");
+  assert.equal(map("prequalification").procurement_stage, "open_competition");
+  assert.equal(map("market_consultation").procurement_stage, "market_consultation");
+  assert.equal(map("transparency_notice").actionable_for_suppliers, false);
+  assert.equal(map("award_or_followup").procurement_stage, "award_or_contract_signed");
+  const expired = extractReykjavikDetailMetadata(await readFile(new URL("reykjavik-detail-expired.html", detailFixtureRoot), "utf8"));
+  assert.equal(expired.deadline, "2026-01-12");
+  assert.equal(map(expired.procurement_type, expired.deadline).procurement_stage, "open_competition");
+  assert.equal(map(expired.procurement_type, expired.deadline).actionable_for_suppliers, false);
+});
+
+test("Reykjavík bounded enrichment isolates failures and does not exceed the hard limit", async () => {
+  const candidates = Array.from({ length: 14 }, (_, index) => ({
+    external_id: String(17000 + index),
+    procurement_reference: String(17000 + index),
+    title: `Útboð ${17000 + index}`,
+    canonical_url: `https://reykjavik.is/utbod/${17000 + index}-fixture`,
+    safe_source_payload: { listing_context: "current_procurement" },
+  }));
+  const detail = await readFile(new URL("reykjavik-detail-open.html", detailFixtureRoot), "utf8");
+  const result = await enrichCandidatesBounded(candidates, {
+    sourceKey: THREE_SOURCE_KEYS.REYKJAVIK,
+    limit: 99,
+    now: new Date("2026-08-27T00:00:00Z"),
+    metadataExtractor: extractReykjavikDetailMetadata,
+    fetchDetail: async (_url, candidate) => candidate.external_id === "17001" ? Promise.reject(Object.assign(new Error("timeout"), { code: "V2_FETCH_TIMEOUT" })) : detail,
+  });
+  assert.deepEqual(result.metrics, { attempted: 12, succeeded: 11, failed: 1, enriched: 11, no_supported_fields: 0, skipped: 2, limit: 12 });
+  assert.equal(result.candidates[1].safe_source_payload.shadow_enrichment.enrichment_status, "failed");
+  assert.equal(result.candidates[12].safe_source_payload.shadow_enrichment.enrichment_status, "skipped_limit");
+});
+
+test("Reykjavík identity resolves stable reference before canonical URL", async () => {
+  const observation = await createObservation({
+    external_id: "16347",
+    procurement_reference: "16347",
+    title: "Markaðskönnun fyrir nemendakerfi",
+    canonical_url: "https://reykjavik.is/utbod/16347-markadskonnun",
+  }, { ...context, source_key: THREE_SOURCE_KEYS.REYKJAVIK });
+  const result = await resolveIdentity(observation, [{
+    id: "same-reference",
+    source_id: "another-source",
+    procurement_reference: "16347",
+    canonical_url: "https://reykjavik.is/utbod/different",
+  }]);
+  assert.equal(result.match_type, "procurement_reference");
+  assert.equal(result.auto_merge, true);
+});
 
 test("content hashes are stable across object key order and fetch time", async () => {
   const candidate = {
@@ -658,15 +781,45 @@ test("classification context is source-accurate without changing other source de
   assert.deepEqual(getSourceClassificationContext({ source_key: THREE_SOURCE_KEYS.RIKISKAUP }).source_type, "national_procurement_portal");
   assert.deepEqual(getSourceClassificationContext({ source_key: THREE_SOURCE_KEYS.VEGAGERDIN }).source_type, "road_authority_broad_feed");
   assert.deepEqual(getSourceClassificationContext({ source_key: THREE_SOURCE_KEYS.ISAFJORDUR }).source_type, "municipal");
+  assert.deepEqual(getSourceClassificationContext({ source_key: THREE_SOURCE_KEYS.REYKJAVIK }), {
+    source_type: "municipal_procurement_portal",
+    connector_type: "municipal_html_index",
+    source_organisation: "Reykjavíkurborg procurement",
+  });
   assert.deepEqual(getSourceClassificationContext({ source_key: "akranes-utbod-v2", adapter_type: "rss" }), { source_type: "municipal", connector_type: "rss_feed", source_organisation: "akranes-utbod-v2" });
 });
 
 test("shadow parser health records stored run and enrichment metrics", () => {
-  const health = buildShadowParserHealth({ config: { parser_name: "rikiskaup-wordpress", parser_version: "1.0.0" }, fetched: 3, parsed: 40, valid: 39, invalid: 1, duplicates: 2, parserErrors: ["deadline_invalid"], enrichment: { attempted: 20, succeeded: 19, failed: 1 }, suspiciousZero: false, pagination: { fetched_pages: 3 } });
+  const health = buildShadowParserHealth({ config: { parser_name: "rikiskaup-wordpress", parser_version: "1.0.0" }, fetched: 3, parsed: 40, valid: 39, invalid: 1, duplicates: 2, parserErrors: ["deadline_invalid"], enrichment: { attempted: 20, succeeded: 19, failed: 1 }, suspiciousZero: false, pagination: { fetched_pages: 3 }, classification: { stage_distribution: { open_competition: 7, uncertain: 33 }, actionable: 7, non_actionable: 33 } });
   assert.equal(health.fetched_count, 3);
   assert.equal(health.valid_count, 39);
   assert.equal(health.duplicate_count, 2);
   assert.equal(health.enrichment.failed, 1);
+  assert.deepEqual(health.classification.stage_distribution, { open_competition: 7, uncertain: 33 });
+  assert.equal(health.classification.actionable, 7);
+});
+
+test("Reykjavík migration is fixture-only public HTML with a disabled fallback", async () => {
+  const sql = await readFile(reykjavikMigrationUrl, "utf8");
+  assert.match(sql, /'reykjavik-utbod-v2'/);
+  assert.match(sql, /'municipal_html_index'/);
+  assert.match(sql, /'fixture_only'/);
+  assert.match(sql, /https:\/\/reykjavik\.is\/utbodsauglysingar/);
+  assert.match(sql, /"public_html_only":true/);
+  assert.match(sql, /"authenticated_documents":false/);
+  assert.match(sql, /"enabled":false,"kind":"in_tend_xhr"/);
+  assert.doesNotMatch(sql, /mode\s*=\s*excluded\.mode/);
+});
+
+test("Reykjavík runtime is allowlisted but has no authenticated or In-Tend request path", async () => {
+  const source = await readFile(functionUrl, "utf8");
+  assert.match(source, /"reykjavik-utbod-v2"/);
+  assert.match(source, /"reykjavik-html-index"/);
+  assert.match(source, /extractReykjavikDetailMetadata/);
+  assert.doesNotMatch(source, /MyTenders|Projects\.svc|reCAPTCHA|authenticated document/i);
+  assert.match(source, /customer_visible_writes:\s*0/);
+  assert.match(source, /promotion_allowed:\s*false/);
+  assert.match(source, /promote_count:\s*0/);
 });
 
 test("admin diagnostics prefer stored run totals over globally limited observation rows", () => {

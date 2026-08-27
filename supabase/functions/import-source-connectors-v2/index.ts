@@ -9,6 +9,7 @@ import { classifyProcurementStage, classificationColumns } from "../_shared/proc
 import { extractAkranesDetailMetadata } from "../_shared/ingestion-v2/adapters/akranes-enrichment.js";
 import { extractRikiskaupDetailMetadata } from "../_shared/ingestion-v2/adapters/rikiskaup-enrichment.js";
 import { extractIsafjordurDetailMetadata } from "../_shared/ingestion-v2/adapters/isafjordur-enrichment.js";
+import { extractReykjavikDetailMetadata } from "../_shared/ingestion-v2/adapters/reykjavik-enrichment.js";
 import {
   applySourcePredictionPolicy,
   buildShadowParserHealth,
@@ -28,7 +29,7 @@ const corsHeaders = {
 const LEGACY_TABLE = "opportunities";
 const STAGING_PROJECT_REF = "ipixuxznqtrcdpzoxric";
 const PRODUCTION_PROJECT_REF = "asojxjbsgqbfpbepojzh";
-const ALLOWED_SOURCES = new Set(["akranes-utbod-v2", "borgarbyggd-utbod-v2", "gardabaer-utbod-v2", "rikiskaup-utbod-v2", "vegagerdin-utbod-v2", "isafjordur-utbod-v2"]);
+const ALLOWED_SOURCES = new Set(["akranes-utbod-v2", "borgarbyggd-utbod-v2", "gardabaer-utbod-v2", "rikiskaup-utbod-v2", "vegagerdin-utbod-v2", "isafjordur-utbod-v2", "reykjavik-utbod-v2"]);
 
 const PHASE_A_FIXTURES: Record<string, { sourceKey: string; file: URL; contentType: string }> = {
   "akranes-rss": {
@@ -49,6 +50,7 @@ const PHASE_A_FIXTURES: Record<string, { sourceKey: string; file: URL; contentTy
   "rikiskaup-wordpress": { sourceKey: "rikiskaup-utbod-v2", file: new URL("./_fixtures/rikiskaup-wordpress.json", import.meta.url), contentType: "application/json" },
   "vegagerdin-rss": { sourceKey: "vegagerdin-utbod-v2", file: new URL("./_fixtures/vegagerdin-rss.xml", import.meta.url), contentType: "application/rss+xml" },
   "isafjordur-rss": { sourceKey: "isafjordur-utbod-v2", file: new URL("./_fixtures/isafjordur-rss.xml", import.meta.url), contentType: "application/rss+xml" },
+  "reykjavik-html-index": { sourceKey: "reykjavik-utbod-v2", file: new URL("./_fixtures/reykjavik-html-index.html", import.meta.url), contentType: "text/html" },
 };
 
 Deno.serve(async (req) => {
@@ -309,7 +311,7 @@ async function runShadow({ body: _body, config, adminClient }: { body: Record<st
       text = await fetched.response.text();
     }
     let candidates = parseWithV2Adapter(config.parser_name, config.parser_version, text);
-    if ([THREE_SOURCE_KEYS.RIKISKAUP, THREE_SOURCE_KEYS.VEGAGERDIN, THREE_SOURCE_KEYS.ISAFJORDUR].includes(config.source_key)) {
+    if ([THREE_SOURCE_KEYS.RIKISKAUP, THREE_SOURCE_KEYS.VEGAGERDIN, THREE_SOURCE_KEYS.ISAFJORDUR, THREE_SOURCE_KEYS.REYKJAVIK].includes(config.source_key)) {
       duplicateCount += countSemanticDuplicates(candidates);
     }
     let enrichmentMetrics = { attempted: 0, succeeded: 0, failed: 0, enriched: 0, no_supported_fields: 0, skipped: candidates.length, limit: 0 };
@@ -332,6 +334,8 @@ async function runShadow({ body: _body, config, adminClient }: { body: Record<st
           ? extractRikiskaupDetailMetadata
           : config.source_key === THREE_SOURCE_KEYS.ISAFJORDUR
             ? extractIsafjordurDetailMetadata
+            : config.source_key === THREE_SOURCE_KEYS.REYKJAVIK
+              ? extractReykjavikDetailMetadata
             : undefined,
         fetchDetail: async (url: string) => {
           const detail = await fetchWithRetry(url, { maxAttempts: 2, timeoutMs: Math.min(Number(config.request_timeout_ms || 5000), 5000), deadlineAt: Date.parse(lease.run_deadline_at), request: { headers } });
@@ -351,10 +355,15 @@ async function runShadow({ body: _body, config, adminClient }: { body: Record<st
     let storedObservations: any[] = observations;
     if (observations.length) { const { data, error } = await adminClient.from("v2_ingestion_observations").insert(observations).select("*"); if (error) throw error; storedObservations = data || observations; }
     const classificationContext = getSourceClassificationContext(config);
+    const classificationMetrics: { stage_distribution: Record<string, number>; actionable: number; non_actionable: number } = { stage_distribution: {}, actionable: 0, non_actionable: 0 };
     for (const observation of storedObservations) {
       const enrichment = observation.safe_source_payload?.shadow_enrichment || {};
       const classified = classificationColumns(classifyProcurementStage({ title: observation.title, body_text: observation.description, description: observation.description, buyer: observation.buyer, deadline: observation.deadline, publication_date: observation.publication_date, ...classificationContext, authoritative_metadata: { ...(observation.safe_source_payload || {}), ...enrichment } }));
       const { prediction, category } = applySourcePredictionPolicy(classified, observation, config, now);
+      const stage = String(prediction.procurement_stage || "uncertain");
+      classificationMetrics.stage_distribution[stage] = (classificationMetrics.stage_distribution[stage] || 0) + 1;
+      if (prediction.actionable_for_suppliers === true) classificationMetrics.actionable += 1;
+      else classificationMetrics.non_actionable += 1;
       const { error: predictionError } = await adminClient.from("v2_ingestion_observations").update({ predicted_procurement_stage: prediction.procurement_stage, predicted_actionable: prediction.actionable_for_suppliers, predicted_confidence: prediction.classification_confidence, predicted_reason: prediction.classification_reason, predicted_requires_admin_review: prediction.requires_admin_review, enrichment_status: enrichment.enrichment_status || null, shadow_quality_category: category }).eq("id", observation.id);
       if (predictionError) throw predictionError;
     }
@@ -362,8 +371,8 @@ async function runShadow({ body: _body, config, adminClient }: { body: Record<st
     for (const observation of storedObservations) { const comparison = await compareObservationToLegacy(observation, legacy || []); const { comparison_state, ...comparisonRecord } = comparison; const { error: comparisonError } = await adminClient.from("v2_legacy_comparisons").upsert({ observation_id: observation.id, ...comparisonRecord }, { onConflict: "observation_id,legacy_opportunity_id,match_type" }); if (comparisonError) throw comparisonError; const state = comparison_state || (comparison.match_type === "v2_only" ? "v2_only" : comparison.match_type === "fuzzy_review_candidate" ? "review_required" : "legacy_match"); const { error: stateError } = await adminClient.from("v2_ingestion_observations").update({ comparison_state: state }).eq("id", observation.id); if (stateError) throw stateError; }
     const finished = new Date().toISOString();
     const runStatus = zeroItem.suspicious ? "quarantined" : invalidCount ? "partial" : "succeeded";
-    const parserHealth = buildShadowParserHealth({ config, fetched: fetchedCount, parsed: candidates.length, valid: validCount, invalid: invalidCount, duplicates: duplicateCount, parserErrors, enrichment: enrichmentMetrics, suspiciousZero: zeroItem.suspicious, pagination });
-    const details = { phase: "B", live_requests_allowed: true, customer_visible_writes: 0, promotion_allowed: false, promote_count: 0, pagination, enrichment: enrichmentMetrics };
+    const parserHealth = buildShadowParserHealth({ config, fetched: fetchedCount, parsed: candidates.length, valid: validCount, invalid: invalidCount, duplicates: duplicateCount, parserErrors, enrichment: enrichmentMetrics, suspiciousZero: zeroItem.suspicious, pagination, classification: classificationMetrics });
+    const details = { phase: "B", live_requests_allowed: true, customer_visible_writes: 0, promotion_allowed: false, promote_count: 0, pagination, enrichment: enrichmentMetrics, classification: classificationMetrics };
     const { error: finalizeError } = await adminClient.from("v2_ingestion_runs").update({ status: runStatus, fetched_count: fetchedCount, parsed_count: candidates.length, observation_count: observations.length, invalid_count: invalidCount, duplicate_count: duplicateCount, suspicious_zero_items: zeroItem.suspicious, error_count: parserErrors.length + (zeroItem.suspicious ? 1 : 0), error_code: zeroItem.reason, error_message: zeroItem.suspicious ? "HTTP success but zero parsed items" : null, details, finished_at: finished, lease_expires_at: finished, updated_at: finished }).eq("id", run.id);
     if (finalizeError) throw finalizeError;
     const { error: healthUpdateError } = await adminClient.from("v2_source_health").upsert({ source_config_id: config.id, status: runStatus === "succeeded" ? "healthy" : "degraded", circuit_state: zeroItem.circuit_should_open ? "open" : "closed", consecutive_zero_item_runs: zeroItem.consecutive_zero_item_runs, last_run_id: run.id, last_run_at: finished, last_success_at: runStatus === "succeeded" ? finished : health?.last_success_at || null, last_shadow_at: finished, last_http_status: fetched.response.status, last_latency_ms: fetched.latencyMs, last_observation_count: observations.length, last_error_code: zeroItem.reason, last_error_message: zeroItem.suspicious ? "HTTP success but zero parsed items" : null, parser_health: parserHealth, updated_at: finished }, { onConflict: "source_config_id" });
