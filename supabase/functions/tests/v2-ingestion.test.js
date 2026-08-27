@@ -17,6 +17,8 @@ import { renderAdminV2IngestionPanel } from "../../../src/pages/adminV2Ingestion
 import { extractAkranesDetailMetadata } from "../_shared/ingestion-v2/adapters/akranes-enrichment.js";
 import { compareSameWindow } from "../_shared/ingestion-v2/replay.js";
 import { extractProcurementDetailMetadata, extractProcurementReference } from "../_shared/ingestion-v2/adapters/procurement-metadata.js";
+import { extractRikiskaupDetailMetadata } from "../_shared/ingestion-v2/adapters/rikiskaup-enrichment.js";
+import { extractIsafjordurDetailMetadata } from "../_shared/ingestion-v2/adapters/isafjordur-enrichment.js";
 import {
   applySourcePredictionPolicy,
   buildShadowParserHealth,
@@ -491,6 +493,65 @@ test("Ríkiskaup detail enrichment fills only explicit missing metadata", async 
   assert.equal(missingBuyer.candidates[0].buyer, "Innkaupastofnun");
 });
 
+test("Ríkiskaup detail extraction ignores site-wide RFI filters and maps explicit tender metadata", () => {
+  const html = `
+    <header><option>Markaðskönnun (RFI)</option></header>
+    <div class="content-text">
+      <h1>Rammasamningur um mötuneytisþjónustu SFS, EES útboð nr. 16200</h1>
+      <table>
+        <tr><td class="title">Númer:</td><td>16200</td></tr>
+        <tr><td class="title">Útboðsaðili:</td><td>Reykjavíkurborg</td></tr>
+        <tr><td class="title">Tegund:</td><td>Þjónusta</td></tr>
+        <tr><td class="title">Skilafrestur</td><td>06.10.2026 kl. 10:00</td></tr>
+      </table>
+      <p>Tilboðum skal skila með rafrænum hætti.</p>
+    </div><div class="layout-footer">Markaðskönnun</div>`;
+  const metadata = extractRikiskaupDetailMetadata(html);
+  assert.equal(metadata.procurement_type, "open_tender");
+  assert.equal(metadata.form_type, "competition");
+  assert.equal(metadata.deadline, "2026-10-06");
+  assert.equal(metadata.procurement_reference, "16200");
+  assert.equal(metadata.buyer, "Reykjavíkurborg");
+});
+
+test("Ríkiskaup source mapping distinguishes tender, forval, RFI, transparency, and weak evidence", () => {
+  const config = { source_key: THREE_SOURCE_KEYS.RIKISKAUP };
+  const initial = { procurement_stage: "uncertain", actionable_for_suppliers: false, requires_admin_review: true, classification_confidence: 0.35 };
+  const mapped = (procurement_type, deadline = "2026-09-30") => applySourcePredictionPolicy(initial, { deadline, safe_source_payload: { shadow_enrichment: { procurement_type } } }, config, new Date("2026-08-27T12:00:00Z")).prediction;
+  assert.deepEqual([mapped("open_tender").procurement_stage, mapped("prequalification").procurement_stage], ["open_competition", "open_competition"]);
+  assert.equal(mapped("market_consultation").procurement_stage, "market_consultation");
+  assert.equal(mapped("transparency_notice").procurement_stage, "uncertain");
+  assert.equal(mapped("transparency_notice").actionable_for_suppliers, false);
+  assert.equal(mapped("unknown", null).procurement_stage, "uncertain");
+});
+
+test("Ríkiskaup representative detail titles produce deterministic source types", () => {
+  const detail = (title, type = "Þjónusta", number = "16341") => extractRikiskaupDetailMetadata(`
+    <header><option>Markaðskönnun (RFI)</option></header>
+    <div class="content-text"><h1>${title}</h1><table>
+      <tr><td class="title">Númer:</td><td>${number}</td></tr>
+      <tr><td class="title">Tegund:</td><td>${type}</td></tr>
+      <tr><td class="title">Skilafrestur</td><td>17.09.2026</td></tr>
+    </table></div><div class="layout-footer">Markaðskönnun</div>`);
+  assert.equal(detail("Útboð á ræstingu í Brekkuskóla").procurement_type, "open_tender");
+  assert.equal(detail("Akstur almenningsvagna 2028-2036. Forval, EES útboð nr. 16341").procurement_type, "prequalification");
+  assert.equal(detail("Markaðskönnun (RFI) fyrir námsumsjónarkerfi").procurement_type, "market_consultation");
+  const transparency = detail("Gagnsæistilkynning vegna fyrirhugaðra innkaupa", "Þjónusta, Gagnsæistilkynning (VEAT)", "23431");
+  assert.equal(transparency.procurement_type, "transparency_notice");
+  assert.equal(transparency.procurement_reference, "23431");
+});
+
+test("expired Ríkiskaup tender is non-actionable after source type mapping", () => {
+  const result = applySourcePredictionPolicy(
+    { procurement_stage: "uncertain", actionable_for_suppliers: false, requires_admin_review: true, classification_confidence: 0.35 },
+    { deadline: "2026-08-26", safe_source_payload: { shadow_enrichment: { procurement_type: "open_tender" } } },
+    { source_key: THREE_SOURCE_KEYS.RIKISKAUP },
+    new Date("2026-08-27T12:00:00Z"),
+  );
+  assert.equal(result.prediction.procurement_stage, "open_competition");
+  assert.equal(result.prediction.actionable_for_suppliers, false);
+});
+
 test("detail enrichment leaves metadata null when it is not explicit", () => {
   const result = extractProcurementDetailMetadata("<article>Almenn lýsing án útboðsgagna.</article>");
   assert.equal(result.deadline, null);
@@ -524,6 +585,55 @@ test("Ísafjarðarbær detail enrichment extracts an explicit deadline", async (
   const result = await enrichCandidatesBounded([candidate], { sourceKey: THREE_SOURCE_KEYS.ISAFJORDUR, limit: 1, now: new Date("2026-08-27T00:00:00Z"), fetchDetail: async () => "<p>Tilboðum skal skilað 14. 09. 2026. Útboðsnúmer: ISA-2026-14.</p>" });
   assert.equal(result.candidates[0].deadline, "2026-09-14");
   assert.equal(result.candidates[0].procurement_reference, "ISA-2026-14");
+});
+
+test("Ísafjarðarbær Moya entryContent recovers Icelandic deadline and explicit reference", async () => {
+  const html = `<nav>Almennar fréttir og dagskrá</nav><div class="entryContent">
+    <p><strong>Slökkvistöð á Suðurtanga – Burðarvirki</strong><br>Útboð nr. 2024120087</p>
+    <table><tr><td>Tilboðsfrestur</td><td>10. júní 2026 kl. 15:30</td></tr></table>
+    <p>Ísafjarðarbær óskar eftir tilboðum. Útboðsgögn verða aðgengileg.</p>
+  </div><footer>Markaðskönnun nr. 99999</footer>`;
+  const candidate = { title: "Útboð: Slökkvistöð", description: "", canonical_url: "https://www.isafjardarbaer.is/is/moya/news/utbod", deadline: null, buyer: "Ísafjarðarbær", procurement_reference: null };
+  const result = await enrichCandidatesBounded([candidate], { sourceKey: THREE_SOURCE_KEYS.ISAFJORDUR, limit: 1, now: new Date("2026-05-20T00:00:00Z"), metadataExtractor: extractIsafjordurDetailMetadata, fetchDetail: async () => html });
+  assert.equal(result.candidates[0].deadline, "2026-06-10");
+  assert.equal(result.candidates[0].procurement_reference, "2024120087");
+  assert.equal(result.candidates[0].safe_source_payload.shadow_enrichment.form_type, "competition");
+});
+
+test("Ísafjarðarbær Moya solicitation supports explicit month-name deadline without a reference", () => {
+  const metadata = extractIsafjordurDetailMetadata(`<div class="entryContent"><p>Útboðsgögn afhent frá 15. júní 2026.</p><p>Tilboðsfrestur: 29. júní 2026 kl. 12:00</p></div>`);
+  assert.equal(metadata.deadline, "2026-06-29");
+  assert.equal(metadata.procurement_reference, null);
+  assert.equal(metadata.form_type, "competition");
+});
+
+test("Ísafjarðarbær ordinary Moya news and missing metadata remain null", () => {
+  const metadata = extractIsafjordurDetailMetadata(`<nav>Útboð nr. 99999</nav><div class="entryContent"><p>Götulokun vegna bæjarhátíðar á laugardag.</p></div>`);
+  assert.equal(metadata.deadline, null);
+  assert.equal(metadata.procurement_reference, null);
+  assert.equal(metadata.form_type, null);
+  assert.equal(metadata.enrichment_status, "no_supported_fields");
+});
+
+test("Ísafjarðarbær explicit follow-up evidence is non-open source metadata", () => {
+  const metadata = extractIsafjordurDetailMetadata(`<div class="entryContent"><p>Niðurstaða útboðs: samningur undirritaður við valinn verktaka.</p></div>`);
+  assert.equal(metadata.form_type, "result");
+  assert.equal(metadata.follow_up, true);
+  const prediction = classificationColumns(classifyProcurementStage({ authoritative_metadata: metadata }));
+  assert.equal(prediction.procurement_stage, "award_or_contract_signed");
+  assert.equal(prediction.actionable_for_suppliers, false);
+});
+
+test("Ísafjarðarbær source-specific enrichment isolates individual detail failures", async () => {
+  const candidates = [
+    { title: "Útboð A", description: "Óskað eftir tilboðum", canonical_url: "https://example.is/a" },
+    { title: "Útboð B", description: "Óskað eftir tilboðum", canonical_url: "https://example.is/b" },
+  ];
+  const result = await enrichCandidatesBounded(candidates, { sourceKey: THREE_SOURCE_KEYS.ISAFJORDUR, limit: 2, now: new Date("2026-05-20T00:00:00Z"), metadataExtractor: extractIsafjordurDetailMetadata, fetchDetail: async (url) => { if (url.endsWith("/a")) throw Object.assign(new Error("timeout"), { code: "V2_FETCH_TIMEOUT" }); return `<div class="entryContent"><p>Tilboðsfrestur: 29. júní 2026</p><p>Útboðsgögn.</p></div>`; } });
+  assert.equal(result.metrics.failed, 1);
+  assert.equal(result.metrics.succeeded, 1);
+  assert.equal(result.candidates[0].safe_source_payload.shadow_enrichment.enrichment_status, "failed");
+  assert.equal(result.candidates[1].deadline, "2026-06-29");
 });
 
 test("Ísafjarðarbær municipal news stays non-actionable and missing deadlines fail closed", () => {

@@ -7,6 +7,8 @@ import { fetchWithRetry } from "../_shared/ingestion-v2/fetching.js";
 import { compareObservationToLegacy } from "../_shared/ingestion-v2/comparison.js";
 import { classifyProcurementStage, classificationColumns } from "../_shared/procurement-stage.js";
 import { extractAkranesDetailMetadata } from "../_shared/ingestion-v2/adapters/akranes-enrichment.js";
+import { extractRikiskaupDetailMetadata } from "../_shared/ingestion-v2/adapters/rikiskaup-enrichment.js";
+import { extractIsafjordurDetailMetadata } from "../_shared/ingestion-v2/adapters/isafjordur-enrichment.js";
 import {
   applySourcePredictionPolicy,
   buildShadowParserHealth,
@@ -326,6 +328,11 @@ async function runShadow({ body: _body, config, adminClient }: { body: Record<st
         sourceKey: config.source_key,
         limit: configuredLimit || defaultDetailLimit,
         now,
+        metadataExtractor: config.source_key === THREE_SOURCE_KEYS.RIKISKAUP
+          ? extractRikiskaupDetailMetadata
+          : config.source_key === THREE_SOURCE_KEYS.ISAFJORDUR
+            ? extractIsafjordurDetailMetadata
+            : undefined,
         fetchDetail: async (url: string) => {
           const detail = await fetchWithRetry(url, { maxAttempts: 2, timeoutMs: Math.min(Number(config.request_timeout_ms || 5000), 5000), deadlineAt: Date.parse(lease.run_deadline_at), request: { headers } });
           return { body: await detail.response.text() };

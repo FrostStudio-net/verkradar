@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  applyDeadlineActionabilityGuard,
   buildAiClassifierInput,
   classificationColumns,
   classifyProcurementStage,
@@ -140,6 +141,28 @@ test("an expired authoritative competition is not actionable", () => {
   const columns = classificationColumns(result, result.classified_by, new Date("2026-07-28T12:00:00Z"));
   assert.equal(columns.procurement_stage, "open_competition");
   assert.equal(columns.actionable_for_suppliers, false);
+});
+
+test("deadline actionability guard preserves future and same-day actionable stages", () => {
+  const base = { procurement_stage: "market_consultation", actionable_for_suppliers: true, negative_signals: [] };
+  const now = new Date("2026-08-27T12:00:00Z");
+  assert.equal(applyDeadlineActionabilityGuard(base, "2026-08-28", now).actionable_for_suppliers, true);
+  assert.equal(applyDeadlineActionabilityGuard(base, "2026-08-27", now).actionable_for_suppliers, true);
+});
+
+test("deadline actionability guard closes every actionable stage after an explicit deadline", () => {
+  for (const procurement_stage of ["open_competition", "upcoming_procurement", "market_consultation"]) {
+    const result = applyDeadlineActionabilityGuard({ procurement_stage, actionable_for_suppliers: true, negative_signals: [] }, "2026-08-26", new Date("2026-08-27T00:00:00Z"));
+    assert.equal(result.procurement_stage, procurement_stage);
+    assert.equal(result.actionable_for_suppliers, false);
+    assert.ok(result.negative_signals.includes("supplier_deadline_expired"));
+  }
+});
+
+test("deadline actionability guard does not loosen non-actionable classification", () => {
+  const result = applyDeadlineActionabilityGuard({ procurement_stage: "uncertain", actionable_for_suppliers: false }, "2026-09-30", new Date("2026-08-27T00:00:00Z"));
+  assert.equal(result.procurement_stage, "uncertain");
+  assert.equal(result.actionable_for_suppliers, false);
 });
 
 test("AI input is allowlisted, bounded, and removes direct identifiers", () => {

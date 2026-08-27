@@ -46,6 +46,18 @@ export function normalizeProcurementStage(value) {
   return STAGE_SET.has(stage) ? stage : "uncertain";
 }
 
+export function applyDeadlineActionabilityGuard(classification, deadline, now = new Date()) {
+  const stage = normalizeProcurementStage(classification?.procurement_stage);
+  if (!ACTIONABLE_STAGE_SET.has(stage) || !isExpired(deadline, now)) return classification;
+  return {
+    ...classification,
+    actionable_for_suppliers: false,
+    classification_reason: appendReason(classification?.classification_reason, "The explicit supplier deadline has expired."),
+    short_reason: appendReason(classification?.short_reason, "The explicit supplier deadline has expired."),
+    negative_signals: unique([...(classification?.negative_signals || []), "supplier_deadline_expired"]),
+  };
+}
+
 export function classificationColumns(classification, classifiedBy = classification.classified_by || "deterministic_rule", now = new Date()) {
   const stage = normalizeProcurementStage(classification.procurement_stage);
   const confidence = clampNumber(classification.confidence ?? classification.classification_confidence, 0, 1);
@@ -144,7 +156,7 @@ export function isProcurementOpportunityEligible(opportunity, options = {}) {
     if (opportunity.requires_admin_review === true || opportunity.requiresAdminReview === true) return false;
     if (!ACTIONABLE_STAGE_SET.has(stage)) return false;
     if (String(opportunity.status || "").toLowerCase() !== "open") return false;
-    if (stage === "open_competition" && isExpired(opportunity.deadline, options.now)) return false;
+    if (ACTIONABLE_STAGE_SET.has(stage) && isExpired(opportunity.deadline, options.now)) return false;
     return true;
   }
   const grandfathered = opportunity.classification_grandfathered === true || opportunity.classificationGrandfathered === true;
@@ -333,4 +345,9 @@ function truncate(value, maximum) {
 
 function unique(values) {
   return [...new Set(values)];
+}
+
+function appendReason(value, suffix) {
+  const reason = String(value || "").trim();
+  return reason ? `${reason} ${suffix}` : suffix;
 }

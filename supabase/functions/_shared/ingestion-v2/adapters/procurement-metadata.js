@@ -8,7 +8,8 @@ const FALSE_REFERENCE_WORDS = new Set([
 export function extractProcurementReference(value, options = {}) {
   const text = stripHtml(value);
   const explicitPatterns = [
-    /(?:ees\s+)?(?:utbodsnummer|utbodsnumer|utboðsnummer|útboðsnúmer|utbods\s*nr\.?|útboðs\s*nr\.?|ees\s+utbod\s+nr\.?|ees\s+útboð\s+nr\.?|tilvisun(?:arnumer)?|tilvísun(?:arnúmer)?|reference|procurement\s+reference)\s*[:#-]?\s*([A-ZÁÉÍÓÚÝÞÐÆÖ0-9][A-ZÁÉÍÓÚÝÞÐÆÖ0-9._/ -]{2,30})/i,
+    /(?:ees\s+)?(?:utbods?|útboðs?)\s*nr\.?\s*[:#-]?\s*([A-ZÁÉÍÓÚÝÞÐÆÖ]{0,10}[-/]?\d{3,}(?:[-/.]\d{1,6})*)\b/i,
+    /(?:ees\s+)?(?:utbodsnummer|utbodsnumer|utboðsnummer|útboðsnúmer|utbods?\s*nr\.?|útboðs?\s*nr\.?|ees\s+utbod\s+nr\.?|ees\s+útboð\s+nr\.?|tilvisun(?:arnumer)?|tilvísun(?:arnúmer)?|reference|procurement\s+reference)\s*[:#-]?\s*([A-ZÁÉÍÓÚÝÞÐÆÖ0-9][A-ZÁÉÍÓÚÝÞÐÆÖ0-9._/ -]{2,30})/i,
     /\b(EES\s*\d{4}\s*\/\s*S\s*\d{3,}(?:-\d+)?)\b/i,
   ];
   for (const pattern of explicitPatterns) {
@@ -68,7 +69,19 @@ export function extractExplicitDeadline(value) {
     const date = new Date(`${candidate}T00:00:00Z`);
     if (!Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === candidate) return candidate;
   }
+  const monthName = text.match(/(?:tilbodsfrestur|tilboðsfrestur|skilafrestur(?:\s+tilboda|\s+tilboða)?|tilbodum\s+skal\s+skila(?:d|ð)?(?:\s+eigi\s+sidar\s+en)?|tilboðum\s+skal\s+skila(?:ð)?(?:\s+eigi\s+síðar\s+en)?|tilbodin\s+verda\s+opnud|tilboðin\s+verða\s+opnuð)[^.!;]{0,120}?(\d{1,2})\.\s*([A-Za-zÁÉÍÓÚÝÞÐÆÖáéíóúýþðæö]+)\s+(\d{4})/i);
+  if (monthName) {
+    const month = icelandicMonth(monthName[2]);
+    const candidate = month ? `${monthName[3]}-${String(month).padStart(2, "0")}-${String(monthName[1]).padStart(2, "0")}` : "";
+    const date = candidate ? new Date(`${candidate}T00:00:00Z`) : null;
+    if (date && !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === candidate) return candidate;
+  }
   return null;
+}
+
+function icelandicMonth(value) {
+  const key = String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/ð/g, "d").replace(/þ/g, "th").replace(/æ/g, "ae");
+  return ({ januar: 1, februar: 2, mars: 3, april: 4, mai: 5, juni: 6, juli: 7, agust: 8, september: 9, oktober: 10, november: 11, desember: 12 })[key] || null;
 }
 
 function firstLabelValue(text, labels) {

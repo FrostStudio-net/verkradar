@@ -1,4 +1,5 @@
 import { extractProcurementDetailMetadata } from "./adapters/procurement-metadata.js";
+import { applyDeadlineActionabilityGuard } from "../procurement-stage.js";
 
 export const THREE_SOURCE_KEYS = Object.freeze({
   RIKISKAUP: "rikiskaup-utbod-v2",
@@ -95,9 +96,12 @@ export async function enrichCandidatesBounded(candidates, options) {
     metrics.attempted += 1;
     try {
       const result = await options.fetchDetail(candidate.canonical_url || candidate.discovered_url, candidate);
-      const metadata = extractProcurementDetailMetadata(result?.body ?? result, {
-        allowContextualNumber: sourceKey === THREE_SOURCE_KEYS.RIKISKAUP,
-      });
+      const metadataExtractor = typeof options.metadataExtractor === "function"
+        ? options.metadataExtractor
+        : (value) => extractProcurementDetailMetadata(value, {
+          allowContextualNumber: sourceKey === THREE_SOURCE_KEYS.RIKISKAUP,
+        });
+      const metadata = metadataExtractor(result?.body ?? result);
       metrics.succeeded += 1;
       if (metadata.enrichment_status === "enriched") metrics.enriched += 1;
       else metrics.no_supported_fields += 1;
@@ -132,8 +136,11 @@ export function isLikelyProcurementCandidate(candidate, sourceKey, now = new Dat
 
 export function applySourcePredictionPolicy(prediction, observation, config, now = new Date()) {
   const sourceKey = String(config?.source_key || "");
-  const category = categorizeShadowObservation(observation, prediction, sourceKey, now);
-  const adjusted = { ...prediction };
+  let adjusted = sourceKey === THREE_SOURCE_KEYS.RIKISKAUP
+    ? applyRikiskaupProcurementType(prediction, observation)
+    : { ...prediction };
+  adjusted = applyDeadlineActionabilityGuard(adjusted, observation?.deadline, now);
+  const category = categorizeShadowObservation(observation, adjusted, sourceKey, now);
   if (sourceKey === THREE_SOURCE_KEYS.VEGAGERDIN && category !== "likely_current_procurement_candidate") {
     adjusted.actionable_for_suppliers = false;
   }
@@ -142,6 +149,33 @@ export function applySourcePredictionPolicy(prediction, observation, config, now
     adjusted.requires_admin_review = true;
   }
   return { prediction: adjusted, category };
+}
+
+function applyRikiskaupProcurementType(prediction, observation) {
+  const procurementType = String(observation?.safe_source_payload?.shadow_enrichment?.procurement_type || "");
+  if (procurementType === "market_consultation") {
+    return mappedPrediction(prediction, "market_consultation", true, false, "Explicit Ríkiskaup RFI/market-consultation evidence.");
+  }
+  if (["open_tender", "prequalification"].includes(procurementType)) {
+    return mappedPrediction(prediction, "open_competition", true, false, procurementType === "prequalification"
+      ? "Explicit Ríkiskaup prequalification accepting supplier applications."
+      : "Explicit Ríkiskaup tender accepting supplier bids.");
+  }
+  if (procurementType === "transparency_notice") {
+    return mappedPrediction(prediction, "uncertain", false, true, "Ríkiskaup transparency/direct-award notice is not an open competition.");
+  }
+  return { ...prediction };
+}
+
+function mappedPrediction(prediction, stage, actionable, review, reason) {
+  return {
+    ...prediction,
+    procurement_stage: stage,
+    actionable_for_suppliers: actionable,
+    requires_admin_review: review,
+    classification_confidence: Math.max(Number(prediction?.classification_confidence || 0), 0.95),
+    classification_reason: reason,
+  };
 }
 
 export function categorizeShadowObservation(observation, prediction, sourceKey, now = new Date()) {
