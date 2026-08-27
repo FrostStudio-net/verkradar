@@ -16,7 +16,7 @@ const corsHeaders = {
 const LEGACY_TABLE = "opportunities";
 const STAGING_PROJECT_REF = "ipixuxznqtrcdpzoxric";
 const PRODUCTION_PROJECT_REF = "asojxjbsgqbfpbepojzh";
-const ALLOWED_SOURCES = new Set(["akranes-utbod-v2", "borgarbyggd-utbod-v2", "gardabaer-utbod-v2"]);
+const ALLOWED_SOURCES = new Set(["akranes-utbod-v2", "borgarbyggd-utbod-v2", "gardabaer-utbod-v2", "rikiskaup-utbod-v2", "vegagerdin-utbod-v2", "isafjordur-utbod-v2"]);
 
 const PHASE_A_FIXTURES: Record<string, { sourceKey: string; file: URL; contentType: string }> = {
   "akranes-rss": {
@@ -34,6 +34,9 @@ const PHASE_A_FIXTURES: Record<string, { sourceKey: string; file: URL; contentTy
     file: new URL("./_fixtures/gardabaer-page-monitor.html", import.meta.url),
     contentType: "text/html",
   },
+  "rikiskaup-wordpress": { sourceKey: "rikiskaup-utbod-v2", file: new URL("./_fixtures/rikiskaup-wordpress.json", import.meta.url), contentType: "application/json" },
+  "vegagerdin-rss": { sourceKey: "vegagerdin-utbod-v2", file: new URL("./_fixtures/vegagerdin-rss.xml", import.meta.url), contentType: "application/rss+xml" },
+  "isafjordur-rss": { sourceKey: "isafjordur-utbod-v2", file: new URL("./_fixtures/isafjordur-rss.xml", import.meta.url), contentType: "application/rss+xml" },
 };
 
 Deno.serve(async (req) => {

@@ -60,6 +60,14 @@ test("parses the current-style Garðabær page-monitor fixture", async () => {
   assert.equal(rows[0].canonical_url, "https://www.gardabaer.is/framkvaemdir/utbod/holtahverfi-lagnir");
 });
 
+for (const [name, parser, file] of [["Ríkiskaup", "rikiskaup-wordpress", "rikiskaup-wordpress.json"], ["Vegagerðin", "vegagerdin-rss", "vegagerdin-rss.xml"], ["Ísafjarðarbær", "isafjordur-rss", "isafjordur-rss.xml"]]) {
+  test(`parses ${name} V2 fixture conservatively`, async () => {
+    const rows = parseWithV2Adapter(parser, "1.0.0", await readFile(new URL(file, fixtureRoot), "utf8"));
+    assert.ok(rows.length >= 1);
+    assert.ok(rows.every((row) => row.canonical_url && row.title));
+  });
+}
+
 test("content hashes are stable across object key order and fetch time", async () => {
   const candidate = {
     source_key: "source",

@@ -1,11 +1,17 @@
 import { akranesRssAdapter } from "./akranes-rss.js";
 import { borgarbyggdWordpressAdapter } from "./borgarbyggd-wordpress.js";
 import { gardabaerPageMonitorAdapter } from "./gardabaer-page-monitor.js";
+import { rikiskaupWordpressAdapter } from "./rikiskaup-wordpress.js";
+import { vegagerdinRssAdapter } from "./vegagerdin-rss.js";
+import { isafjordurRssAdapter } from "./isafjordur-rss.js";
 
 const ADAPTERS = new Map([
   [akranesRssAdapter.parserName, akranesRssAdapter],
   [borgarbyggdWordpressAdapter.parserName, borgarbyggdWordpressAdapter],
   [gardabaerPageMonitorAdapter.parserName, gardabaerPageMonitorAdapter],
+  [rikiskaupWordpressAdapter.parserName, rikiskaupWordpressAdapter],
+  [vegagerdinRssAdapter.parserName, vegagerdinRssAdapter],
+  [isafjordurRssAdapter.parserName, isafjordurRssAdapter],
 ]);
 
 export function getV2Adapter(parserName, parserVersion) {
