@@ -16,6 +16,19 @@ import { promoteObservation } from "../_shared/ingestion-v2/promotion.js";
 import { renderAdminV2IngestionPanel } from "../../../src/pages/adminV2Ingestion.js";
 import { extractAkranesDetailMetadata } from "../_shared/ingestion-v2/adapters/akranes-enrichment.js";
 import { compareSameWindow } from "../_shared/ingestion-v2/replay.js";
+import { extractProcurementDetailMetadata, extractProcurementReference } from "../_shared/ingestion-v2/adapters/procurement-metadata.js";
+import {
+  applySourcePredictionPolicy,
+  buildShadowParserHealth,
+  countSemanticDuplicates,
+  enrichCandidatesBounded,
+  fetchBoundedWordpressPages,
+  getSourceClassificationContext,
+  isLikelyProcurementCandidate,
+  THREE_SOURCE_KEYS,
+} from "../_shared/ingestion-v2/shadow-quality.js";
+import { classifyProcurementStage, classificationColumns } from "../_shared/procurement-stage.js";
+import { buildAdminV2OverviewRows } from "../../../src/services/adminV2Ingestion.js";
 
 const fixtureRoot = new URL("../import-source-connectors-v2/_fixtures/", import.meta.url);
 const migrationUrl = new URL("../../migrations/20260826120000_parallel_source_ingestion_v2_phase_a.sql", import.meta.url);
@@ -424,6 +437,141 @@ test("baseline_unavailable is an observation-only comparison state", async () =>
   assert.match(sql, /baseline_unavailable/);
   assert.match(sql, /not_compared.*legacy_match.*legacy_only.*v2_only.*conflict.*review_required/s);
   assert.doesNotMatch(sql, /legacy_comparisons/);
+});
+
+test("Ríkiskaup WordPress pagination is bounded and deduplicates across pages", async () => {
+  const pages = new Map([
+    [1, [{ id: 1, link: "https://utbodsvefur.is/1" }, { id: 2, link: "https://utbodsvefur.is/2" }]],
+    [2, [{ id: 2, link: "https://utbodsvefur.is/2" }, { id: 3, link: "https://utbodsvefur.is/3" }]],
+    [3, []],
+  ]);
+  const result = await fetchBoundedWordpressPages({ endpointUrl: "https://utbodsvefur.is/wp-json/wp/v2/posts", perPage: 2, maxPages: 3, maxItems: 10, fetchPage: async (_url, page) => ({ body: pages.get(page) }) });
+  assert.deepEqual(result.items.map((item) => item.id), [1, 2, 3]);
+  assert.equal(result.diagnostics.fetched_pages, 3);
+  assert.equal(result.diagnostics.duplicates, 1);
+  assert.equal(result.diagnostics.stopped, "empty_page");
+});
+
+test("Ríkiskaup pagination obeys hard page and item caps", async () => {
+  let calls = 0;
+  const result = await fetchBoundedWordpressPages({ endpointUrl: "https://utbodsvefur.is/wp-json/wp/v2/posts", perPage: 2, maxPages: 2, maxItems: 3, fetchPage: async (_url, page) => { calls += 1; return { body: [{ id: page * 10 + 1 }, { id: page * 10 + 2 }] }; } });
+  assert.equal(calls, 2);
+  assert.equal(result.items.length, 3);
+  assert.equal(result.diagnostics.stopped, "item_cap");
+});
+
+test("Ríkiskaup pagination stops at the WordPress reported final page", async () => {
+  let calls = 0;
+  const result = await fetchBoundedWordpressPages({ endpointUrl: "https://utbodsvefur.is/wp-json/wp/v2/posts", perPage: 2, maxPages: 3, maxItems: 10, fetchPage: async () => { calls += 1; return { body: [{ id: 1 }, { id: 2 }], totalPages: "1" }; } });
+  assert.equal(calls, 1);
+  assert.equal(result.diagnostics.reported_total_pages, 1);
+  assert.equal(result.diagnostics.stopped, "reported_end");
+});
+
+test("Ríkiskaup title references require procurement context and support numeric IDs", () => {
+  assert.equal(extractProcurementReference("Markaðskönnun (RFI), nr. 16347", { allowContextualNumber: true }), "16347");
+  assert.equal(extractProcurementReference("Rammasamningur, EES útboð nr. 16200", { allowContextualNumber: true }), "16200");
+  assert.equal(extractProcurementReference("Frétt nr. 16347", { allowContextualNumber: true }), null);
+});
+
+test("ordinary Icelandic words are rejected as procurement references", () => {
+  for (const word of ["verk", "gerðina", "ferli", "frestur", "lýsingar"]) {
+    assert.equal(extractProcurementReference(`Tilvísun: ${word}`), null);
+  }
+});
+
+test("Ríkiskaup detail enrichment fills only explicit missing metadata", async () => {
+  const source = { title: "Útboð nr. 16347", description: "", canonical_url: "https://utbodsvefur.is/16347", buyer: "Existing buyer", deadline: null, procurement_reference: "16347" };
+  const result = await enrichCandidatesBounded([source], { sourceKey: THREE_SOURCE_KEYS.RIKISKAUP, limit: 1, now: new Date("2026-08-27T00:00:00Z"), fetchDetail: async () => "<p>Verkkaupi: Annar kaupandi. Tilboðsfrestur: 30.09.2026. Tilvísun: 99999.</p>" });
+  assert.equal(result.candidates[0].deadline, "2026-09-30");
+  assert.equal(result.candidates[0].buyer, "Existing buyer");
+  assert.equal(result.candidates[0].procurement_reference, "16347");
+  assert.equal(result.metrics.succeeded, 1);
+  const missingBuyer = await enrichCandidatesBounded([{ ...source, buyer: null }], { sourceKey: THREE_SOURCE_KEYS.RIKISKAUP, limit: 1, now: new Date("2026-08-27T00:00:00Z"), fetchDetail: async () => "<p>Verkkaupi: Innkaupastofnun. Tilboðsfrestur: 30.09.2026.</p>" });
+  assert.equal(missingBuyer.candidates[0].buyer, "Innkaupastofnun");
+});
+
+test("detail enrichment leaves metadata null when it is not explicit", () => {
+  const result = extractProcurementDetailMetadata("<article>Almenn lýsing án útboðsgagna.</article>");
+  assert.equal(result.deadline, null);
+  assert.equal(result.buyer, null);
+  assert.equal(result.procurement_reference, null);
+  assert.equal(result.enrichment_status, "no_supported_fields");
+});
+
+test("Vegagerðin candidate prefilter and enrichment remain bounded on a broad feed", async () => {
+  const current = Array.from({ length: 20 }, (_, index) => ({ title: `Útboð nr. ${16000 + index}`, description: "Óskað eftir tilboðum", publication_date: "2026-08-20", canonical_url: `https://vegagerdin.is/${index}` }));
+  const historical = Array.from({ length: 80 }, (_, index) => ({ title: `Frétt af framkvæmd ${index}`, description: "Vinna er hafin", publication_date: "2022-01-01", canonical_url: `https://vegagerdin.is/old/${index}` }));
+  const result = await enrichCandidatesBounded([...current, ...historical], { sourceKey: THREE_SOURCE_KEYS.VEGAGERDIN, limit: 12, now: new Date("2026-08-27T00:00:00Z"), fetchDetail: async () => "<p>Almenn útboðslýsing.</p>" });
+  assert.equal(result.metrics.attempted, 12);
+  assert.equal(result.metrics.skipped, 88);
+  assert.equal(result.candidates.length, 100);
+});
+
+test("Vegagerðin news and historical follow-up are never made actionable", () => {
+  const config = { source_key: THREE_SOURCE_KEYS.VEGAGERDIN };
+  const news = { title: "Umferðartilkynning", description: "Almenn frétt", publication_date: "2026-08-20", deadline: null };
+  const historical = { title: "Niðurstaða útboðs", description: "Samningur undirritaður", publication_date: "2022-01-01", deadline: null };
+  for (const observation of [news, historical]) {
+    const initial = { procurement_stage: "upcoming_procurement", actionable_for_suppliers: true, requires_admin_review: false };
+    const result = applySourcePredictionPolicy(initial, observation, config, new Date("2026-08-27T00:00:00Z"));
+    assert.equal(result.prediction.actionable_for_suppliers, false);
+  }
+});
+
+test("Ísafjarðarbær detail enrichment extracts an explicit deadline", async () => {
+  const candidate = { title: "Óskað eftir tilboðum í hafnarverk", description: "", canonical_url: "https://www.isafjordur.is/utbod", deadline: null, buyer: "Ísafjarðarbær", procurement_reference: null };
+  const result = await enrichCandidatesBounded([candidate], { sourceKey: THREE_SOURCE_KEYS.ISAFJORDUR, limit: 1, now: new Date("2026-08-27T00:00:00Z"), fetchDetail: async () => "<p>Tilboðum skal skilað 14. 09. 2026. Útboðsnúmer: ISA-2026-14.</p>" });
+  assert.equal(result.candidates[0].deadline, "2026-09-14");
+  assert.equal(result.candidates[0].procurement_reference, "ISA-2026-14");
+});
+
+test("Ísafjarðarbær municipal news stays non-actionable and missing deadlines fail closed", () => {
+  const context = getSourceClassificationContext({ source_key: THREE_SOURCE_KEYS.ISAFJORDUR });
+  const news = classificationColumns(classifyProcurementStage({ ...context, title: "Götulokun vegna malbikunar", description: "Umferð verður beint annað", authoritative_metadata: {} }));
+  assert.equal(news.actionable_for_suppliers, false);
+  const openWithoutDeadline = applySourcePredictionPolicy({ procurement_stage: "open_competition", actionable_for_suppliers: true, requires_admin_review: false }, { deadline: null }, { source_key: THREE_SOURCE_KEYS.ISAFJORDUR });
+  assert.equal(openWithoutDeadline.prediction.actionable_for_suppliers, false);
+  assert.equal(openWithoutDeadline.prediction.requires_admin_review, true);
+});
+
+test("Ísafjarðarbær semantic duplicate titles are counted without dropping raw observations", () => {
+  const rows = [
+    { title: "Óskað eftir tilboðum í þakviðgerðir", publication_date: "2026-02-27", canonical_url: "https://isafjordur.is/one" },
+    { title: "Óskað eftir tilboðum í þakviðgerðir", publication_date: "2026-02-27", canonical_url: "https://isafjordur.is/one-1" },
+  ];
+  assert.equal(countSemanticDuplicates(rows), 1);
+  assert.equal(rows.length, 2);
+});
+
+test("classification context is source-accurate without changing other source defaults", () => {
+  assert.deepEqual(getSourceClassificationContext({ source_key: THREE_SOURCE_KEYS.RIKISKAUP }).source_type, "national_procurement_portal");
+  assert.deepEqual(getSourceClassificationContext({ source_key: THREE_SOURCE_KEYS.VEGAGERDIN }).source_type, "road_authority_broad_feed");
+  assert.deepEqual(getSourceClassificationContext({ source_key: THREE_SOURCE_KEYS.ISAFJORDUR }).source_type, "municipal");
+  assert.deepEqual(getSourceClassificationContext({ source_key: "akranes-utbod-v2", adapter_type: "rss" }), { source_type: "municipal", connector_type: "rss_feed", source_organisation: "akranes-utbod-v2" });
+});
+
+test("shadow parser health records stored run and enrichment metrics", () => {
+  const health = buildShadowParserHealth({ config: { parser_name: "rikiskaup-wordpress", parser_version: "1.0.0" }, fetched: 3, parsed: 40, valid: 39, invalid: 1, duplicates: 2, parserErrors: ["deadline_invalid"], enrichment: { attempted: 20, succeeded: 19, failed: 1 }, suspiciousZero: false, pagination: { fetched_pages: 3 } });
+  assert.equal(health.fetched_count, 3);
+  assert.equal(health.valid_count, 39);
+  assert.equal(health.duplicate_count, 2);
+  assert.equal(health.enrichment.failed, 1);
+});
+
+test("admin diagnostics prefer stored run totals over globally limited observation rows", () => {
+  const rows = buildAdminV2OverviewRows({ configs: [{ id: "source", v2_source_health: { last_observation_count: 749, parser_health: { invalid_count: 0 } } }], runs: [{ id: "run", source_config_id: "source", observation_count: 749, invalid_count: 0, created_at: "2026-08-27" }], observations: [], comparisons: [] });
+  assert.equal(rows[0].observationCount, 749);
+  assert.equal(rows[0].validObservationCount, 749);
+});
+
+test("three-source quality code remains shadow-only with zero promotion paths", async () => {
+  const source = await readFile(functionUrl, "utf8");
+  assert.match(source, /customer_visible_writes:\s*0/);
+  assert.match(source, /promotion_allowed:\s*false/);
+  assert.match(source, /promote_count:\s*0/);
+  assert.doesNotMatch(source, /\.from\(["']opportunities["']\)\.(?:insert|update|upsert|delete)/);
+  assert.doesNotMatch(source, /promote_v2_observation/);
 });
 
 async function sampleObservation(overrides = {}) {

@@ -17,6 +17,7 @@ export function renderAdminV2IngestionPanel({ rows = [], loading = false, error 
               <tr>
                 <th>Source</th>
                 <th>Mode</th>
+                <th>Controls</th>
                 <th>Last fixture/shadow run</th>
                 <th>Run status</th>
                 <th>Observations</th>
@@ -48,7 +49,7 @@ function renderRow(row, escapeHtml, formatDateTime, canMutate = false) {
       <td>${escapeHtml(run.status || health.status || "not run")}${run.suspicious_zero_items ? `<br><small>Zero-item anomaly</small>` : ""}</td>
       <td>${Number(row.observationCount || 0)} <small>(${Number(row.validObservationCount || 0)} valid)</small></td>
       <td>${errors}${health.last_error_message ? `<br><small>${escapeHtml(health.last_error_message)}</small>` : ""}</td>
-      <td>${escapeHtml(health.status || "unknown")} / ${escapeHtml(health.circuit_state || "closed")}<br><small>${Number(parserHealth.parsed_count || 0)} parsed, ${Number(parserHealth.invalid_count || 0)} invalid</small></td>
+      <td>${escapeHtml(health.status || "unknown")} / ${escapeHtml(health.circuit_state || "closed")}<br><small>${Number(parserHealth.fetched_count ?? run.fetched_count ?? 0)} fetched, ${Number(parserHealth.parsed_count ?? run.parsed_count ?? 0)} parsed, ${Number(parserHealth.valid_count ?? Math.max(0, Number(run.observation_count || 0) - Number(run.invalid_count || 0)))} valid, ${Number(parserHealth.invalid_count ?? run.invalid_count ?? 0)} invalid, ${Number(parserHealth.duplicate_count ?? run.duplicate_count ?? 0)} duplicates</small></td>
       <td>${escapeHtml(comparison)}</td>
     </tr>
   `;
