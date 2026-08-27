@@ -64,6 +64,9 @@ import {
   loadAdminContactRequests,
   loadAdminV2IngestionOverview,
   invokeAdminV2Action,
+  isPhaseC1StagingRuntime,
+  PHASE_C1_CANARY_OBSERVATION_ID,
+  PHASE_C1_REYKJAVIK_SOURCE_KEY,
   loadAdminTrialRequests,
   logClientCompanyProfileChange,
   mergeAiReviewsIntoReportMatches,
@@ -268,6 +271,8 @@ let state = {
   v2IngestionLoading: false,
   v2IngestionLoaded: false,
   v2IngestionError: null,
+  v2CanaryAction: "",
+  v2CanaryAssertions: null,
   expandedSourceId: null,
   adminCompanies: [],
   adminCompaniesLoading: false,
@@ -573,6 +578,8 @@ function clearLocalProfileState() {
   state.v2IngestionLoading = false;
   state.v2IngestionLoaded = false;
   state.v2IngestionError = null;
+  state.v2CanaryAction = "";
+  state.v2CanaryAssertions = null;
   state.adminCompanies = [];
   state.adminCompaniesLoading = false;
   state.adminCompaniesLoaded = false;
@@ -596,6 +603,8 @@ function clearAdminAccessState() {
   state.sourceCoverageLoaded = false;
   state.v2IngestionRows = [];
   state.v2IngestionLoaded = false;
+  state.v2CanaryAction = "";
+  state.v2CanaryAssertions = null;
   state.adminCompanies = [];
   state.adminCompaniesLoaded = false;
   state.adminReviewMatches = [];
@@ -737,6 +746,39 @@ document.addEventListener("click", async (event) => {
       else await invokeAdminV2Action(supabaseClient, "set_mode", source, name === "v2-enable-shadow" ? "shadow" : "fixture_only");
       await loadV2IngestionForAdmin();
     } catch (error) { console.error(error); state.v2IngestionError = formatSupabaseError(error); render(); }
+    return;
+  }
+
+  if (["v2-c1-approve-source", "v2-c1-revoke-source", "v2-c1-approve-observation", "v2-c1-promote", "v2-c1-assertions", "v2-c1-rollback"].includes(name)) {
+    event.preventDefault();
+    if (!supabaseClient || !state.isAdmin || !isPhaseC1StagingRuntime(SUPABASE_URL)) return;
+    action.disabled = true;
+    state.v2CanaryAction = name;
+    state.v2IngestionError = null;
+    render();
+    try {
+      let result;
+      if (name === "v2-c1-approve-source" || name === "v2-c1-revoke-source") {
+        result = await invokeAdminV2Action(supabaseClient, "set_source_promotion_approval", PHASE_C1_REYKJAVIK_SOURCE_KEY, null, { approved: name === "v2-c1-approve-source" });
+      } else if (name === "v2-c1-approve-observation") {
+        result = await invokeAdminV2Action(supabaseClient, "approve_promotion", null, null, { observation_id: PHASE_C1_CANARY_OBSERVATION_ID, note: "Phase C1 Reykjavík staging canary" });
+      } else if (name === "v2-c1-promote") {
+        result = await invokeAdminV2Action(supabaseClient, "promote_canary", null, null, { observation_id: PHASE_C1_CANARY_OBSERVATION_ID });
+      } else if (name === "v2-c1-assertions") {
+        result = await invokeAdminV2Action(supabaseClient, "canary_assertions", null, null, { opportunity_id: action.dataset.opportunityId });
+        state.v2CanaryAssertions = result.assertions || null;
+      } else {
+        result = await invokeAdminV2Action(supabaseClient, "rollback_canary", null, null, { observation_id: PHASE_C1_CANARY_OBSERVATION_ID, reason: "Phase C1 staging canary rollback" });
+        state.v2CanaryAssertions = result.rollback?.assertions || null;
+      }
+      if (name !== "v2-c1-assertions") await loadV2IngestionForAdmin();
+    } catch (error) {
+      console.error(error);
+      state.v2IngestionError = formatSupabaseError(error);
+    } finally {
+      state.v2CanaryAction = "";
+      render();
+    }
     return;
   }
 
@@ -9636,7 +9678,10 @@ function renderAdminActiveTab(opportunities) {
         error: state.v2IngestionError || "",
         escapeHtml,
         formatDateTime,
-        controlsEnabled: SUPABASE_URL.includes("ipixuxznqtrcdpzoxric") && !SUPABASE_URL.includes("asojxjbsgqbfpbepojzh")
+        controlsEnabled: isPhaseC1StagingRuntime(SUPABASE_URL),
+        canaryControlsEnabled: state.isAdmin && isPhaseC1StagingRuntime(SUPABASE_URL),
+        canaryAction: state.v2CanaryAction || "",
+        canaryAssertions: state.v2CanaryAssertions || null
       })}
       ${renderLatestImportRunsTable()}
       ${renderLatestTedOpportunities()}

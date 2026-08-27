@@ -96,6 +96,7 @@ Deno.serve(async (req) => {
     if (!adminRow) return json({ error: "Admin access required" }, 403);
 
     const body = await safeJson(req);
+    if (body.action === "set_source_promotion_approval") return await setSourcePromotionApproval({ body, adminClient });
     if (body.action === "approve_promotion") return await approvePromotion({ body, adminClient, adminUserId: userData.user.id });
     if (body.action === "promote_canary") return await promoteCanary({ body, adminClient });
     if (body.action === "rollback_canary") return await rollbackCanary({ body, adminClient, adminUserId: userData.user.id });
@@ -425,6 +426,34 @@ async function approvePromotion({ body, adminClient, adminUserId }: { body: Reco
   });
   if (error) throw error;
   return json({ ok: true, action: "approve_promotion", canary: true, automatic: false, observation: Array.isArray(data) ? data[0] : data });
+}
+
+async function setSourcePromotionApproval({ body, adminClient }: { body: Record<string, unknown>; adminClient: any }) {
+  const sourceKey = String(body.source_key || "").trim();
+  if (sourceKey !== THREE_SOURCE_KEYS.REYKJAVIK) {
+    return json({ error: "Phase C1 source approval is limited to Reykjavík", code: "V2_C1_SOURCE_NOT_ALLOWED" }, 403);
+  }
+  if (typeof body.approved !== "boolean") {
+    return json({ error: "An explicit approved boolean is required", code: "V2_SOURCE_APPROVAL_VALUE_REQUIRED" }, 400);
+  }
+  const approved = body.approved === true;
+  const { data: config, error: configError } = await adminClient.from("v2_source_configs")
+    .select("id,source_key,mode,promotion_approved")
+    .eq("source_key", sourceKey).single();
+  if (configError) throw configError;
+  if (!approved && config.mode !== "promote" && config.promotion_approved !== true) {
+    return json({ ok: true, action: "set_source_promotion_approval", source_key: sourceKey, mode: config.mode, promotion_approved: false, idempotent: true });
+  }
+  if (approved && !["shadow", "promote"].includes(config.mode)) {
+    return json({ error: "Reykjavík must already be in shadow mode", code: "V2_C1_SHADOW_MODE_REQUIRED" }, 409);
+  }
+  const { data: updated, error: updateError } = await adminClient.from("v2_source_configs")
+    .update({ promotion_approved: approved, mode: approved ? "promote" : "shadow", updated_at: new Date().toISOString() })
+    .eq("id", config.id)
+    .eq("source_key", sourceKey)
+    .select("id,source_key,mode,promotion_approved").single();
+  if (updateError) throw updateError;
+  return json({ ok: true, action: "set_source_promotion_approval", source: updated, manual_only: true, automatic: false });
 }
 
 async function promoteCanary({ body, adminClient }: { body: Record<string, unknown>; adminClient: any }) {

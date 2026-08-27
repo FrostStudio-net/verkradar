@@ -7,7 +7,8 @@
     "test:procurement-stage": "node --test supabase/functions/tests/procurement-stage.test.js",
     "test:ingestion-v2": "node --test supabase/functions/tests/v2-ingestion.test.js",
     "test:phase-c0": "node --test supabase/functions/tests/phase-c0-promotion.test.js",
-    "test:phase-c0-db": "bash scripts/test-phase-c0-db.sh"
+    "test:phase-c0-db": "bash scripts/test-phase-c0-db.sh",
+    "test:phase-c1-admin-ui": "node --test supabase/functions/tests/phase-c1-admin-ui.test.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",

@@ -767,7 +767,8 @@ test("admin v2 panel exposes only safe shadow actions", async () => {
   assert.match(panel, /v2-disable-shadow/);
   assert.match(panel, /v2-run-shadow/);
   assert.doesNotMatch(panel, /v2-promote|data-action="promote"/);
-  assert.match(panel, /read-only fixture\/shadow health/i);
+  assert.match(panel, /fixture\/shadow health/i);
+  assert.match(panel, /canaryControlsEnabled/);
 });
 
 test("admin v2 panel render path resolves control gating without free variables", () => {
