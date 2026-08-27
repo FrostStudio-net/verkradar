@@ -10,6 +10,8 @@ import { extractAkranesDetailMetadata } from "../_shared/ingestion-v2/adapters/a
 import { extractRikiskaupDetailMetadata } from "../_shared/ingestion-v2/adapters/rikiskaup-enrichment.js";
 import { extractIsafjordurDetailMetadata } from "../_shared/ingestion-v2/adapters/isafjordur-enrichment.js";
 import { extractReykjavikDetailMetadata } from "../_shared/ingestion-v2/adapters/reykjavik-enrichment.js";
+import { extractLandsvirkjunDetailMetadata } from "../_shared/ingestion-v2/adapters/landsvirkjun-enrichment.js";
+import { getLandsvirkjunParserDiagnostics } from "../_shared/ingestion-v2/adapters/landsvirkjun-html-index.js";
 import {
   applySourcePredictionPolicy,
   buildShadowParserHealth,
@@ -51,6 +53,7 @@ const PHASE_A_FIXTURES: Record<string, { sourceKey: string; file: URL; contentTy
   "vegagerdin-rss": { sourceKey: "vegagerdin-utbod-v2", file: new URL("./_fixtures/vegagerdin-rss.xml", import.meta.url), contentType: "application/rss+xml" },
   "isafjordur-rss": { sourceKey: "isafjordur-utbod-v2", file: new URL("./_fixtures/isafjordur-rss.xml", import.meta.url), contentType: "application/rss+xml" },
   "reykjavik-html-index": { sourceKey: "reykjavik-utbod-v2", file: new URL("./_fixtures/reykjavik-html-index.html", import.meta.url), contentType: "text/html" },
+  "landsvirkjun-html-index": { sourceKey: "landsvirkjun-utbod-v2", file: new URL("./_fixtures/landsvirkjun-html-index.html", import.meta.url), contentType: "text/html" },
 };
 
 Deno.serve(async (req) => {
@@ -95,6 +98,7 @@ Deno.serve(async (req) => {
     const fixtureName = String(body.fixture || body.fixtureName || "").trim();
     const requestedSource = String(body.source_key || body.source || "").trim();
     if (!fixtureName && requestedSource) {
+      if (!ALLOWED_SOURCES.has(requestedSource)) return json({ error: "Source is not allowlisted for live execution", code: "V2_SOURCE_NOT_ALLOWED" }, 403);
       const { data: shadowConfig, error: shadowError } = await adminClient.from("v2_source_configs").select("*").eq("source_key", requestedSource).single();
       if (shadowError) throw shadowError;
       if (shadowConfig.mode === "shadow") return await runShadow({ body, config: shadowConfig, adminClient });
@@ -165,6 +169,7 @@ Deno.serve(async (req) => {
     assertRunDeadline(lease.run_deadline_at);
     const fixtureText = await Deno.readTextFile(fixture.file);
     const candidates = parseWithV2Adapter(config.parser_name, config.parser_version, fixtureText);
+    const indexDiagnostics = getLandsvirkjunParserDiagnostics(candidates);
     const zeroItem = detectZeroItemAnomaly({
       httpOk: true,
       parsedCount: candidates.length,
@@ -220,6 +225,7 @@ Deno.serve(async (req) => {
         error_count: zeroItem.suspicious ? 1 : 0,
         error_code: zeroItem.reason,
         error_message: zeroItem.suspicious ? "Fixture parsed zero items and was quarantined." : null,
+        details: { phase: "A", live_requests_allowed: false, fixture_content_type: fixture.contentType, index_diagnostics: indexDiagnostics },
         finished_at: finishedAt,
         lease_expires_at: finishedAt,
         updated_at: finishedAt,
@@ -248,6 +254,7 @@ Deno.serve(async (req) => {
         parser_version: config.parser_version,
         parsed_count: candidates.length,
         invalid_count: invalidCount,
+        index_diagnostics: indexDiagnostics,
         fixture_only: true,
       },
       updated_at: finishedAt,
@@ -277,6 +284,11 @@ Deno.serve(async (req) => {
 });
 
 async function runShadow({ body: _body, config, adminClient }: { body: Record<string, unknown>; config: any; adminClient: any }) {
+  if (config?.settings?.operational_state === "automated_live_access_not_cleared" || config?.settings?.access_policy?.automated_live_access_cleared === false) {
+    const error = new Error("Automated live access has not been operationally cleared for this source");
+    (error as any).code = "V2_LIVE_ACCESS_NOT_CLEARED";
+    throw error;
+  }
   const started = Date.now();
   const now = new Date();
   const lease = createRunLease({ now, leaseMs: 30000, deadlineMs: Number(config.run_deadline_ms || 30000) });
@@ -311,7 +323,8 @@ async function runShadow({ body: _body, config, adminClient }: { body: Record<st
       text = await fetched.response.text();
     }
     let candidates = parseWithV2Adapter(config.parser_name, config.parser_version, text);
-    if ([THREE_SOURCE_KEYS.RIKISKAUP, THREE_SOURCE_KEYS.VEGAGERDIN, THREE_SOURCE_KEYS.ISAFJORDUR, THREE_SOURCE_KEYS.REYKJAVIK].includes(config.source_key)) {
+    const indexDiagnostics = getLandsvirkjunParserDiagnostics(candidates);
+    if ([THREE_SOURCE_KEYS.RIKISKAUP, THREE_SOURCE_KEYS.VEGAGERDIN, THREE_SOURCE_KEYS.ISAFJORDUR, THREE_SOURCE_KEYS.REYKJAVIK, THREE_SOURCE_KEYS.LANDSVIRKJUN].includes(config.source_key)) {
       duplicateCount += countSemanticDuplicates(candidates);
     }
     let enrichmentMetrics = { attempted: 0, succeeded: 0, failed: 0, enriched: 0, no_supported_fields: 0, skipped: candidates.length, limit: 0 };
@@ -336,6 +349,8 @@ async function runShadow({ body: _body, config, adminClient }: { body: Record<st
             ? extractIsafjordurDetailMetadata
             : config.source_key === THREE_SOURCE_KEYS.REYKJAVIK
               ? extractReykjavikDetailMetadata
+            : config.source_key === THREE_SOURCE_KEYS.LANDSVIRKJUN
+              ? extractLandsvirkjunDetailMetadata
             : undefined,
         fetchDetail: async (url: string) => {
           const detail = await fetchWithRetry(url, { maxAttempts: 2, timeoutMs: Math.min(Number(config.request_timeout_ms || 5000), 5000), deadlineAt: Date.parse(lease.run_deadline_at), request: { headers } });
@@ -371,8 +386,8 @@ async function runShadow({ body: _body, config, adminClient }: { body: Record<st
     for (const observation of storedObservations) { const comparison = await compareObservationToLegacy(observation, legacy || []); const { comparison_state, ...comparisonRecord } = comparison; const { error: comparisonError } = await adminClient.from("v2_legacy_comparisons").upsert({ observation_id: observation.id, ...comparisonRecord }, { onConflict: "observation_id,legacy_opportunity_id,match_type" }); if (comparisonError) throw comparisonError; const state = comparison_state || (comparison.match_type === "v2_only" ? "v2_only" : comparison.match_type === "fuzzy_review_candidate" ? "review_required" : "legacy_match"); const { error: stateError } = await adminClient.from("v2_ingestion_observations").update({ comparison_state: state }).eq("id", observation.id); if (stateError) throw stateError; }
     const finished = new Date().toISOString();
     const runStatus = zeroItem.suspicious ? "quarantined" : invalidCount ? "partial" : "succeeded";
-    const parserHealth = buildShadowParserHealth({ config, fetched: fetchedCount, parsed: candidates.length, valid: validCount, invalid: invalidCount, duplicates: duplicateCount, parserErrors, enrichment: enrichmentMetrics, suspiciousZero: zeroItem.suspicious, pagination, classification: classificationMetrics });
-    const details = { phase: "B", live_requests_allowed: true, customer_visible_writes: 0, promotion_allowed: false, promote_count: 0, pagination, enrichment: enrichmentMetrics, classification: classificationMetrics };
+    const parserHealth = buildShadowParserHealth({ config, fetched: fetchedCount, parsed: candidates.length, valid: validCount, invalid: invalidCount, duplicates: duplicateCount, parserErrors, enrichment: enrichmentMetrics, suspiciousZero: zeroItem.suspicious, pagination, classification: classificationMetrics, indexDiagnostics });
+    const details = { phase: "B", live_requests_allowed: true, customer_visible_writes: 0, promotion_allowed: false, promote_count: 0, pagination, index_diagnostics: indexDiagnostics, enrichment: enrichmentMetrics, classification: classificationMetrics };
     const { error: finalizeError } = await adminClient.from("v2_ingestion_runs").update({ status: runStatus, fetched_count: fetchedCount, parsed_count: candidates.length, observation_count: observations.length, invalid_count: invalidCount, duplicate_count: duplicateCount, suspicious_zero_items: zeroItem.suspicious, error_count: parserErrors.length + (zeroItem.suspicious ? 1 : 0), error_code: zeroItem.reason, error_message: zeroItem.suspicious ? "HTTP success but zero parsed items" : null, details, finished_at: finished, lease_expires_at: finished, updated_at: finished }).eq("id", run.id);
     if (finalizeError) throw finalizeError;
     const { error: healthUpdateError } = await adminClient.from("v2_source_health").upsert({ source_config_id: config.id, status: runStatus === "succeeded" ? "healthy" : "degraded", circuit_state: zeroItem.circuit_should_open ? "open" : "closed", consecutive_zero_item_runs: zeroItem.consecutive_zero_item_runs, last_run_id: run.id, last_run_at: finished, last_success_at: runStatus === "succeeded" ? finished : health?.last_success_at || null, last_shadow_at: finished, last_http_status: fetched.response.status, last_latency_ms: fetched.latencyMs, last_observation_count: observations.length, last_error_code: zeroItem.reason, last_error_message: zeroItem.suspicious ? "HTTP success but zero parsed items" : null, parser_health: parserHealth, updated_at: finished }, { onConflict: "source_config_id" });

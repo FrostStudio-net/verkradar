@@ -6,6 +6,7 @@ export const THREE_SOURCE_KEYS = Object.freeze({
   VEGAGERDIN: "vegagerdin-utbod-v2",
   ISAFJORDUR: "isafjordur-utbod-v2",
   REYKJAVIK: "reykjavik-utbod-v2",
+  LANDSVIRKJUN: "landsvirkjun-utbod-v2",
 });
 
 export const DETAIL_ENRICHMENT_LIMITS = Object.freeze({
@@ -13,6 +14,7 @@ export const DETAIL_ENRICHMENT_LIMITS = Object.freeze({
   [THREE_SOURCE_KEYS.VEGAGERDIN]: 12,
   [THREE_SOURCE_KEYS.ISAFJORDUR]: 15,
   [THREE_SOURCE_KEYS.REYKJAVIK]: 12,
+  [THREE_SOURCE_KEYS.LANDSVIRKJUN]: 10,
 });
 
 export function getSourceClassificationContext(config) {
@@ -28,6 +30,9 @@ export function getSourceClassificationContext(config) {
   }
   if (sourceKey === THREE_SOURCE_KEYS.REYKJAVIK) {
     return { source_type: "municipal_procurement_portal", connector_type: "municipal_html_index", source_organisation: "Reykjavíkurborg procurement" };
+  }
+  if (sourceKey === THREE_SOURCE_KEYS.LANDSVIRKJUN) {
+    return { source_type: "energy_utility_procurement_portal", connector_type: "public_procurement_html_index", source_organisation: "Landsvirkjun procurement" };
   }
   if (["akranes-utbod-v2", "borgarbyggd-utbod-v2", "gardabaer-utbod-v2"].includes(sourceKey)) {
     return { source_type: "municipal", connector_type: "rss_feed", source_organisation: String(config?.display_name || sourceKey) };
@@ -132,6 +137,16 @@ export async function enrichCandidatesBounded(candidates, options) {
 }
 
 export function isLikelyProcurementCandidate(candidate, sourceKey, now = new Date()) {
+  if (sourceKey === THREE_SOURCE_KEYS.LANDSVIRKJUN) {
+    try {
+      const url = new URL(candidate?.canonical_url || candidate?.discovered_url || "");
+      return ["utbodsvefur.is", "www.utbodsvefur.is"].includes(url.hostname.toLowerCase()) &&
+        candidate?.safe_source_payload?.listing_context === "current_procurement" &&
+        normalize(candidate?.buyer) === "landsvirkjun";
+    } catch {
+      return false;
+    }
+  }
   if (sourceKey === THREE_SOURCE_KEYS.REYKJAVIK) {
     try {
       const url = new URL(candidate?.canonical_url || candidate?.discovered_url || "");
@@ -159,6 +174,8 @@ export function applySourcePredictionPolicy(prediction, observation, config, now
     ? applyRikiskaupProcurementType(prediction, observation)
     : sourceKey === THREE_SOURCE_KEYS.REYKJAVIK
       ? applyReykjavikProcurementType(prediction, observation)
+      : sourceKey === THREE_SOURCE_KEYS.LANDSVIRKJUN
+        ? applyLandsvirkjunProcurementType(prediction, observation)
     : { ...prediction };
   adjusted = applyDeadlineActionabilityGuard(adjusted, observation?.deadline, now);
   const category = categorizeShadowObservation(observation, adjusted, sourceKey, now);
@@ -170,6 +187,30 @@ export function applySourcePredictionPolicy(prediction, observation, config, now
     adjusted.requires_admin_review = true;
   }
   return { prediction: adjusted, category };
+}
+
+function applyLandsvirkjunProcurementType(prediction, observation) {
+  const procurementType = String(observation?.safe_source_payload?.shadow_enrichment?.procurement_type || "");
+  if (procurementType === "market_consultation") {
+    return mappedPrediction(prediction, "market_consultation", true, false, "Explicit Landsvirkjun RFI/market-consultation evidence.");
+  }
+  if (["open_tender", "prequalification", "dynamic_purchasing_system"].includes(procurementType)) {
+    return mappedPrediction(prediction, "open_competition", true, false, procurementType === "prequalification"
+      ? "Explicit Landsvirkjun prequalification accepting supplier applications."
+      : procurementType === "dynamic_purchasing_system"
+        ? "Explicit Landsvirkjun dynamic purchasing system accepting supplier applications."
+        : "Explicit Landsvirkjun tender accepting supplier bids.");
+  }
+  if (procurementType === "prior_notice") {
+    return mappedPrediction(prediction, "upcoming_procurement", true, false, "Explicit Landsvirkjun prior-information notice on the current procurement listing.");
+  }
+  if (procurementType === "transparency_notice") {
+    return mappedPrediction(prediction, "uncertain", false, true, "Landsvirkjun transparency/direct-award notice is not an open competition.");
+  }
+  if (procurementType === "award_or_followup") {
+    return mappedPrediction(prediction, "award_or_contract_signed", false, false, "Explicit Landsvirkjun procurement award/follow-up evidence.");
+  }
+  return { ...prediction };
 }
 
 function applyReykjavikProcurementType(prediction, observation) {
@@ -237,7 +278,7 @@ export function categorizeShadowObservation(observation, prediction, sourceKey, 
 
 /** @param {any} input */
 export function buildShadowParserHealth(input) {
-  const { config, fetched, parsed, valid, invalid, duplicates, parserErrors = [], enrichment, suspiciousZero, pagination, classification } = input;
+  const { config, fetched, parsed, valid, invalid, duplicates, parserErrors = [], enrichment, suspiciousZero, pagination, classification, indexDiagnostics } = input;
   return {
     parser_name: config.parser_name,
     parser_version: config.parser_version,
@@ -250,6 +291,7 @@ export function buildShadowParserHealth(input) {
     enrichment: enrichment || { attempted: 0, succeeded: 0, failed: 0, enriched: 0, skipped: 0 },
     suspicious_zero_items: suspiciousZero === true,
     pagination: pagination || null,
+    index_diagnostics: indexDiagnostics || null,
     classification: classification || { stage_distribution: {}, actionable: 0, non_actionable: 0 },
     fixture_only: false,
   };

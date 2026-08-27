@@ -5,6 +5,7 @@ import { rikiskaupWordpressAdapter } from "./rikiskaup-wordpress.js";
 import { vegagerdinRssAdapter } from "./vegagerdin-rss.js";
 import { isafjordurRssAdapter } from "./isafjordur-rss.js";
 import { reykjavikHtmlIndexAdapter } from "./reykjavik-html-index.js";
+import { landsvirkjunHtmlIndexAdapter } from "./landsvirkjun-html-index.js";
 
 const ADAPTERS = new Map([
   [akranesRssAdapter.parserName, akranesRssAdapter],
@@ -14,6 +15,7 @@ const ADAPTERS = new Map([
   [vegagerdinRssAdapter.parserName, vegagerdinRssAdapter],
   [isafjordurRssAdapter.parserName, isafjordurRssAdapter],
   [reykjavikHtmlIndexAdapter.parserName, reykjavikHtmlIndexAdapter],
+  [landsvirkjunHtmlIndexAdapter.parserName, landsvirkjunHtmlIndexAdapter],
 ]);
 
 export function getV2Adapter(parserName, parserVersion) {
