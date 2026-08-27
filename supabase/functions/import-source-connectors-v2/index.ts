@@ -10,8 +10,8 @@ import { extractAkranesDetailMetadata } from "../_shared/ingestion-v2/adapters/a
 import { extractRikiskaupDetailMetadata } from "../_shared/ingestion-v2/adapters/rikiskaup-enrichment.js";
 import { extractIsafjordurDetailMetadata } from "../_shared/ingestion-v2/adapters/isafjordur-enrichment.js";
 import { extractReykjavikDetailMetadata } from "../_shared/ingestion-v2/adapters/reykjavik-enrichment.js";
-import { extractLandsvirkjunDetailMetadata } from "../_shared/ingestion-v2/adapters/landsvirkjun-enrichment.js";
-import { getLandsvirkjunParserDiagnostics } from "../_shared/ingestion-v2/adapters/landsvirkjun-html-index.js";
+import { extractLandsnetDetailMetadata, extractLandsvirkjunDetailMetadata, extractOrkuveitanDetailMetadata, extractVeiturDetailMetadata } from "../_shared/ingestion-v2/adapters/utbodsvefur-enrichment.js";
+import { getUtbodsvefurParserDiagnostics } from "../_shared/ingestion-v2/adapters/utbodsvefur-buyers.js";
 import {
   applySourcePredictionPolicy,
   buildShadowParserHealth,
@@ -53,7 +53,17 @@ const PHASE_A_FIXTURES: Record<string, { sourceKey: string; file: URL; contentTy
   "vegagerdin-rss": { sourceKey: "vegagerdin-utbod-v2", file: new URL("./_fixtures/vegagerdin-rss.xml", import.meta.url), contentType: "application/rss+xml" },
   "isafjordur-rss": { sourceKey: "isafjordur-utbod-v2", file: new URL("./_fixtures/isafjordur-rss.xml", import.meta.url), contentType: "application/rss+xml" },
   "reykjavik-html-index": { sourceKey: "reykjavik-utbod-v2", file: new URL("./_fixtures/reykjavik-html-index.html", import.meta.url), contentType: "text/html" },
-  "landsvirkjun-html-index": { sourceKey: "landsvirkjun-utbod-v2", file: new URL("./_fixtures/landsvirkjun-html-index.html", import.meta.url), contentType: "text/html" },
+  "landsvirkjun-html-index": { sourceKey: "landsvirkjun-utbod-v2", file: new URL("./_fixtures/utbodsvefur-buyers-html-index.html", import.meta.url), contentType: "text/html" },
+  "landsnet-html-index": { sourceKey: "landsnet-utbod-v2", file: new URL("./_fixtures/utbodsvefur-buyers-html-index.html", import.meta.url), contentType: "text/html" },
+  "veitur-html-index": { sourceKey: "veitur-utbod-v2", file: new URL("./_fixtures/utbodsvefur-buyers-html-index.html", import.meta.url), contentType: "text/html" },
+  "orkuveitan-html-index": { sourceKey: "orkuveitan-utbod-v2", file: new URL("./_fixtures/utbodsvefur-buyers-html-index.html", import.meta.url), contentType: "text/html" },
+};
+
+const UTBODSVEFUR_DETAIL_EXTRACTORS: Record<string, (html: string) => Record<string, unknown>> = {
+  [THREE_SOURCE_KEYS.LANDSVIRKJUN]: extractLandsvirkjunDetailMetadata,
+  [THREE_SOURCE_KEYS.LANDSNET]: extractLandsnetDetailMetadata,
+  [THREE_SOURCE_KEYS.VEITUR]: extractVeiturDetailMetadata,
+  [THREE_SOURCE_KEYS.ORKUVEITAN]: extractOrkuveitanDetailMetadata,
 };
 
 Deno.serve(async (req) => {
@@ -169,7 +179,7 @@ Deno.serve(async (req) => {
     assertRunDeadline(lease.run_deadline_at);
     const fixtureText = await Deno.readTextFile(fixture.file);
     const candidates = parseWithV2Adapter(config.parser_name, config.parser_version, fixtureText);
-    const indexDiagnostics = getLandsvirkjunParserDiagnostics(candidates);
+    const indexDiagnostics = getUtbodsvefurParserDiagnostics(candidates);
     const zeroItem = detectZeroItemAnomaly({
       httpOk: true,
       parsedCount: candidates.length,
@@ -323,8 +333,8 @@ async function runShadow({ body: _body, config, adminClient }: { body: Record<st
       text = await fetched.response.text();
     }
     let candidates = parseWithV2Adapter(config.parser_name, config.parser_version, text);
-    const indexDiagnostics = getLandsvirkjunParserDiagnostics(candidates);
-    if ([THREE_SOURCE_KEYS.RIKISKAUP, THREE_SOURCE_KEYS.VEGAGERDIN, THREE_SOURCE_KEYS.ISAFJORDUR, THREE_SOURCE_KEYS.REYKJAVIK, THREE_SOURCE_KEYS.LANDSVIRKJUN].includes(config.source_key)) {
+    const indexDiagnostics = getUtbodsvefurParserDiagnostics(candidates);
+    if ([THREE_SOURCE_KEYS.RIKISKAUP, THREE_SOURCE_KEYS.VEGAGERDIN, THREE_SOURCE_KEYS.ISAFJORDUR, THREE_SOURCE_KEYS.REYKJAVIK, ...Object.keys(UTBODSVEFUR_DETAIL_EXTRACTORS)].includes(config.source_key)) {
       duplicateCount += countSemanticDuplicates(candidates);
     }
     let enrichmentMetrics = { attempted: 0, succeeded: 0, failed: 0, enriched: 0, no_supported_fields: 0, skipped: candidates.length, limit: 0 };
@@ -349,8 +359,8 @@ async function runShadow({ body: _body, config, adminClient }: { body: Record<st
             ? extractIsafjordurDetailMetadata
             : config.source_key === THREE_SOURCE_KEYS.REYKJAVIK
               ? extractReykjavikDetailMetadata
-            : config.source_key === THREE_SOURCE_KEYS.LANDSVIRKJUN
-              ? extractLandsvirkjunDetailMetadata
+            : UTBODSVEFUR_DETAIL_EXTRACTORS[config.source_key]
+              ? UTBODSVEFUR_DETAIL_EXTRACTORS[config.source_key]
             : undefined,
         fetchDetail: async (url: string) => {
           const detail = await fetchWithRetry(url, { maxAttempts: 2, timeoutMs: Math.min(Number(config.request_timeout_ms || 5000), 5000), deadlineAt: Date.parse(lease.run_deadline_at), request: { headers } });

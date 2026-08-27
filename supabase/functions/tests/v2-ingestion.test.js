@@ -29,6 +29,13 @@ import {
 } from "../_shared/ingestion-v2/adapters/landsvirkjun-enrichment.js";
 import { getLandsvirkjunParserDiagnostics } from "../_shared/ingestion-v2/adapters/landsvirkjun-html-index.js";
 import {
+  classifyUtbodsvefurProcurementType,
+  extractLandsnetDetailMetadata,
+  extractOrkuveitanDetailMetadata,
+  extractVeiturDetailMetadata,
+} from "../_shared/ingestion-v2/adapters/utbodsvefur-enrichment.js";
+import { getUtbodsvefurParserDiagnostics, UTBODSVEFUR_BUYERS } from "../_shared/ingestion-v2/adapters/utbodsvefur-buyers.js";
+import {
   applySourcePredictionPolicy,
   buildShadowParserHealth,
   countSemanticDuplicates,
@@ -46,6 +53,7 @@ const detailFixtureRoot = new URL("./fixtures/", import.meta.url);
 const migrationUrl = new URL("../../migrations/20260826120000_parallel_source_ingestion_v2_phase_a.sql", import.meta.url);
 const reykjavikMigrationUrl = new URL("../../migrations/20260827163000_v2_reykjavik_fixture_source.sql", import.meta.url);
 const landsvirkjunMigrationUrl = new URL("../../migrations/20260827190000_v2_landsvirkjun_fixture_source.sql", import.meta.url);
+const utbodsvefurBuyersMigrationUrl = new URL("../../migrations/20260827210000_v2_utbodsvefur_buyer_fixture_sources.sql", import.meta.url);
 const functionUrl = new URL("../import-source-connectors-v2/index.ts", import.meta.url);
 
 const context = {
@@ -213,7 +221,7 @@ test("Reykjavík identity resolves stable reference before canonical URL", async
 });
 
 test("Landsvirkjun aggregate parser filters the shared table by exact buyer", async () => {
-  const input = await readFile(new URL("landsvirkjun-html-index.html", fixtureRoot), "utf8");
+  const input = await readFile(new URL("utbodsvefur-buyers-html-index.html", fixtureRoot), "utf8");
   const rows = parseWithV2Adapter("landsvirkjun-html-index", "1.0.0", input);
   assert.equal(rows.length, 3);
   assert.deepEqual(rows.map((row) => row.procurement_reference), ["2026-17", "2026-10", "2026-38"]);
@@ -227,6 +235,8 @@ test("Landsvirkjun aggregate parser filters the shared table by exact buyer", as
     buyer_mismatch_rows: 4,
     duplicate_rows: 0,
     zero_exact_buyer_match: false,
+    canonical_buyer: "Landsvirkjun",
+    accepted_buyer_aliases: [],
     structure: "semantic_procurement_table_v1",
   });
   assert.equal(rows.some((row) => /Landsnet|Isavia|Veitur|Orkuveita/.test(row.buyer)), false);
@@ -301,7 +311,7 @@ test("Landsvirkjun future enrichment is hard-bounded and never follows provenanc
     title: `Útboð ${index}`,
     buyer: "Landsvirkjun",
     canonical_url: `https://utbodsvefur.is/landsvirkjun-${index}/`,
-    safe_source_payload: { listing_context: "current_procurement" },
+    safe_source_payload: { listing_context: "current_procurement", configured_buyer: "Landsvirkjun" },
   }));
   const detail = await readFile(new URL("landsvirkjun-detail-open.html", detailFixtureRoot), "utf8");
   const requested = [];
@@ -325,6 +335,122 @@ test("Landsvirkjun identity prefers explicit reference and does not fuzzy-auto-m
   assert.equal(reference.auto_merge, true);
   const fuzzy = await resolveIdentity(observation, [{ id: "similar-title", source_id: "other", title: "HVM36 Þrýstipípur", publication_date: null, deadline: null }]);
   assert.equal(fuzzy.auto_merge, false);
+});
+
+test("shared Útboðsvefur aggregate returns only each configured buyer", async () => {
+  const input = await readFile(new URL("utbodsvefur-buyers-html-index.html", fixtureRoot), "utf8");
+  const cases = [
+    ["landsvirkjun-html-index", "Landsvirkjun", ["2026-17", "2026-10", "2026-38"]],
+    ["landsnet-html-index", "Landsnet", ["2026-06-629"]],
+    ["veitur-html-index", "Veitur", ["VEU-2604-0038"]],
+    ["orkuveitan-html-index", "Orkuveita Reykjavíkur", ["ORGK-2025-01"]],
+  ];
+  for (const [parser, buyer, references] of cases) {
+    const rows = parseWithV2Adapter(parser, "1.0.0", input);
+    assert.deepEqual(rows.map((row) => row.procurement_reference), references);
+    assert.ok(rows.every((row) => row.buyer === buyer));
+    assert.ok(rows.every((row) => row.safe_source_payload.configured_buyer === buyer));
+    const diagnostics = getUtbodsvefurParserDiagnostics(rows);
+    assert.equal(diagnostics.total_rows, 7);
+    assert.equal(diagnostics.matching_buyer_rows, references.length);
+    assert.equal(diagnostics.buyer_mismatch_rows, 7 - references.length);
+  }
+});
+
+test("Útboðsvefur exact buyer filtering rejects near matches and related companies", () => {
+  const table = (buyer) => `<table><tr><th>Númer</th><th>Lýsing</th><th>Útboðsaðili</th><th>Tegund</th><th>Skilafrestur</th></tr><tr><td>X-1</td><td><a href="/x-one/">Útboð</a></td><td>${buyer}</td><td>Framkvæmd</td><td>01.10.2026</td></tr></table>`;
+  assert.equal(parseWithV2Adapter("landsnet-html-index", "1.0.0", table("Landsnet hf.")).length, 0);
+  assert.equal(parseWithV2Adapter("veitur-html-index", "1.0.0", table("Orkuveita Reykjavíkur")).length, 0);
+  assert.equal(parseWithV2Adapter("orkuveitan-html-index", "1.0.0", table("Veitur")).length, 0);
+  assert.equal(parseWithV2Adapter("orkuveitan-html-index", "1.0.0", table("Orkuveitan")).length, 0);
+  assert.deepEqual(UTBODSVEFUR_BUYERS.orkuveitan.acceptedBuyerAliases, []);
+});
+
+test("Landsnet public detail enrichment identifies RFI market consultation", async () => {
+  const metadata = extractLandsnetDetailMetadata(await readFile(new URL("landsnet-detail-rfi.html", detailFixtureRoot), "utf8"));
+  assert.equal(metadata.procurement_reference, "2026-06-629");
+  assert.equal(metadata.buyer, "Landsnet");
+  assert.equal(metadata.deadline, "2026-09-01");
+  assert.equal(metadata.procurement_type, "market_consultation");
+  assert.equal(metadata.form_type, "consultation");
+  assert.equal(metadata.canonical_url, "https://utbodsvefur.is/faeranlegar-vinnubudir-markadskonnun/");
+  assert.match(metadata.description, /markaðskönnun en ekki útboð/);
+  assert.equal(metadata.portal_url, "https://in-tendhost.co.uk/landsnet/aspx/ProjectManage/629");
+});
+
+test("Veitur public detail enrichment preserves VEU reference and excludes Orkuveitan", async () => {
+  const metadata = extractVeiturDetailMetadata(await readFile(new URL("veitur-detail-open.html", detailFixtureRoot), "utf8"));
+  assert.equal(metadata.procurement_reference, "VEU-2604-0038");
+  assert.equal(metadata.buyer, "Veitur");
+  assert.equal(metadata.deadline, "2026-09-03");
+  assert.equal(metadata.procurement_type, "open_tender");
+  assert.equal(metadata.request_for_bids, true);
+  assert.equal(metadata.canonical_url, "https://utbodsvefur.is/hreinsun-myndanir-og-greining-fraveitulagna/");
+  assert.equal(classifyUtbodsvefurProcurementType("Rammasamningur Veitna; tilboðum skal skila"), "open_tender");
+  const related = extractVeiturDetailMetadata(await readFile(new URL("orkuveitan-detail-dps.html", detailFixtureRoot), "utf8"));
+  assert.equal(related.enrichment_status, "no_supported_fields");
+  assert.equal(related.procurement_reference, null);
+});
+
+test("Orkuveitan public detail enrichment preserves ORGK identity and explicit DPS", async () => {
+  const metadata = extractOrkuveitanDetailMetadata(await readFile(new URL("orkuveitan-detail-dps.html", detailFixtureRoot), "utf8"));
+  assert.equal(metadata.procurement_reference, "ORGK-2025-01");
+  assert.equal(metadata.buyer, "Orkuveita Reykjavíkur");
+  assert.equal(metadata.deadline, "2031-04-17");
+  assert.equal(metadata.procurement_type, "dynamic_purchasing_system");
+  assert.equal(metadata.form_type, "competition");
+  assert.equal(metadata.canonical_url, "https://utbodsvefur.is/laus-husgogn-fyrir-hofudstodvar-orkuveitunnar/");
+  const subsidiary = extractOrkuveitanDetailMetadata(await readFile(new URL("veitur-detail-open.html", detailFixtureRoot), "utf8"));
+  assert.equal(subsidiary.enrichment_status, "no_supported_fields");
+});
+
+test("shared Útboðsvefur classification maps RFI and DPS but expired deadlines always close", () => {
+  assert.equal(classifyUtbodsvefurProcurementType("Markaðskönnun / RFI"), "market_consultation");
+  assert.equal(classifyUtbodsvefurProcurementType("Gagnvirkt innkaupakerfi DPS"), "dynamic_purchasing_system");
+  assert.equal(classifyUtbodsvefurProcurementType("Almenn kynning á starfsemi"), "unknown");
+  const base = { procurement_stage: "uncertain", actionable_for_suppliers: false, requires_admin_review: true, classification_confidence: 0.35 };
+  for (const source_key of [THREE_SOURCE_KEYS.LANDSNET, THREE_SOURCE_KEYS.VEITUR, THREE_SOURCE_KEYS.ORKUVEITAN]) {
+    const current = applySourcePredictionPolicy(base, { deadline: "2031-04-17", safe_source_payload: { shadow_enrichment: { procurement_type: "dynamic_purchasing_system" } } }, { source_key }, new Date("2026-08-28T10:00:00Z")).prediction;
+    assert.equal(current.procurement_stage, "open_competition");
+    assert.equal(current.actionable_for_suppliers, true);
+    const expired = applySourcePredictionPolicy(base, { deadline: "2026-08-27", safe_source_payload: { shadow_enrichment: { procurement_type: "open_tender" } } }, { source_key }, new Date("2026-08-28T10:00:00Z")).prediction;
+    assert.equal(expired.procurement_stage, "open_competition");
+    assert.equal(expired.actionable_for_suppliers, false);
+    const weak = applySourcePredictionPolicy(base, { deadline: null, safe_source_payload: { shadow_enrichment: { procurement_type: "unknown" } } }, { source_key }, new Date("2026-08-28T10:00:00Z")).prediction;
+    assert.equal(weak.procurement_stage, "uncertain");
+    assert.equal(weak.actionable_for_suppliers, false);
+  }
+});
+
+test("new Útboðsvefur source identities use exact reference and never fuzzy-auto-merge", async () => {
+  const cases = [
+    [THREE_SOURCE_KEYS.LANDSNET, "2026-06-629", "Landsnet RFI"],
+    [THREE_SOURCE_KEYS.VEITUR, "VEU-2604-0038", "Fráveitulagnir"],
+    [THREE_SOURCE_KEYS.ORKUVEITAN, "ORGK-2025-01", "Laus húsgögn"],
+  ];
+  for (const [sourceKey, reference, title] of cases) {
+    const observation = await createObservation({ external_id: reference, procurement_reference: reference, title, canonical_url: `https://utbodsvefur.is/${String(reference).toLowerCase()}/` }, { ...context, source_key: sourceKey });
+    const exact = await resolveIdentity(observation, [{ id: "reference", source_id: "other", procurement_reference: reference, title: "Other" }]);
+    assert.equal(exact.match_type, "procurement_reference");
+    assert.equal(exact.auto_merge, true);
+    const fuzzy = await resolveIdentity(observation, [{ id: "similar", source_id: "other", title }]);
+    assert.equal(fuzzy.auto_merge, false);
+  }
+});
+
+test("bounded Útboðsvefur enrichment fetches only public detail URLs, never provenance", async () => {
+  const input = await readFile(new URL("utbodsvefur-buyers-html-index.html", fixtureRoot), "utf8");
+  const candidates = parseWithV2Adapter("landsnet-html-index", "1.0.0", input);
+  const detail = await readFile(new URL("landsnet-detail-rfi.html", detailFixtureRoot), "utf8");
+  const requested = [];
+  const result = await enrichCandidatesBounded(candidates, {
+    sourceKey: THREE_SOURCE_KEYS.LANDSNET,
+    metadataExtractor: extractLandsnetDetailMetadata,
+    fetchDetail: async (url) => { requested.push(url); return detail; },
+  });
+  assert.equal(result.metrics.attempted, 1);
+  assert.deepEqual(requested, ["https://utbodsvefur.is/faeranlegar-vinnubudir-markadskonnun/"]);
+  assert.equal(requested.some((url) => url.includes("in-tendhost")), false);
 });
 
 test("content hashes are stable across object key order and fetch time", async () => {
@@ -912,6 +1038,9 @@ test("classification context is source-accurate without changing other source de
     connector_type: "public_procurement_html_index",
     source_organisation: "Landsvirkjun procurement",
   });
+  assert.equal(getSourceClassificationContext({ source_key: THREE_SOURCE_KEYS.LANDSNET }).source_organisation, "Landsnet procurement");
+  assert.equal(getSourceClassificationContext({ source_key: THREE_SOURCE_KEYS.VEITUR }).source_organisation, "Veitur procurement");
+  assert.equal(getSourceClassificationContext({ source_key: THREE_SOURCE_KEYS.ORKUVEITAN }).source_organisation, "Orkuveita Reykjavíkur procurement");
   assert.deepEqual(getSourceClassificationContext({ source_key: "akranes-utbod-v2", adapter_type: "rss" }), { source_type: "municipal", connector_type: "rss_feed", source_organisation: "akranes-utbod-v2" });
 });
 
@@ -976,6 +1105,38 @@ test("Landsvirkjun runtime is fixture-wired, live-blocked, and promotion-free", 
   assert.match(source, /promotion_allowed:\s*false/);
   assert.match(source, /promote_count:\s*0/);
   assert.doesNotMatch(source, /\.from\(["']opportunities["']\)\.(?:insert|update|upsert|delete)/);
+});
+
+test("three additional Útboðsvefur configs are fixture-only with strict buyer settings", async () => {
+  const sql = await readFile(utbodsvefurBuyersMigrationUrl, "utf8");
+  for (const [key, selector, buyer] of [
+    ["landsnet-utbod-v2", "326", "Landsnet"],
+    ["veitur-utbod-v2", "574", "Veitur"],
+    ["orkuveitan-utbod-v2", "193", "Orkuveita Reykjavíkur"],
+  ]) {
+    assert.match(sql, new RegExp(`'${key}'`));
+    assert.match(sql, new RegExp(`\\?adili=${selector}`));
+    assert.match(sql, new RegExp(`'${buyer}'`));
+  }
+  assert.match(sql, /'fixture_only'/);
+  assert.match(sql, /'automated_live_access_not_cleared'/);
+  assert.match(sql, /'robots_disallow', true/);
+  assert.match(sql, /'automated_live_access_cleared', false/);
+  assert.match(sql, /'promotion_available', false/);
+  assert.match(sql, /'accepted_buyer_aliases', '\[\]'::jsonb/);
+  assert.doesNotMatch(sql, /mode\s*=\s*excluded\.mode/);
+});
+
+test("new Útboðsvefur sources are fixture-wired but outside every live execution allowlist", async () => {
+  const source = await readFile(functionUrl, "utf8");
+  for (const parser of ["landsnet-html-index", "veitur-html-index", "orkuveitan-html-index"]) assert.match(source, new RegExp(`"${parser}"`));
+  for (const extractor of ["extractLandsnetDetailMetadata", "extractVeiturDetailMetadata", "extractOrkuveitanDetailMetadata"]) assert.match(source, new RegExp(extractor));
+  const allowlist = source.match(/const ALLOWED_SOURCES = new Set\(\[([^\]]+)\]\)/)?.[1] || "";
+  for (const key of ["landsvirkjun-utbod-v2", "landsnet-utbod-v2", "veitur-utbod-v2", "orkuveitan-utbod-v2"]) assert.doesNotMatch(allowlist, new RegExp(key));
+  assert.match(source, /V2_LIVE_ACCESS_NOT_CLEARED/);
+  assert.doesNotMatch(source, /fetchWithRetry\([^\n]*(?:in-tendhost|MyTenders|Projects\.svc)/i);
+  assert.doesNotMatch(source, /\.from\(["']opportunities["']\)\.(?:insert|update|upsert|delete)/);
+  assert.doesNotMatch(source, /promote_v2_observation/);
 });
 
 test("Landsvirkjun aggregate diagnostics persist in parser health", () => {

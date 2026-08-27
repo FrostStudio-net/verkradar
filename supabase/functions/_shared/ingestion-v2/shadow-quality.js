@@ -7,6 +7,16 @@ export const THREE_SOURCE_KEYS = Object.freeze({
   ISAFJORDUR: "isafjordur-utbod-v2",
   REYKJAVIK: "reykjavik-utbod-v2",
   LANDSVIRKJUN: "landsvirkjun-utbod-v2",
+  LANDSNET: "landsnet-utbod-v2",
+  VEITUR: "veitur-utbod-v2",
+  ORKUVEITAN: "orkuveitan-utbod-v2",
+});
+
+const UTBODSVEFUR_SOURCE_BUYERS = Object.freeze({
+  [THREE_SOURCE_KEYS.LANDSVIRKJUN]: "Landsvirkjun",
+  [THREE_SOURCE_KEYS.LANDSNET]: "Landsnet",
+  [THREE_SOURCE_KEYS.VEITUR]: "Veitur",
+  [THREE_SOURCE_KEYS.ORKUVEITAN]: "Orkuveita Reykjavíkur",
 });
 
 export const DETAIL_ENRICHMENT_LIMITS = Object.freeze({
@@ -15,6 +25,9 @@ export const DETAIL_ENRICHMENT_LIMITS = Object.freeze({
   [THREE_SOURCE_KEYS.ISAFJORDUR]: 15,
   [THREE_SOURCE_KEYS.REYKJAVIK]: 12,
   [THREE_SOURCE_KEYS.LANDSVIRKJUN]: 10,
+  [THREE_SOURCE_KEYS.LANDSNET]: 10,
+  [THREE_SOURCE_KEYS.VEITUR]: 10,
+  [THREE_SOURCE_KEYS.ORKUVEITAN]: 10,
 });
 
 export function getSourceClassificationContext(config) {
@@ -31,8 +44,8 @@ export function getSourceClassificationContext(config) {
   if (sourceKey === THREE_SOURCE_KEYS.REYKJAVIK) {
     return { source_type: "municipal_procurement_portal", connector_type: "municipal_html_index", source_organisation: "Reykjavíkurborg procurement" };
   }
-  if (sourceKey === THREE_SOURCE_KEYS.LANDSVIRKJUN) {
-    return { source_type: "energy_utility_procurement_portal", connector_type: "public_procurement_html_index", source_organisation: "Landsvirkjun procurement" };
+  if (UTBODSVEFUR_SOURCE_BUYERS[sourceKey]) {
+    return { source_type: "energy_utility_procurement_portal", connector_type: "public_procurement_html_index", source_organisation: `${UTBODSVEFUR_SOURCE_BUYERS[sourceKey]} procurement` };
   }
   if (["akranes-utbod-v2", "borgarbyggd-utbod-v2", "gardabaer-utbod-v2"].includes(sourceKey)) {
     return { source_type: "municipal", connector_type: "rss_feed", source_organisation: String(config?.display_name || sourceKey) };
@@ -137,12 +150,14 @@ export async function enrichCandidatesBounded(candidates, options) {
 }
 
 export function isLikelyProcurementCandidate(candidate, sourceKey, now = new Date()) {
-  if (sourceKey === THREE_SOURCE_KEYS.LANDSVIRKJUN) {
+  const configuredBuyer = UTBODSVEFUR_SOURCE_BUYERS[sourceKey];
+  if (configuredBuyer) {
     try {
       const url = new URL(candidate?.canonical_url || candidate?.discovered_url || "");
       return ["utbodsvefur.is", "www.utbodsvefur.is"].includes(url.hostname.toLowerCase()) &&
         candidate?.safe_source_payload?.listing_context === "current_procurement" &&
-        normalize(candidate?.buyer) === "landsvirkjun";
+        normalize(candidate?.buyer) === normalize(configuredBuyer) &&
+        normalize(candidate?.safe_source_payload?.configured_buyer) === normalize(configuredBuyer);
     } catch {
       return false;
     }
@@ -174,8 +189,8 @@ export function applySourcePredictionPolicy(prediction, observation, config, now
     ? applyRikiskaupProcurementType(prediction, observation)
     : sourceKey === THREE_SOURCE_KEYS.REYKJAVIK
       ? applyReykjavikProcurementType(prediction, observation)
-      : sourceKey === THREE_SOURCE_KEYS.LANDSVIRKJUN
-        ? applyLandsvirkjunProcurementType(prediction, observation)
+      : UTBODSVEFUR_SOURCE_BUYERS[sourceKey]
+        ? applyUtbodsvefurProcurementType(prediction, observation, UTBODSVEFUR_SOURCE_BUYERS[sourceKey])
     : { ...prediction };
   adjusted = applyDeadlineActionabilityGuard(adjusted, observation?.deadline, now);
   const category = categorizeShadowObservation(observation, adjusted, sourceKey, now);
@@ -189,26 +204,26 @@ export function applySourcePredictionPolicy(prediction, observation, config, now
   return { prediction: adjusted, category };
 }
 
-function applyLandsvirkjunProcurementType(prediction, observation) {
+function applyUtbodsvefurProcurementType(prediction, observation, buyer) {
   const procurementType = String(observation?.safe_source_payload?.shadow_enrichment?.procurement_type || "");
   if (procurementType === "market_consultation") {
-    return mappedPrediction(prediction, "market_consultation", true, false, "Explicit Landsvirkjun RFI/market-consultation evidence.");
+    return mappedPrediction(prediction, "market_consultation", true, false, `Explicit ${buyer} RFI/market-consultation evidence.`);
   }
   if (["open_tender", "prequalification", "dynamic_purchasing_system"].includes(procurementType)) {
     return mappedPrediction(prediction, "open_competition", true, false, procurementType === "prequalification"
-      ? "Explicit Landsvirkjun prequalification accepting supplier applications."
+      ? `Explicit ${buyer} prequalification accepting supplier applications.`
       : procurementType === "dynamic_purchasing_system"
-        ? "Explicit Landsvirkjun dynamic purchasing system accepting supplier applications."
-        : "Explicit Landsvirkjun tender accepting supplier bids.");
+        ? `Explicit ${buyer} dynamic purchasing system accepting supplier applications.`
+        : `Explicit ${buyer} tender accepting supplier bids.`);
   }
   if (procurementType === "prior_notice") {
-    return mappedPrediction(prediction, "upcoming_procurement", true, false, "Explicit Landsvirkjun prior-information notice on the current procurement listing.");
+    return mappedPrediction(prediction, "upcoming_procurement", true, false, `Explicit ${buyer} prior-information notice on the current procurement listing.`);
   }
   if (procurementType === "transparency_notice") {
-    return mappedPrediction(prediction, "uncertain", false, true, "Landsvirkjun transparency/direct-award notice is not an open competition.");
+    return mappedPrediction(prediction, "uncertain", false, true, `${buyer} transparency/direct-award notice is not an open competition.`);
   }
   if (procurementType === "award_or_followup") {
-    return mappedPrediction(prediction, "award_or_contract_signed", false, false, "Explicit Landsvirkjun procurement award/follow-up evidence.");
+    return mappedPrediction(prediction, "award_or_contract_signed", false, false, `Explicit ${buyer} procurement award/follow-up evidence.`);
   }
   return { ...prediction };
 }
