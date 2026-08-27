@@ -5,7 +5,9 @@
     "build": "vite build && cp app.js dist/ && cp -R src dist/src",
     "preview": "vite preview",
     "test:procurement-stage": "node --test supabase/functions/tests/procurement-stage.test.js",
-    "test:ingestion-v2": "node --test supabase/functions/tests/v2-ingestion.test.js"
+    "test:ingestion-v2": "node --test supabase/functions/tests/v2-ingestion.test.js",
+    "test:phase-c0": "node --test supabase/functions/tests/phase-c0-promotion.test.js",
+    "test:phase-c0-db": "bash scripts/test-phase-c0-db.sh"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",

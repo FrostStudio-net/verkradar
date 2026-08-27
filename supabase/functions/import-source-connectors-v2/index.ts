@@ -16,6 +16,7 @@ import {
   applySourcePredictionPolicy,
   buildShadowParserHealth,
   countSemanticDuplicates,
+  derivePromotionEvidence,
   DETAIL_ENRICHMENT_LIMITS,
   enrichCandidatesBounded,
   fetchBoundedWordpressPages,
@@ -95,6 +96,10 @@ Deno.serve(async (req) => {
     if (!adminRow) return json({ error: "Admin access required" }, 403);
 
     const body = await safeJson(req);
+    if (body.action === "approve_promotion") return await approvePromotion({ body, adminClient, adminUserId: userData.user.id });
+    if (body.action === "promote_canary") return await promoteCanary({ body, adminClient });
+    if (body.action === "rollback_canary") return await rollbackCanary({ body, adminClient, adminUserId: userData.user.id });
+    if (body.action === "canary_assertions") return await canaryAssertions({ body, adminClient });
     if (body.action === "set_mode") return await setShadowMode({ body, adminClient });
     if (body.action === "diagnostics") return await diagnostics({ adminClient });
     if (body.action === "run_shadow") {
@@ -385,11 +390,12 @@ async function runShadow({ body: _body, config, adminClient }: { body: Record<st
       const enrichment = observation.safe_source_payload?.shadow_enrichment || {};
       const classified = classificationColumns(classifyProcurementStage({ title: observation.title, body_text: observation.description, description: observation.description, buyer: observation.buyer, deadline: observation.deadline, publication_date: observation.publication_date, ...classificationContext, authoritative_metadata: { ...(observation.safe_source_payload || {}), ...enrichment } }));
       const { prediction, category } = applySourcePredictionPolicy(classified, observation, config, now);
+      const promotionEvidence = derivePromotionEvidence(observation, prediction);
       const stage = String(prediction.procurement_stage || "uncertain");
       classificationMetrics.stage_distribution[stage] = (classificationMetrics.stage_distribution[stage] || 0) + 1;
       if (prediction.actionable_for_suppliers === true) classificationMetrics.actionable += 1;
       else classificationMetrics.non_actionable += 1;
-      const { error: predictionError } = await adminClient.from("v2_ingestion_observations").update({ predicted_procurement_stage: prediction.procurement_stage, predicted_actionable: prediction.actionable_for_suppliers, predicted_confidence: prediction.classification_confidence, predicted_reason: prediction.classification_reason, predicted_requires_admin_review: prediction.requires_admin_review, enrichment_status: enrichment.enrichment_status || null, shadow_quality_category: category }).eq("id", observation.id);
+      const { error: predictionError } = await adminClient.from("v2_ingestion_observations").update({ predicted_procurement_stage: prediction.procurement_stage, predicted_actionable: prediction.actionable_for_suppliers, predicted_confidence: prediction.classification_confidence, predicted_reason: prediction.classification_reason, predicted_requires_admin_review: prediction.requires_admin_review, enrichment_status: enrichment.enrichment_status || null, shadow_quality_category: category, ...promotionEvidence }).eq("id", observation.id);
       if (predictionError) throw predictionError;
     }
     const { data: legacy } = await adminClient.from(LEGACY_TABLE).select("id,source_id,external_id,procurement_reference,canonical_url,url,title,description,buyer,deadline,publication_date,location").eq("source_id", config.source_id);
@@ -408,6 +414,70 @@ async function runShadow({ body: _body, config, adminClient }: { body: Record<st
     await adminClient.from("v2_ingestion_runs").update({ status: code === "V2_RUN_DEADLINE" ? "timed_out" : "failed", error_count: 1, error_code: code || "V2_SHADOW_ERROR", error_message: errorMessage(error), finished_at: new Date().toISOString() }).eq("id", run.id);
     throw error;
   }
+}
+
+async function approvePromotion({ body, adminClient, adminUserId }: { body: Record<string, unknown>; adminClient: any; adminUserId: string }) {
+  const observationId = requireSingleObservationId(body);
+  const { data, error } = await adminClient.rpc("approve_v2_observation_for_promotion", {
+    target_observation_id: observationId,
+    approving_admin_id: adminUserId,
+    approval_note_text: String(body.note || "").trim() || null,
+  });
+  if (error) throw error;
+  return json({ ok: true, action: "approve_promotion", canary: true, automatic: false, observation: Array.isArray(data) ? data[0] : data });
+}
+
+async function promoteCanary({ body, adminClient }: { body: Record<string, unknown>; adminClient: any }) {
+  const observationId = requireSingleObservationId(body);
+  const { data, error } = await adminClient.rpc("promote_v2_observation", { target_observation_id: observationId });
+  if (error) throw error;
+  const result = Array.isArray(data) ? data[0] : data;
+  if (result?.promotion_status !== "promoted") {
+    return json({ ok: false, action: "promote_canary", canary: true, quarantined: false, ...result }, 409);
+  }
+  const assertions = result.opportunity_id
+    ? await loadCanaryAssertions(adminClient, String(result.opportunity_id))
+    : null;
+  return json({ ok: true, action: "promote_canary", canary: true, quarantined: result.created === true, downstream_triggered: false, ...result, assertions });
+}
+
+async function rollbackCanary({ body, adminClient, adminUserId }: { body: Record<string, unknown>; adminClient: any; adminUserId: string }) {
+  const observationId = requireSingleObservationId(body);
+  const reason = String(body.reason || "").trim();
+  if (!reason) return json({ error: "A rollback reason is required", code: "V2_ROLLBACK_REASON_REQUIRED" }, 400);
+  const { data, error } = await adminClient.rpc("rollback_v2_canary_promotion", {
+    target_observation_id: observationId,
+    rollback_admin_id: adminUserId,
+    rollback_reason_text: reason,
+  });
+  if (error) throw error;
+  return json({ ok: true, action: "rollback_canary", canary: true, rollback: Array.isArray(data) ? data[0] : data });
+}
+
+async function canaryAssertions({ body, adminClient }: { body: Record<string, unknown>; adminClient: any }) {
+  const opportunityId = String(body.opportunity_id || "").trim();
+  if (!isUuid(opportunityId)) return json({ error: "Exactly one valid opportunity_id is required", code: "V2_SINGLE_OPPORTUNITY_REQUIRED" }, 400);
+  return json({ ok: true, action: "canary_assertions", opportunity_id: opportunityId, assertions: await loadCanaryAssertions(adminClient, opportunityId) });
+}
+
+async function loadCanaryAssertions(adminClient: any, opportunityId: string) {
+  const { data, error } = await adminClient.rpc("v2_canary_downstream_assertions", { target_opportunity_id: opportunityId });
+  if (error) throw error;
+  return data;
+}
+
+function requireSingleObservationId(body: Record<string, unknown>) {
+  const observationId = String(body.observation_id || "").trim();
+  if (!isUuid(observationId) || Array.isArray(body.observation_ids)) {
+    const error = new Error("Exactly one valid observation_id is required");
+    (error as any).code = "V2_SINGLE_OBSERVATION_REQUIRED";
+    throw error;
+  }
+  return observationId;
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 function summarizeExistingEnrichment(candidates: any[], limit: number) {

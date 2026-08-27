@@ -204,6 +204,33 @@ export function applySourcePredictionPolicy(prediction, observation, config, now
   return { prediction: adjusted, category };
 }
 
+export function derivePromotionEvidence(observation, prediction) {
+  const enrichment = observation?.safe_source_payload?.shadow_enrichment || {};
+  const enrichmentStatus = String(enrichment.enrichment_status || "");
+  const procurementType = String(enrichment.procurement_type || "");
+  const strongType = [
+    "open_tender",
+    "prequalification",
+    "market_consultation",
+    "dynamic_purchasing_system",
+    "prior_notice",
+  ].includes(procurementType);
+  const strongSignals = Array.isArray(prediction?.positive_signals)
+    ? prediction.positive_signals.map(String)
+    : [];
+  const strongProcurementEvidence = strongType || enrichment.request_for_bids === true ||
+    strongSignals.some((signal) => ["request_for_bids", "market_consultation", "supplier_deadline", "procurement_reference"].includes(signal));
+  const deadlineEvidence = observation?.deadline ? "explicit_source" : null;
+  let promotionEnrichmentStatus = "failed";
+  if (["enriched", "no_supported_fields"].includes(enrichmentStatus)) promotionEnrichmentStatus = "succeeded";
+  else if (!enrichmentStatus && strongProcurementEvidence && deadlineEvidence) promotionEnrichmentStatus = "not_needed";
+  return {
+    strong_procurement_evidence: strongProcurementEvidence,
+    deadline_evidence: deadlineEvidence,
+    promotion_enrichment_status: promotionEnrichmentStatus,
+  };
+}
+
 function applyUtbodsvefurProcurementType(prediction, observation, buyer) {
   const procurementType = String(observation?.safe_source_payload?.shadow_enrichment?.procurement_type || "");
   if (procurementType === "market_consultation") {

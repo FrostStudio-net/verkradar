@@ -9,7 +9,7 @@ export class V2PromotionBlockedError extends Error {
 }
 
 export async function promoteObservation(options) {
-  const { config, observation, identity, classifyNewOpportunity, promotionGateway, duplicateDefense } = options;
+  const { config, observation, identity, promotionGateway } = options;
   if (config?.mode !== "promote") {
     throw new V2PromotionBlockedError(`Explicit promote mode is required; current mode is ${config?.mode || "missing"}`, "V2_PROMOTE_MODE_REQUIRED");
   }
@@ -21,28 +21,14 @@ export async function promoteObservation(options) {
     throw new V2PromotionBlockedError("Fuzzy identity candidate requires manual review", "V2_FUZZY_REVIEW_REQUIRED");
   }
 
-  let classification = null;
-  if (!identity?.matched) {
-    if (typeof classifyNewOpportunity !== "function") {
-      throw new V2PromotionBlockedError("Existing procurement-stage classification contract is required", "V2_CLASSIFIER_REQUIRED");
-    }
-    classification = await classifyNewOpportunity(observation);
-    assertCompleteClassification(classification);
-  }
   if (typeof promotionGateway !== "function") throw new V2PromotionBlockedError("Promotion gateway is unavailable");
-
-  const result = await promotionGateway(observation.id, classification);
-  if (result?.created && typeof duplicateDefense === "function") {
-    await duplicateDefense(result.opportunity_id);
-  }
-  return result;
+  return await promotionGateway(observation.id);
 }
 
 export function createSupabasePromotionGateway(supabase) {
-  return async (observationId, classification) => {
+  return async (observationId) => {
     const { data, error } = await supabase.rpc("promote_v2_observation", {
       target_observation_id: observationId,
-      classification,
     });
     if (error) throw error;
     return Array.isArray(data) ? data[0] : data;

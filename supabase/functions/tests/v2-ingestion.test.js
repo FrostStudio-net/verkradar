@@ -39,6 +39,7 @@ import {
   applySourcePredictionPolicy,
   buildShadowParserHealth,
   countSemanticDuplicates,
+  derivePromotionEvidence,
   enrichCandidatesBounded,
   fetchBoundedWordpressPages,
   getSourceClassificationContext,
@@ -556,14 +557,17 @@ test("fixture and shadow modes cannot call the production gateway", async () => 
   }
 });
 
-test("promote mode is required and a new row requires existing classification contract", async () => {
+test("promotion helper delegates only the observation id to the database-owned gate", async () => {
   const observation = await sampleObservation();
-  await assert.rejects(() => promoteObservation({
+  let received;
+  const result = await promoteObservation({
     config: { mode: "promote", source_id: observation.source_id },
     observation,
     identity: { matched: false },
-    promotionGateway: async () => { throw new Error("must not reach gateway"); },
-  }), { code: "V2_CLASSIFIER_REQUIRED" });
+    promotionGateway: async (...args) => { received = args; return { promotion_status: "blocked" }; },
+  });
+  assert.deepEqual(received, [observation.id]);
+  assert.equal(result.promotion_status, "blocked");
 });
 
 test("legacy row path attaches provenance without reclassification", async () => {
@@ -581,7 +585,7 @@ test("legacy row path attaches provenance without reclassification", async () =>
     },
   });
   assert.equal(classifierCalls, 0);
-  assert.equal(receivedClassification, null);
+  assert.equal(receivedClassification, undefined);
   assert.equal(result.opportunity_id, "legacy-opportunity");
   assert.equal(result.provenance_attached, true);
 });
@@ -633,7 +637,7 @@ test("repeated promotion returns the same opportunity and attaches provenance on
   assert.equal(second.provenance_attached, false);
 });
 
-test("new promotion invokes duplicate detection only as defense-in-depth", async () => {
+test("new promotion leaves duplicate and eligibility enforcement to the atomic database gateway", async () => {
   const observation = await sampleObservation();
   const defended = [];
   const classification = {
@@ -653,7 +657,7 @@ test("new promotion invokes duplicate detection only as defense-in-depth", async
     duplicateDefense: async (opportunityId) => defended.push(opportunityId),
   });
   assert.equal(result.created, true);
-  assert.deepEqual(defended, ["new-opportunity"]);
+  assert.deepEqual(defended, []);
 });
 
 test("eligible HTTP failures retry and Retry-After is honored", async () => {
@@ -746,10 +750,10 @@ test("Phase B shadow trigger type is narrowly added", async () => {
   assert.doesNotMatch(sql, /'promote'/);
 });
 
-test("Phase A function has no live fetch, promotion RPC, or opportunities write path", async () => {
+test("fixture and shadow implementation has no direct opportunities write path", async () => {
   const source = await readFile(functionUrl, "utf8");
   assert.doesNotMatch(source, /\bfetch\s*\(/);
-  assert.doesNotMatch(source, /promote_v2_observation/);
+  assert.match(source, /body\.action === "promote_canary"/);
   assert.doesNotMatch(source, /\.from\(["']opportunities["']\)/);
   assert.match(source, /config\.mode !== "fixture_only"/);
   assert.match(source, /Phase A permits fixture\/replay input only/);
@@ -1136,7 +1140,7 @@ test("new Útboðsvefur sources are fixture-wired but outside every live executi
   assert.match(source, /V2_LIVE_ACCESS_NOT_CLEARED/);
   assert.doesNotMatch(source, /fetchWithRetry\([^\n]*(?:in-tendhost|MyTenders|Projects\.svc)/i);
   assert.doesNotMatch(source, /\.from\(["']opportunities["']\)\.(?:insert|update|upsert|delete)/);
-  assert.doesNotMatch(source, /promote_v2_observation/);
+  assert.match(source, /promote_v2_observation/);
 });
 
 test("Landsvirkjun aggregate diagnostics persist in parser health", () => {
@@ -1160,13 +1164,35 @@ test("admin diagnostics prefer stored run totals over globally limited observati
   assert.equal(rows[0].validObservationCount, 749);
 });
 
-test("three-source quality code remains shadow-only with zero promotion paths", async () => {
+test("shadow runs remain zero-write even though a separate manual canary action exists", async () => {
   const source = await readFile(functionUrl, "utf8");
   assert.match(source, /customer_visible_writes:\s*0/);
   assert.match(source, /promotion_allowed:\s*false/);
   assert.match(source, /promote_count:\s*0/);
   assert.doesNotMatch(source, /\.from\(["']opportunities["']\)\.(?:insert|update|upsert|delete)/);
-  assert.doesNotMatch(source, /promote_v2_observation/);
+  assert.match(source, /body\.action === "promote_canary"/);
+});
+
+test("promotion evidence requires explicit deadline and strong procurement metadata", () => {
+  const ready = derivePromotionEvidence({
+    deadline: "2026-10-01",
+    safe_source_payload: { shadow_enrichment: { enrichment_status: "enriched", procurement_type: "open_tender", request_for_bids: true } },
+  }, { positive_signals: [] });
+  assert.deepEqual(ready, {
+    strong_procurement_evidence: true,
+    deadline_evidence: "explicit_source",
+    promotion_enrichment_status: "succeeded",
+  });
+  const failed = derivePromotionEvidence({
+    deadline: "2026-10-01",
+    safe_source_payload: { shadow_enrichment: { enrichment_status: "failed", procurement_type: "open_tender" } },
+  }, { positive_signals: [] });
+  assert.equal(failed.strong_procurement_evidence, true);
+  assert.equal(failed.promotion_enrichment_status, "failed");
+  const weak = derivePromotionEvidence({ deadline: null, safe_source_payload: {} }, { positive_signals: [] });
+  assert.equal(weak.strong_procurement_evidence, false);
+  assert.equal(weak.deadline_evidence, null);
+  assert.equal(weak.promotion_enrichment_status, "failed");
 });
 
 async function sampleObservation(overrides = {}) {
