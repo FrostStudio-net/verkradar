@@ -32,6 +32,8 @@ const corsHeaders = {
 };
 const LEGACY_TABLE = "opportunities";
 const STAGING_PROJECT_REF = "ipixuxznqtrcdpzoxric";
+const REYKJAVIK_SOURCE_KEY = "reykjavik-utbod-v2";
+const PRODUCTION_CANARY_CONFIRMATION = "Enable canary controls only — no promotion will occur";
 const STAGING_PHASE_C_SOURCES: ReadonlySet<string> = new Set([THREE_SOURCE_KEYS.REYKJAVIK, THREE_SOURCE_KEYS.RIKISKAUP]);
 const ALLOWED_SOURCES = new Set(["akranes-utbod-v2", "borgarbyggd-utbod-v2", "gardabaer-utbod-v2", "rikiskaup-utbod-v2", "vegagerdin-utbod-v2", "isafjordur-utbod-v2", "reykjavik-utbod-v2"]);
 
@@ -100,12 +102,17 @@ Deno.serve(async (req) => {
     if (body.action === "phase_c_capabilities") return await phaseCCapabilities({ adminClient, isProduction });
     const productionPhaseCAction = ["set_source_promotion_approval", "approve_promotion", "promote_canary", "rollback_canary", "canary_assertions", "approve_release", "release_canary", "disable_released_canary"].includes(String(body.action || ""));
     const productionShadowAction = body.action === "run_shadow";
+    const productionCanaryToggleAction = body.action === "set_reykjavik_production_canary_enabled";
+    if (productionCanaryToggleAction && !isProduction) {
+      return json({ error: "This action is available only in the production project", code: "V2_PRODUCTION_CANARY_ENVIRONMENT_REQUIRED" }, 403);
+    }
     if (isProduction && productionPhaseCAction && !(await isPhaseCProductionEnabled(adminClient))) {
       return json({ error: "Phase C production canary feature is disabled", code: "V2_PRODUCTION_FEATURE_DISABLED" }, 409);
     }
-    if (isProduction && !productionPhaseCAction && !productionShadowAction) {
+    if (isProduction && !productionPhaseCAction && !productionShadowAction && !productionCanaryToggleAction) {
       return json({ error: "This action is not available in production", code: "V2_PRODUCTION_ACTION_BLOCKED" }, 403);
     }
+    if (productionCanaryToggleAction) return await setReykjavikProductionCanaryEnabled({ body, adminClient, adminUserId: userData.user.id });
     if (body.action === "set_source_promotion_approval") return await setSourcePromotionApproval({ body, adminClient, adminUserId: userData.user.id });
     if (body.action === "approve_promotion") return await approvePromotion({ body, adminClient, adminUserId: userData.user.id });
     if (body.action === "promote_canary") return await promoteCanary({ body, adminClient, adminUserId: userData.user.id });
@@ -479,6 +486,34 @@ async function setSourcePromotionApproval({ body, adminClient, adminUserId }: { 
   });
   if (error) throw error;
   return json({ ok: true, action: "set_source_promotion_approval", source: Array.isArray(data) ? data[0] : data, manual_only: true, automatic: false });
+}
+
+async function setReykjavikProductionCanaryEnabled({ body, adminClient, adminUserId }: { body: Record<string, unknown>; adminClient: any; adminUserId: string }) {
+  const sourceKey = String(body.source_key || "").trim();
+  if (sourceKey !== REYKJAVIK_SOURCE_KEY) {
+    return json({ error: "Only Reykjavík is allowlisted for the first production canary", code: "V2_PRODUCTION_CANARY_SOURCE_NOT_ALLOWED" }, 403);
+  }
+  if (typeof body.enabled !== "boolean") {
+    return json({ error: "An explicit enabled boolean is required", code: "V2_PRODUCTION_CANARY_VALUE_REQUIRED" }, 400);
+  }
+  if (body.enabled === true && String(body.confirmation || "") !== PRODUCTION_CANARY_CONFIRMATION) {
+    return json({ error: "Exact production canary confirmation is required", code: "V2_PRODUCTION_CANARY_CONFIRMATION_REQUIRED" }, 400);
+  }
+  const { data, error } = await adminClient.rpc("set_reykjavik_production_canary_enabled", {
+    enabled_value: body.enabled,
+    acting_admin_id: adminUserId,
+  });
+  if (error) throw error;
+  const state = Array.isArray(data) ? data[0] : data;
+  return json({
+    ok: true,
+    action: "set_reykjavik_production_canary_enabled",
+    source_key: REYKJAVIK_SOURCE_KEY,
+    state,
+    promotion_executed: false,
+    release_enabled: false,
+    downstream_triggered: false,
+  });
 }
 
 async function promoteCanary({ body, adminClient, adminUserId }: { body: Record<string, unknown>; adminClient: any; adminUserId: string }) {

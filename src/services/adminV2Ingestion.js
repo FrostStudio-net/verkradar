@@ -2,6 +2,7 @@ export const PHASE_C1_STAGING_PROJECT_REF = "ipixuxznqtrcdpzoxric";
 export const PHASE_C1_PRODUCTION_PROJECT_REF = "asojxjbsgqbfpbepojzh";
 export const PHASE_C1_REYKJAVIK_SOURCE_KEY = "reykjavik-utbod-v2";
 export const PHASE_C1_CANARY_OBSERVATION_ID = "a5ded8dc-a745-4297-9dc7-e2783b374630";
+export const PHASE_C3_FIRST_PRODUCTION_CANARY_OBSERVATION_ID = "32713ed0-089d-45a0-97f9-24fabdbf08dd";
 export const PHASE_C2_CASES = Object.freeze([
   { case_key: "A", source_key: "reykjavik-utbod-v2", observation_id: "729459ca-3408-4004-a158-7b75f6c6c32f", expected: "new_quarantined_opportunity" },
   { case_key: "B", source_key: "rikiskaup-utbod-v2", observation_id: "d5a8f0eb-f55e-4b8c-b2c3-146a2eea0df1", expected: "existing_opportunity_reuse", expected_opportunity_id: "a416b17a-4249-41f7-9b14-51063ca9689e" },
@@ -61,7 +62,8 @@ export async function loadAdminV2IngestionOverview(supabase) {
     supabase.from("v2_ingestion_observations")
       .select("id, source_config_id, source_id, source_key, external_id, procurement_reference, title, buyer, deadline, canonical_url, validation_state, comparison_state, promotion_state, promoted_opportunity_id, predicted_procurement_stage, predicted_actionable, predicted_confidence, predicted_requires_admin_review, strong_procurement_evidence, deadline_evidence, promotion_enrichment_status, approved_for_promotion, approved_at, approved_for_release, released_at")
       .eq("source_key", PHASE_C1_REYKJAVIK_SOURCE_KEY)
-      .order("created_at", { ascending: false }).limit(50),
+      .eq("id", PHASE_C3_FIRST_PRODUCTION_CANARY_OBSERVATION_ID)
+      .limit(1),
     supabase.from("automation_settings").select("key,value").in("key", ["phase_c_production_enabled", "phase_c_release_enabled"]),
   ]);
   for (const result of [configsResult, runsResult, observationsResult, comparisonsResult, caseObservationsResult, caseProvenanceResult, productionCandidatesResult, phaseCFlagResult]) {

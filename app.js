@@ -66,6 +66,7 @@ import {
   invokeAdminV2Action,
   getPhaseC2Case,
   PHASE_C2_CASES,
+  PHASE_C3_FIRST_PRODUCTION_CANARY_OBSERVATION_ID,
   isPhaseC1StagingRuntime,
   isPhaseC3ProductionRuntime,
   loadAdminTrialRequests,
@@ -878,6 +879,40 @@ document.addEventListener("click", async (event) => {
       } else if (name === "v2-c3-disable") {
         state.v2C3Result = await invokeAdminV2Action(supabaseClient, "disable_released_canary", null, null, { observation_id: observationId, reason });
       }
+      await loadV2IngestionForAdmin();
+    } catch (error) {
+      console.error(error);
+      state.v2IngestionError = formatSupabaseError(error);
+      state.v2C3Result = error.actionResult || { ok: false, error: formatSupabaseError(error) };
+    } finally {
+      state.v2C3Action = "";
+      render();
+    }
+    return;
+  }
+
+  if (name === "v2-c3-enable-controls" || name === "v2-c3-disable-controls") {
+    event.preventDefault();
+    const productionRow = (state.v2IngestionRows || []).find((row) => row.source_key === "reykjavik-utbod-v2");
+    const allowed = state.isAdmin && isPhaseC3ProductionRuntime(SUPABASE_URL) && productionRow;
+    if (!supabaseClient || !allowed) return;
+    const enable = name === "v2-c3-enable-controls";
+    const confirmation = "Enable canary controls only — no promotion will occur";
+    if (enable && !window.confirm(confirmation)) return;
+    if (!enable && !window.confirm("Disable production canary controls?")) return;
+    action.disabled = true;
+    state.v2C3Action = name;
+    state.v2C3Result = null;
+    state.v2IngestionError = null;
+    render();
+    try {
+      state.v2C3Result = await invokeAdminV2Action(
+        supabaseClient,
+        "set_reykjavik_production_canary_enabled",
+        "reykjavik-utbod-v2",
+        null,
+        { enabled: enable, ...(enable ? { confirmation } : {}) },
+      );
       await loadV2IngestionForAdmin();
     } catch (error) {
       console.error(error);
@@ -2463,6 +2498,11 @@ async function loadV2IngestionForAdmin() {
   render();
   try {
     state.v2IngestionRows = await loadAdminV2IngestionOverview(supabaseClient);
+    const productionRow = state.v2IngestionRows.find((row) => row.source_key === "reykjavik-utbod-v2");
+    const preparedCandidate = productionRow?.phaseC3Production?.candidates?.find(
+      (item) => item.observation.id === PHASE_C3_FIRST_PRODUCTION_CANARY_OBSERVATION_ID,
+    );
+    state.v2C3SelectedObservationId = preparedCandidate?.observation.id || "";
   } catch (error) {
     console.error("Failed to load v2 ingestion status:", error);
     state.v2IngestionRows = [];
