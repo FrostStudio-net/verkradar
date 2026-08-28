@@ -32,9 +32,7 @@ const corsHeaders = {
 const LEGACY_TABLE = "opportunities";
 const STAGING_PROJECT_REF = "ipixuxznqtrcdpzoxric";
 const PRODUCTION_PROJECT_REF = "asojxjbsgqbfpbepojzh";
-const PHASE_C2_CASE_B_OBSERVATION_ID = "d5a8f0eb-f55e-4b8c-b2c3-146a2eea0df1";
-const PHASE_C2_CASE_B_OPPORTUNITY_ID = "a416b17a-4249-41f7-9b14-51063ca9689e";
-const PHASE_C2_CASE_C_OBSERVATION_ID = "9c6b7648-1685-4d9b-953e-6afdcba208a7";
+const STAGING_PHASE_C_SOURCES = new Set([THREE_SOURCE_KEYS.REYKJAVIK, THREE_SOURCE_KEYS.RIKISKAUP]);
 const ALLOWED_SOURCES = new Set(["akranes-utbod-v2", "borgarbyggd-utbod-v2", "gardabaer-utbod-v2", "rikiskaup-utbod-v2", "vegagerdin-utbod-v2", "isafjordur-utbod-v2", "reykjavik-utbod-v2"]);
 
 const PHASE_A_FIXTURES: Record<string, { sourceKey: string; file: URL; contentType: string }> = {
@@ -77,9 +75,9 @@ Deno.serve(async (req) => {
   let runId = "";
   try {
     const supabaseUrl = requiredEnv("SUPABASE_URL");
-    if (supabaseUrl.includes(PRODUCTION_PROJECT_REF) || !supabaseUrl.includes(STAGING_PROJECT_REF)) {
-      return json({ error: "V2 shadow controls are staging-only", code: "V2_ENVIRONMENT_BLOCKED" }, 409);
-    }
+    const isStaging = supabaseUrl.includes(STAGING_PROJECT_REF);
+    const isProduction = supabaseUrl.includes(PRODUCTION_PROJECT_REF);
+    if (!isStaging && !isProduction) return json({ error: "Unknown Supabase project", code: "V2_ENVIRONMENT_BLOCKED" }, 409);
     const anonKey = requiredEnv("SUPABASE_ANON_KEY");
     const serviceRoleKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
     const authHeader = req.headers.get("authorization") || "";
@@ -99,13 +97,22 @@ Deno.serve(async (req) => {
     if (!adminRow) return json({ error: "Admin access required" }, 403);
 
     const body = await safeJson(req);
-    if (body.action === "set_source_promotion_approval") return await setSourcePromotionApproval({ body, adminClient });
+    if (body.action === "phase_c_capabilities") return await phaseCCapabilities({ adminClient, isProduction });
+    const productionPhaseCAction = ["set_source_promotion_approval", "approve_promotion", "promote_canary", "rollback_canary", "canary_assertions", "approve_release", "release_canary", "disable_released_canary"].includes(String(body.action || ""));
+    if (isProduction && productionPhaseCAction && !(await isPhaseCProductionEnabled(adminClient))) {
+      return json({ error: "Phase C production canary feature is disabled", code: "V2_PRODUCTION_FEATURE_DISABLED" }, 409);
+    }
+    if (isProduction && !productionPhaseCAction) {
+      return json({ error: "This action is not available in production", code: "V2_PRODUCTION_ACTION_BLOCKED" }, 403);
+    }
+    if (body.action === "set_source_promotion_approval") return await setSourcePromotionApproval({ body, adminClient, adminUserId: userData.user.id });
     if (body.action === "approve_promotion") return await approvePromotion({ body, adminClient, adminUserId: userData.user.id });
-    if (body.action === "promote_canary") return await promoteCanary({ body, adminClient });
+    if (body.action === "promote_canary") return await promoteCanary({ body, adminClient, adminUserId: userData.user.id });
     if (body.action === "rollback_canary") return await rollbackCanary({ body, adminClient, adminUserId: userData.user.id });
-    if (body.action === "clear_c2_review_approval") return await clearC2ReviewApproval({ body, adminClient, adminUserId: userData.user.id });
+    if (body.action === "approve_release") return await approveRelease({ body, adminClient, adminUserId: userData.user.id });
+    if (body.action === "release_canary") return await releaseCanary({ body, adminClient, adminUserId: userData.user.id });
+    if (body.action === "disable_released_canary") return await disableReleasedCanary({ body, adminClient, adminUserId: userData.user.id });
     if (body.action === "canary_assertions") return await canaryAssertions({ body, adminClient });
-    if (body.action === "compare_c2_candidate") return await compareC2Candidate({ body, adminClient, adminUserId: userData.user.id });
     if (body.action === "set_mode") return await setShadowMode({ body, adminClient });
     if (body.action === "diagnostics") return await diagnostics({ adminClient });
     if (body.action === "run_shadow") {
@@ -433,38 +440,25 @@ async function approvePromotion({ body, adminClient, adminUserId }: { body: Reco
   return json({ ok: true, action: "approve_promotion", canary: true, automatic: false, observation: Array.isArray(data) ? data[0] : data });
 }
 
-async function setSourcePromotionApproval({ body, adminClient }: { body: Record<string, unknown>; adminClient: any }) {
+async function setSourcePromotionApproval({ body, adminClient, adminUserId }: { body: Record<string, unknown>; adminClient: any; adminUserId: string }) {
   const sourceKey = String(body.source_key || "").trim();
-  const allowedSources = new Set([THREE_SOURCE_KEYS.REYKJAVIK, THREE_SOURCE_KEYS.RIKISKAUP]);
-  if (!allowedSources.has(sourceKey)) {
-    return json({ error: "Phase C manual promotion is limited to the prepared Reykjavík and Ríkiskaup sources", code: "V2_C_SOURCE_NOT_ALLOWED" }, 403);
-  }
+  if (!STAGING_PHASE_C_SOURCES.has(sourceKey)) return json({ error: "Source is not approved for a manual Phase C canary", code: "V2_C_SOURCE_NOT_ALLOWED" }, 403);
   if (typeof body.approved !== "boolean") {
     return json({ error: "An explicit approved boolean is required", code: "V2_SOURCE_APPROVAL_VALUE_REQUIRED" }, 400);
   }
-  const approved = body.approved === true;
-  const { data: config, error: configError } = await adminClient.from("v2_source_configs")
-    .select("id,source_key,mode,promotion_approved")
-    .eq("source_key", sourceKey).single();
-  if (configError) throw configError;
-  if (!approved && config.mode !== "promote" && config.promotion_approved !== true) {
-    return json({ ok: true, action: "set_source_promotion_approval", source_key: sourceKey, mode: config.mode, promotion_approved: false, idempotent: true });
-  }
-  if (approved && !["shadow", "promote"].includes(config.mode)) {
-    return json({ error: "The selected source must already be in shadow mode", code: "V2_C_SHADOW_MODE_REQUIRED" }, 409);
-  }
-  const { data: updated, error: updateError } = await adminClient.from("v2_source_configs")
-    .update({ promotion_approved: approved, mode: approved ? "promote" : "shadow", updated_at: new Date().toISOString() })
-    .eq("id", config.id)
-    .eq("source_key", sourceKey)
-    .select("id,source_key,mode,promotion_approved").single();
-  if (updateError) throw updateError;
-  return json({ ok: true, action: "set_source_promotion_approval", source: updated, manual_only: true, automatic: false });
+  const { data, error } = await adminClient.rpc("set_v2_source_production_approval", {
+    target_source_key: sourceKey,
+    approved_value: body.approved === true,
+    approving_admin_id: adminUserId,
+    reason_text: String(body.reason || "").trim() || null,
+  });
+  if (error) throw error;
+  return json({ ok: true, action: "set_source_promotion_approval", source: Array.isArray(data) ? data[0] : data, manual_only: true, automatic: false });
 }
 
-async function promoteCanary({ body, adminClient }: { body: Record<string, unknown>; adminClient: any }) {
+async function promoteCanary({ body, adminClient, adminUserId }: { body: Record<string, unknown>; adminClient: any; adminUserId: string }) {
   const observationId = requireSingleObservationId(body);
-  const { data, error } = await adminClient.rpc("promote_v2_observation", { target_observation_id: observationId });
+  const { data, error } = await adminClient.rpc("promote_v2_observation", { target_observation_id: observationId, promoting_admin_id: adminUserId });
   if (error) throw error;
   const result = Array.isArray(data) ? data[0] : data;
   if (result?.promotion_status !== "promoted") {
@@ -474,6 +468,45 @@ async function promoteCanary({ body, adminClient }: { body: Record<string, unkno
     ? await loadCanaryAssertions(adminClient, String(result.opportunity_id))
     : null;
   return json({ ok: true, action: "promote_canary", canary: true, quarantined: result.created === true, downstream_triggered: false, ...result, assertions });
+}
+
+async function approveRelease({ body, adminClient, adminUserId }: { body: Record<string, unknown>; adminClient: any; adminUserId: string }) {
+  const observationId = requireSingleObservationId(body);
+  const reason = String(body.reason || "").trim();
+  if (!reason) return json({ error: "A release approval reason is required", code: "V2_RELEASE_REASON_REQUIRED" }, 400);
+  const { data, error } = await adminClient.rpc("approve_v2_canary_release", { target_observation_id: observationId, approving_admin_id: adminUserId, reason_text: reason });
+  if (error) throw error;
+  return json({ ok: true, action: "approve_release", release: data, automatic: false });
+}
+
+async function releaseCanary({ body, adminClient, adminUserId }: { body: Record<string, unknown>; adminClient: any; adminUserId: string }) {
+  const observationId = requireSingleObservationId(body);
+  const reason = String(body.reason || "").trim();
+  if (!reason) return json({ error: "A release reason is required", code: "V2_RELEASE_REASON_REQUIRED" }, 400);
+  const { data, error } = await adminClient.rpc("release_v2_canary", { target_observation_id: observationId, releasing_admin_id: adminUserId, reason_text: reason });
+  if (error) throw error;
+  return json({ ok: true, action: "release_canary", release: data, matching_triggered: false, communication_hold: true });
+}
+
+async function disableReleasedCanary({ body, adminClient, adminUserId }: { body: Record<string, unknown>; adminClient: any; adminUserId: string }) {
+  const observationId = requireSingleObservationId(body);
+  const reason = String(body.reason || "").trim();
+  if (!reason) return json({ error: "A disable reason is required", code: "V2_DISABLE_REASON_REQUIRED" }, 400);
+  const { data, error } = await adminClient.rpc("disable_released_v2_canary", { target_observation_id: observationId, disabling_admin_id: adminUserId, reason_text: reason });
+  if (error) throw error;
+  return json({ ok: true, action: "disable_released_canary", disable: data, deleted: false });
+}
+
+async function isPhaseCProductionEnabled(adminClient: any) {
+  const { data, error } = await adminClient.from("automation_settings").select("value").eq("key", "phase_c_production_enabled").maybeSingle();
+  if (error) throw error;
+  return data?.value === true || data?.value === "true";
+}
+
+async function phaseCCapabilities({ adminClient, isProduction }: { adminClient: any; isProduction: boolean }) {
+  const enabled = isProduction ? await isPhaseCProductionEnabled(adminClient) : true;
+  const { data: releaseSetting } = await adminClient.from("automation_settings").select("value").eq("key", "phase_c_release_enabled").maybeSingle();
+  return json({ ok: true, action: "phase_c_capabilities", production: isProduction, enabled, release_enabled: releaseSetting?.value === true || releaseSetting?.value === "true", single_observation_only: true, bulk: false, automatic: false });
 }
 
 async function rollbackCanary({ body, adminClient, adminUserId }: { body: Record<string, unknown>; adminClient: any; adminUserId: string }) {
@@ -489,47 +522,10 @@ async function rollbackCanary({ body, adminClient, adminUserId }: { body: Record
   return json({ ok: true, action: "rollback_canary", canary: true, rollback: Array.isArray(data) ? data[0] : data });
 }
 
-async function clearC2ReviewApproval({ body, adminClient, adminUserId }: { body: Record<string, unknown>; adminClient: any; adminUserId: string }) {
-  const observationId = requireSingleObservationId(body);
-  if (observationId !== PHASE_C2_CASE_C_OBSERVATION_ID) {
-    return json({ error: "Phase C2 review-approval cleanup is limited to Case C", code: "V2_C2_CLEAR_APPROVAL_NOT_ALLOWED" }, 403);
-  }
-  const { data, error } = await adminClient.rpc("clear_v2_c2_review_approval", {
-    target_observation_id: observationId,
-    clearing_admin_id: adminUserId,
-  });
-  if (error) throw error;
-  return json({
-    ok: true,
-    action: "clear_c2_review_approval",
-    observation: Array.isArray(data) ? data[0] : data,
-    review_evidence_preserved: true,
-    opportunity_mutated: false,
-    provenance_mutated: false,
-  });
-}
-
 async function canaryAssertions({ body, adminClient }: { body: Record<string, unknown>; adminClient: any }) {
   const opportunityId = String(body.opportunity_id || "").trim();
   if (!isUuid(opportunityId)) return json({ error: "Exactly one valid opportunity_id is required", code: "V2_SINGLE_OPPORTUNITY_REQUIRED" }, 400);
   return json({ ok: true, action: "canary_assertions", opportunity_id: opportunityId, assertions: await loadCanaryAssertions(adminClient, opportunityId) });
-}
-
-async function compareC2Candidate({ body, adminClient, adminUserId }: { body: Record<string, unknown>; adminClient: any; adminUserId: string }) {
-  const observationId = requireSingleObservationId(body);
-  if (observationId !== PHASE_C2_CASE_B_OBSERVATION_ID) {
-    return json({ error: "Phase C2 comparison is limited to the selected Case B observation", code: "V2_C2_COMPARISON_NOT_ALLOWED" }, 403);
-  }
-  const { data, error } = await adminClient.rpc("compare_v2_observation_deterministically", {
-    target_observation_id: observationId,
-    comparing_admin_id: adminUserId,
-  });
-  if (error) throw error;
-  const result = Array.isArray(data) ? data[0] : data;
-  if (result?.opportunity_id !== PHASE_C2_CASE_B_OPPORTUNITY_ID || result?.comparison_state !== "legacy_match") {
-    return json({ ok: false, action: "compare_c2_candidate", code: "V2_C2_UNEXPECTED_COMPARISON_RESULT", comparison: result }, 409);
-  }
-  return json({ ok: true, action: "compare_c2_candidate", comparison: result, promotion_executed: false, opportunity_mutated: false });
 }
 
 async function loadCanaryAssertions(adminClient: any, opportunityId: string) {

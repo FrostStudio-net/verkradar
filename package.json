@@ -10,6 +10,8 @@
     "test:phase-c0-db": "bash scripts/test-phase-c0-db.sh",
     "test:phase-c1-admin-ui": "node --test supabase/functions/tests/phase-c1-admin-ui.test.js",
     "test:phase-c2-comparison": "node --test supabase/functions/tests/phase-c2-comparison.test.js"
+    ,"test:phase-c3": "node --test supabase/functions/tests/phase-c3-prerequisites.test.js",
+    "test:phase-c3-db": "bash scripts/test-phase-c3-db.sh"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",

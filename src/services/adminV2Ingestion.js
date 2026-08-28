@@ -22,13 +22,21 @@ export function isPhaseC1StagingRuntime(supabaseUrl) {
   }
 }
 
+export function isPhaseC3ProductionRuntime(supabaseUrl) {
+  try {
+    return new URL(String(supabaseUrl || "")).hostname.toLowerCase() === `${PHASE_C1_PRODUCTION_PROJECT_REF}.supabase.co`;
+  } catch {
+    return false;
+  }
+}
+
 export async function loadAdminV2IngestionOverview(supabase) {
   if (!supabase) throw new Error("Supabase client is not configured");
   const caseIds = PHASE_C2_CASES.map((item) => item.observation_id);
-  const [configsResult, runsResult, observationsResult, comparisonsResult, caseObservationsResult, caseProvenanceResult] = await Promise.all([
+  const [configsResult, runsResult, observationsResult, comparisonsResult, caseObservationsResult, caseProvenanceResult, productionCandidatesResult, phaseCFlagResult] = await Promise.all([
     supabase.from("v2_source_configs").select(`
       id, source_id, source_key, display_name, adapter_type, mode, parser_name, parser_version,
-      promotion_approved, promotion_reference_required, updated_at,
+      promotion_approved, promotion_reference_required, production_canary_enabled, release_feature_enabled, release_approved, updated_at,
       v2_source_health (
         status, circuit_state, consecutive_failures, consecutive_zero_item_runs,
         last_run_at, last_success_at, last_fixture_at, last_shadow_at,
@@ -50,8 +58,13 @@ export async function loadAdminV2IngestionOverview(supabase) {
     supabase.from("opportunity_ingestion_provenance")
       .select("id, observation_id, opportunity_id, provenance_type, identity_match_type, metadata, attached_at")
       .in("observation_id", caseIds),
+    supabase.from("v2_ingestion_observations")
+      .select("id, source_config_id, source_id, source_key, external_id, procurement_reference, title, buyer, deadline, canonical_url, validation_state, comparison_state, promotion_state, promoted_opportunity_id, predicted_procurement_stage, predicted_actionable, predicted_confidence, predicted_requires_admin_review, strong_procurement_evidence, deadline_evidence, promotion_enrichment_status, approved_for_promotion, approved_at, approved_for_release, released_at")
+      .eq("source_key", PHASE_C1_REYKJAVIK_SOURCE_KEY)
+      .order("created_at", { ascending: false }).limit(50),
+    supabase.from("automation_settings").select("key,value").in("key", ["phase_c_production_enabled", "phase_c_release_enabled"]),
   ]);
-  for (const result of [configsResult, runsResult, observationsResult, comparisonsResult, caseObservationsResult, caseProvenanceResult]) {
+  for (const result of [configsResult, runsResult, observationsResult, comparisonsResult, caseObservationsResult, caseProvenanceResult, productionCandidatesResult, phaseCFlagResult]) {
     if (result.error) throw result.error;
   }
 
@@ -74,12 +87,57 @@ export async function loadAdminV2IngestionOverview(supabase) {
     return { ...definition, observation, provenance, opportunity: opportunitiesById.get(opportunityId) || null };
   });
 
+  const flags = Object.fromEntries((phaseCFlagResult.data || []).map((row) => [row.key, row.value === true || row.value === "true"]));
+  const today = new Date().toISOString().slice(0, 10);
+  const productionCandidates = (productionCandidatesResult.data || []).filter((row) =>
+    row.validation_state === "valid"
+    && row.predicted_procurement_stage === "open_competition"
+    && row.predicted_actionable === true
+    && Number(row.predicted_confidence || 0) >= 0.90
+    && row.predicted_requires_admin_review === false
+    && row.strong_procurement_evidence === true
+    && row.deadline_evidence === "explicit_source"
+    && row.deadline > today
+    && Boolean(row.procurement_reference && row.canonical_url && row.buyer)
+    && ["succeeded", "not_needed"].includes(row.promotion_enrichment_status)
+    && ["legacy_match", "v2_only", "baseline_unavailable"].includes(row.comparison_state)
+  );
+  const productionCandidateIds = productionCandidates.map((row) => row.id);
+  const productionProvenance = new Map();
+  const productionOpportunities = new Map();
+  if (productionCandidateIds.length) {
+    const provenanceResult = await supabase.from("opportunity_ingestion_provenance")
+      .select("id,observation_id,opportunity_id,provenance_type,identity_match_type,metadata")
+      .in("observation_id", productionCandidateIds);
+    if (provenanceResult.error) throw provenanceResult.error;
+    for (const row of provenanceResult.data || []) productionProvenance.set(row.observation_id, row);
+    const opportunityIds = [...new Set(productionCandidates.map((row) => row.promoted_opportunity_id || productionProvenance.get(row.id)?.opportunity_id).filter(Boolean))];
+    if (opportunityIds.length) {
+      const opportunityResult = await supabase.from("opportunities")
+        .select("id,source_id,external_id,title,buyer,deadline,url,status,raw_payload,procurement_stage,actionable_for_suppliers,phase_c_communication_hold,phase_c_released_at,phase_c_disabled_at,updated_at")
+        .in("id", opportunityIds);
+      if (opportunityResult.error) throw opportunityResult.error;
+      for (const row of opportunityResult.data || []) productionOpportunities.set(row.id, row);
+    }
+  }
+  const hydratedProductionCandidates = productionCandidates.map((observation) => {
+    const provenance = productionProvenance.get(observation.id) || null;
+    return { observation, provenance, opportunity: productionOpportunities.get(observation.promoted_opportunity_id || provenance?.opportunity_id) || null };
+  });
   return buildAdminV2OverviewRows({
     configs: configsResult.data || [],
     runs: runsResult.data || [],
     observations: observationsResult.data || [],
     comparisons: comparisonsResult.data || [],
-  }).map((row) => ({ ...row, phaseC2Cases: cases.filter((item) => item.source_key === row.source_key) }));
+  }).map((row) => ({
+    ...row,
+    phaseC2Cases: cases.filter((item) => item.source_key === row.source_key),
+    phaseC3Production: row.source_key === PHASE_C1_REYKJAVIK_SOURCE_KEY ? {
+      enabled: flags.phase_c_production_enabled === true,
+      release_enabled: flags.phase_c_release_enabled === true,
+      candidates: hydratedProductionCandidates,
+    } : null,
+  }));
 }
 
 export function buildAdminV2OverviewRows({ configs = [], runs = [], observations = [], comparisons = [] }) {

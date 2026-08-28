@@ -6,7 +6,7 @@ export { logClientCompanyProfileChange } from "./services/companyProfileAudit.js
 export { getLegalPageData } from "./services/legal.js";
 export { acceptCompanyInvite, buildCompanyInviteLink, claimInvitedCompanyMemberships, clearStoredPendingInviteToken, getAuthCallbackInfo, getAuthCallbackRedirectUrl, getInitialPendingInviteToken, getInviteAuthDiagnostics, getInviteRouteDiagnostics, getInviteTokenFromRoute, getStoredPendingInviteToken, getStoredPendingInviteTokenSource, isInviteDebugEnabled, loadActiveCompanyMemberships, normalizeAccessEmail, previewCompanyInvite, replaceUrlWithInviteRoute, sanitizeInviteToken, setStoredPendingInviteToken, shouldPreserveInviteForRoute } from "./services/companyAccess.js";
 export { requestDailyPipelineRun } from "./services/adminAutomation.js";
-export { PHASE_C1_CANARY_OBSERVATION_ID, PHASE_C1_REYKJAVIK_SOURCE_KEY, PHASE_C2_CASES, getPhaseC2Case, isPhaseC1StagingRuntime, loadAdminV2IngestionOverview, invokeAdminV2Action, verifyPhaseC1PromotionIdempotency } from "./services/adminV2Ingestion.js";
+export { PHASE_C1_CANARY_OBSERVATION_ID, PHASE_C1_REYKJAVIK_SOURCE_KEY, PHASE_C2_CASES, getPhaseC2Case, isPhaseC1StagingRuntime, isPhaseC3ProductionRuntime, loadAdminV2IngestionOverview, invokeAdminV2Action, verifyPhaseC1PromotionIdempotency } from "./services/adminV2Ingestion.js";
 export { buildAdminCompanyProfilePayload, saveAdminCompanyProfile } from "./services/adminCompanyProfile.js";
 export { formatAiUsageCost, loadTodayAiUsageSummary, requestAiMatchReview, requestAutomaticAiReviewRun, requestCompanyAiReviewBatch, updateCompanyAutoAiReviewEnabled } from "./services/aiReviews.js";
 export { mergeAiReviewsIntoAdminMatches } from "./services/matchDisplay.js";

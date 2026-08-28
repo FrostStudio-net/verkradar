@@ -34,13 +34,7 @@ test("Phase C2 comparison RPC is service-role-only", async () => {
   assert.match(sql, /mode is distinct from 'shadow'[\s\S]*V2_COMPARISON_REQUIRES_UNAPPROVED_SHADOW_SOURCE/);
 });
 
-test("authenticated staging Edge action is fixed to the selected Case B pair", async () => {
+test("fixed Case B IDs and staging comparison action do not ship in the production-capable Edge backend", async () => {
   const source = await readFile(functionUrl, "utf8");
-  const auth = source.indexOf('from("admin_users")');
-  const route = source.indexOf('body.action === "compare_c2_candidate"');
-  assert.ok(route > auth);
-  assert.match(source, /PHASE_C2_CASE_B_OBSERVATION_ID = "d5a8f0eb-f55e-4b8c-b2c3-146a2eea0df1"/);
-  assert.match(source, /PHASE_C2_CASE_B_OPPORTUNITY_ID = "a416b17a-4249-41f7-9b14-51063ca9689e"/);
-  assert.match(source, /promotion_executed: false/);
-  assert.match(source, /opportunity_mutated: false/);
+  assert.doesNotMatch(source, /compare_c2_candidate|PHASE_C2_CASE_B_OBSERVATION_ID|PHASE_C2_CASE_B_OPPORTUNITY_ID/);
 });

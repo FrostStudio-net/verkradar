@@ -67,6 +67,7 @@ import {
   getPhaseC2Case,
   PHASE_C2_CASES,
   isPhaseC1StagingRuntime,
+  isPhaseC3ProductionRuntime,
   loadAdminTrialRequests,
   logClientCompanyProfileChange,
   mergeAiReviewsIntoReportMatches,
@@ -274,6 +275,9 @@ let state = {
   v2C2Action: "",
   v2C2Results: {},
   v2C2Assertions: {},
+  v2C3SelectedObservationId: "",
+  v2C3Action: "",
+  v2C3Result: null,
   expandedSourceId: null,
   adminCompanies: [],
   adminCompaniesLoading: false,
@@ -582,6 +586,9 @@ function clearLocalProfileState() {
   state.v2C2Action = "";
   state.v2C2Results = {};
   state.v2C2Assertions = {};
+  state.v2C3SelectedObservationId = "";
+  state.v2C3Action = "";
+  state.v2C3Result = null;
   state.adminCompanies = [];
   state.adminCompaniesLoading = false;
   state.adminCompaniesLoaded = false;
@@ -608,6 +615,9 @@ function clearAdminAccessState() {
   state.v2C2Action = "";
   state.v2C2Results = {};
   state.v2C2Assertions = {};
+  state.v2C3SelectedObservationId = "";
+  state.v2C3Action = "";
+  state.v2C3Result = null;
   state.adminCompanies = [];
   state.adminCompaniesLoaded = false;
   state.adminReviewMatches = [];
@@ -795,6 +805,50 @@ document.addEventListener("click", async (event) => {
       state.v2IngestionError = formatSupabaseError(error);
     } finally {
       state.v2C2Action = "";
+      render();
+    }
+    return;
+  }
+
+  if (["v2-c3-approve-source", "v2-c3-revoke-source", "v2-c3-approve-observation", "v2-c3-promote", "v2-c3-assertions", "v2-c3-rollback", "v2-c3-approve-release", "v2-c3-release", "v2-c3-disable"].includes(name)) {
+    event.preventDefault();
+    const productionRow = (state.v2IngestionRows || []).find((row) => row.source_key === "reykjavik-utbod-v2");
+    const enabled = state.isAdmin && isPhaseC3ProductionRuntime(SUPABASE_URL) && productionRow?.phaseC3Production?.enabled === true && productionRow?.production_canary_enabled === true;
+    const observationId = state.v2C3SelectedObservationId;
+    const selected = productionRow?.phaseC3Production?.candidates?.find((item) => item.observation.id === observationId);
+    if (!supabaseClient || !enabled || (!["v2-c3-approve-source", "v2-c3-revoke-source"].includes(name) && !selected)) return;
+    const reasonActions = new Set(["v2-c3-rollback", "v2-c3-approve-release", "v2-c3-release", "v2-c3-disable"]);
+    const reason = reasonActions.has(name) ? window.prompt("Required audit reason")?.trim() : "";
+    if (reasonActions.has(name) && !reason) return;
+    action.disabled = true;
+    state.v2C3Action = name;
+    state.v2IngestionError = null;
+    render();
+    try {
+      if (name === "v2-c3-approve-source" || name === "v2-c3-revoke-source") {
+        state.v2C3Result = await invokeAdminV2Action(supabaseClient, "set_source_promotion_approval", "reykjavik-utbod-v2", null, { approved: name === "v2-c3-approve-source", reason: "Phase C3 single-source production canary" });
+      } else if (name === "v2-c3-approve-observation") {
+        state.v2C3Result = await invokeAdminV2Action(supabaseClient, "approve_promotion", null, null, { observation_id: observationId, note: "Phase C3 single-observation production canary" });
+      } else if (name === "v2-c3-promote") {
+        state.v2C3Result = await invokeAdminV2Action(supabaseClient, "promote_canary", null, null, { observation_id: observationId });
+      } else if (name === "v2-c3-assertions") {
+        state.v2C3Result = await invokeAdminV2Action(supabaseClient, "canary_assertions", null, null, { opportunity_id: selected.opportunity.id });
+      } else if (name === "v2-c3-rollback") {
+        state.v2C3Result = await invokeAdminV2Action(supabaseClient, "rollback_canary", null, null, { observation_id: observationId, reason });
+      } else if (name === "v2-c3-approve-release") {
+        state.v2C3Result = await invokeAdminV2Action(supabaseClient, "approve_release", null, null, { observation_id: observationId, reason });
+      } else if (name === "v2-c3-release") {
+        state.v2C3Result = await invokeAdminV2Action(supabaseClient, "release_canary", null, null, { observation_id: observationId, reason });
+      } else if (name === "v2-c3-disable") {
+        state.v2C3Result = await invokeAdminV2Action(supabaseClient, "disable_released_canary", null, null, { observation_id: observationId, reason });
+      }
+      await loadV2IngestionForAdmin();
+    } catch (error) {
+      console.error(error);
+      state.v2IngestionError = formatSupabaseError(error);
+      state.v2C3Result = error.actionResult || { ok: false, error: formatSupabaseError(error) };
+    } finally {
+      state.v2C3Action = "";
       render();
     }
     return;
@@ -1374,6 +1428,12 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", (event) => {
+  if (event.target.matches('[data-action="v2-c3-select-observation"]')) {
+    state.v2C3SelectedObservationId = event.target.value || "";
+    state.v2C3Result = null;
+    render();
+    return;
+  }
   if (event.target.matches("[data-admin-filter]")) {
     const key = event.target.dataset.adminFilter;
     state.adminOpportunityFilters = getAdminOpportunityFilters();
@@ -3470,6 +3530,7 @@ function inferLocationFromOpportunityText(text) {
 
 function isDashboardVisibleOpportunity(opp) {
   if (!opp || opp.status !== "open") return false;
+  if (opp.phaseCCommunicationHold === true || opp.rawPayload?.phase_c_communication_hold === true) return false;
   if (!opp.url || opp.url === "#") return false;
   if (daysUntilDeadline(opp.deadline) < 0) return false;
   if (isDemoTestOpportunity(opp)) return false;
@@ -9700,7 +9761,11 @@ function renderAdminActiveTab(opportunities) {
         phaseC2ControlsEnabled: state.isAdmin && isPhaseC1StagingRuntime(SUPABASE_URL),
         phaseC2Action: state.v2C2Action || "",
         phaseC2Results: state.v2C2Results || {},
-        phaseC2Assertions: state.v2C2Assertions || {}
+        phaseC2Assertions: state.v2C2Assertions || {},
+        phaseC3ProductionControlsEnabled: state.isAdmin && isPhaseC3ProductionRuntime(SUPABASE_URL),
+        phaseC3SelectedObservationId: state.v2C3SelectedObservationId || "",
+        phaseC3Action: state.v2C3Action || "",
+        phaseC3Result: state.v2C3Result || null
       })}
       ${renderLatestImportRunsTable()}
       ${renderLatestTedOpportunities()}
@@ -11130,6 +11195,7 @@ function isCustomerReportModeEligible(opp, mode = "all_current") {
 
 function isStrictCustomerReportEligible(opp) {
   if (!opp || isDemoTestOpportunity(opp)) return false;
+  if (opp.phaseCCommunicationHold === true || opp.rawPayload?.phase_c_communication_hold === true) return false;
   if (getSafetyStatus(opp) === "hidden") return false;
   if (!isDashboardVisibleOpportunity(opp)) return false;
   if (!isCustomerMatchEligibleOpportunity(opp)) return false;

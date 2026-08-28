@@ -133,16 +133,9 @@ test("Case A/B reuse the fail-closed rollback and Case C clears approval fields 
   assert.doesNotMatch(update, /comparison_state\s*=|promotion_state\s*=|promotion_error\s*=|promoted_opportunity_id\s*=/);
 });
 
-test("Case C cleanup Edge action is staging-admin routed and exact-observation scoped", async () => {
+test("staging-only cleanup action is absent from the production-capable Edge backend", async () => {
   const edge = await readFile(new URL("../import-source-connectors-v2/index.ts", import.meta.url), "utf8");
-  const adminCheck = edge.indexOf('.from("admin_users")');
-  const route = edge.indexOf('body.action === "clear_c2_review_approval"');
-  assert.ok(route > adminCheck);
-  assert.match(edge, /observationId !== PHASE_C2_CASE_C_OBSERVATION_ID/);
-  assert.match(edge, /adminClient\.rpc\("clear_v2_c2_review_approval"/);
-  assert.match(edge, /review_evidence_preserved: true/);
-  assert.match(edge, /opportunity_mutated: false/);
-  assert.match(edge, /provenance_mutated: false/);
+  assert.doesNotMatch(edge, /clear_c2_review_approval|PHASE_C2_CASE_C_OBSERVATION_ID/);
 });
 
 test("page-load service is select-only and mutations use authenticated Edge actions", async () => {

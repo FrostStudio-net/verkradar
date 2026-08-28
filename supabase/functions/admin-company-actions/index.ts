@@ -1943,6 +1943,8 @@ function isStaleCustomerOpportunity(opportunity: Record<string, unknown>) {
 
 function isDashboardVisibleOpportunity(opportunity: Record<string, unknown>) {
   if (!opportunity || String(opportunity.status || "") !== "open") return false;
+  const payload = opportunity.rawPayload as Record<string, unknown> | undefined;
+  if (opportunity.phase_c_communication_hold === true || opportunity.phaseCCommunicationHold === true || payload?.phase_c_communication_hold === true) return false;
   if (!opportunity.url || opportunity.url === "#") return false;
   if (daysUntilDeadline(String(opportunity.deadline || "")) < 0) return false;
   if (isDemoTestOpportunity(opportunity)) return false;
@@ -1974,6 +1976,8 @@ function getReportSections(company: CompanyProfile, matches: Array<Record<string
 }
 
 function isStrictCustomerReportEligible(company: CompanyProfile, opportunity: Record<string, unknown>) {
+  const payload = opportunity.rawPayload as Record<string, unknown> | undefined;
+  if (opportunity.phase_c_communication_hold === true || opportunity.phaseCCommunicationHold === true || payload?.phase_c_communication_hold === true) return false;
   if (!isCustomerMatchEligibleOpportunity(opportunity)) return false;
   if (opportunity.procurementStage || opportunity.procurement_stage) return true;
   if (isAlreadyAwardedOrTenderedReportItem(opportunity)) return false;

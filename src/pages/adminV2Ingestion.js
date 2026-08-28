@@ -1,4 +1,4 @@
-export function renderAdminV2IngestionPanel({ rows = [], loading = false, error = "", escapeHtml, formatDateTime, controlsEnabled = false, phaseC2ControlsEnabled = false, phaseC2Action = "", phaseC2Results = {}, phaseC2Assertions = {} }) {
+export function renderAdminV2IngestionPanel({ rows = [], loading = false, error = "", escapeHtml, formatDateTime, controlsEnabled = false, phaseC2ControlsEnabled = false, phaseC2Action = "", phaseC2Results = {}, phaseC2Assertions = {}, phaseC3ProductionControlsEnabled = false, phaseC3SelectedObservationId = "", phaseC3Action = "", phaseC3Result = null }) {
   const canMutate = controlsEnabled === true;
   const cases = rows.flatMap((row) => (row.phaseC2Cases || []).map((item) => ({ ...item, source: row }))).sort((left, right) => left.case_key.localeCompare(right.case_key));
   return `
@@ -32,8 +32,59 @@ export function renderAdminV2IngestionPanel({ rows = [], loading = false, error 
         </div>
       ` : error ? "" : `<div class="empty-card">No v2 sources configured. Apply the Phase A migration to create the isolated control plane.</div>`}
       ${phaseC2ControlsEnabled && cases.length ? renderPhaseC2(cases, escapeHtml, formatDateTime, phaseC2Action, phaseC2Results, phaseC2Assertions) : ""}
+      ${phaseC3ProductionControlsEnabled ? renderPhaseC3Production(rows, escapeHtml, formatDateTime, phaseC3SelectedObservationId, phaseC3Action, phaseC3Result) : ""}
     </section>
   `;
+}
+
+function renderPhaseC3Production(rows, escapeHtml, formatDateTime, selectedId, activeAction, result) {
+  const row = rows.find((item) => item.source_key === "reykjavik-utbod-v2");
+  const control = row?.phaseC3Production;
+  if (!row || control?.enabled !== true || row.production_canary_enabled !== true) return "";
+  const candidates = control.candidates || [];
+  const selected = candidates.find((item) => item.observation.id === selectedId) || null;
+  const observation = selected?.observation;
+  const opportunity = selected?.opportunity;
+  const provenance = selected?.provenance;
+  const sourceApproved = row.mode === "promote" && row.promotion_approved === true;
+  const held = opportunity?.phase_c_communication_hold === true || opportunity?.raw_payload?.phase_c_communication_hold === true;
+  const quarantined = opportunity?.raw_payload?.promotion_quarantine === "phase_c_canary";
+  const busy = Boolean(activeAction);
+  return `
+    <section class="phase-c-canary" aria-labelledby="phase-c3-production-title">
+      <div class="card-header"><div><h3 id="phase-c3-production-title">Phase C3 production canary</h3><p>One source and one observation only. Promotion, release, and communication are separate.</p></div><span class="status-pill is-error">PRODUCTION — MANUAL</span></div>
+      <label>Eligible Reykjavík observation
+        <select data-action="v2-c3-select-observation" ${busy ? "disabled" : ""}>
+          <option value="">Select exactly one observation</option>
+          ${candidates.map((item) => `<option value="${escapeHtml(item.observation.id)}" ${item.observation.id === selectedId ? "selected" : ""}>${escapeHtml(`${item.observation.procurement_reference || "no reference"} — ${item.observation.title}`)}</option>`).join("")}
+        </select>
+      </label>
+      <dl>
+        <dt>Source mode / approval</dt><dd>${escapeHtml(row.mode)} / ${row.promotion_approved ? "approved" : "not approved"}</dd>
+        <dt>Observation</dt><dd>${observation ? `<code>${escapeHtml(observation.id)}</code>` : "—"}</dd>
+        <dt>Reference</dt><dd>${escapeHtml(observation?.procurement_reference || "—")}</dd>
+        <dt>Title</dt><dd>${escapeHtml(observation?.title || "—")}</dd>
+        <dt>Deadline / stage / confidence</dt><dd>${escapeHtml(observation ? `${observation.deadline || "—"} / ${observation.predicted_procurement_stage || "—"} / ${Number(observation.predicted_confidence || 0).toFixed(2)}` : "—")}</dd>
+        <dt>Comparison / promotion</dt><dd>${escapeHtml(observation ? `${observation.comparison_state} / ${observation.promotion_state}` : "—")}</dd>
+        <dt>Opportunity</dt><dd>${opportunity ? `<code>${escapeHtml(opportunity.id)}</code> — ${escapeHtml(opportunity.status || "—")}` : "—"}</dd>
+        <dt>Provenance</dt><dd>${escapeHtml(provenance?.provenance_type || "—")}</dd>
+        <dt>Quarantine / communication hold</dt><dd>${quarantined ? "QUARANTINED" : "no"} / ${held ? "HELD" : "no"}</dd>
+      </dl>
+      <div class="admin-inline-actions">
+        <button data-action="v2-c3-approve-source" ${sourceApproved || busy ? "disabled" : ""}>Approve Reykjavík source</button>
+        <button data-action="v2-c3-revoke-source" ${(!row.promotion_approved && row.mode !== "promote") || busy ? "disabled" : ""}>Revoke source</button>
+        <button data-action="v2-c3-approve-observation" ${!observation || !sourceApproved || observation.approved_for_promotion || busy ? "disabled" : ""}>Approve observation</button>
+        <button data-action="v2-c3-promote" ${!observation || !sourceApproved || !observation.approved_for_promotion || opportunity || busy ? "disabled" : ""}>Promote once</button>
+        <button data-action="v2-c3-assertions" ${!opportunity || busy ? "disabled" : ""}>Run safety assertions</button>
+        <button data-action="v2-c3-rollback" ${!opportunity || !quarantined || busy ? "disabled" : ""}>Rollback before release</button>
+        <button data-action="v2-c3-approve-release" ${!opportunity || !quarantined || !control.release_enabled || row.release_feature_enabled !== true || busy ? "disabled" : ""}>Approve release</button>
+        <button data-action="v2-c3-release" ${!observation?.approved_for_release || !quarantined || busy ? "disabled" : ""}>Release with communication hold</button>
+        <button data-action="v2-c3-disable" ${!opportunity?.phase_c_released_at || busy ? "disabled" : ""}>Post-release disable</button>
+      </div>
+      ${activeAction ? `<p class="admin-message">Running ${escapeHtml(activeAction)}…</p>` : ""}
+      ${result ? `<pre class="phase-c-canary-assertions">${escapeHtml(JSON.stringify(result, null, 2))}</pre>` : ""}
+      <p><small>No matching, AI, report, send, bulk, automatic release, or communication-hold-clear control exists here.</small></p>
+    </section>`;
 }
 
 function renderPhaseC2(cases, escapeHtml, formatDateTime, activeAction, results, assertions) {
