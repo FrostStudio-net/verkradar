@@ -63,6 +63,16 @@ function renderPhaseC2Case(item, escapeHtml, formatDateTime, activeAction, resul
   const eligibility = getKnownCanaryEligibility(row, observation);
   const observationApproved = observation?.approved_for_promotion === true && observation?.promotion_state === "eligible";
   const canPromote = sourceApproved && observationApproved && eligibility.ready && !opportunity && !observation?.promoted_opportunity_id;
+  const canRollback = ["A", "B"].includes(item.case_key)
+    && Boolean(opportunity && provenance)
+    && observation?.promotion_state === "promoted"
+    && observation?.promoted_opportunity_id === opportunity.id;
+  const canClearReviewApproval = item.case_key === "C"
+    && observation?.approved_for_promotion === true
+    && observation?.comparison_state === "review_required"
+    && observation?.promotion_state === "review_required"
+    && !observation?.promoted_opportunity_id
+    && !provenance;
   const payload = opportunity?.raw_payload || {};
   const unchanged = provenance?.metadata?.opportunity_mutated === false
     || result?.reasons?.some?.((reason) => reason?.opportunity_mutated === false) === true;
@@ -93,16 +103,20 @@ function renderPhaseC2Case(item, escapeHtml, formatDateTime, activeAction, resul
         <button type="button" data-action="v2-c2-approve-observation" data-observation-id="${escapeHtml(item.observation_id)}" ${!sourceApproved || observation?.approved_for_promotion || busy || Boolean(opportunity) ? "disabled" : ""}>Approve observation</button>
         <button type="button" data-action="v2-c2-promote" data-observation-id="${escapeHtml(item.observation_id)}" ${!canPromote || busy ? "disabled" : ""}>Promote once</button>
         ${opportunity ? `<button type="button" data-action="v2-c2-assertions" data-observation-id="${escapeHtml(item.observation_id)}" data-opportunity-id="${escapeHtml(opportunity.id)}" ${busy ? "disabled" : ""}>Run downstream safety assertions</button>` : ""}
+        ${["A", "B"].includes(item.case_key) ? `<button type="button" data-action="v2-c2-rollback" data-observation-id="${escapeHtml(item.observation_id)}" ${!canRollback || busy ? "disabled" : ""}>Roll back Case ${escapeHtml(item.case_key)}</button>` : ""}
+        ${item.case_key === "C" ? `<button type="button" data-action="v2-c2-clear-approval" data-observation-id="${escapeHtml(item.observation_id)}" ${!canClearReviewApproval || busy ? "disabled" : ""}>Clear manual approval</button>` : ""}
       </div>
       ${!eligibility.ready && !opportunity ? `<p class="admin-message is-error">Promotion unavailable: ${escapeHtml(eligibility.reasons.join("; "))}</p>` : ""}
       ${result ? `
         <div class="admin-message ${result.ok === false ? "is-error" : ""}" role="status">
-          <strong>${result.ok === false ? "PROMOTION BLOCKED" : "PROMOTION RESULT"}</strong>
+          <strong>${result.ok === false ? "PROMOTION BLOCKED" : result.action === "rollback_canary" ? "ROLLBACK SUCCEEDED" : result.action === "clear_c2_review_approval" ? "APPROVAL CLEARED" : "PROMOTION RESULT"}</strong>
           <dl>
             <dt>Returned opportunity ID</dt><dd>${result.opportunity_id ? `<code>${escapeHtml(result.opportunity_id)}</code>` : "—"}</dd>
             <dt>Provenance type</dt><dd>${escapeHtml(provenance?.provenance_type || "—")}</dd>
             ${item.case_key === "B" ? `<dt>Existing opportunity unchanged</dt><dd>${unchanged ? "yes" : "not yet verified"}</dd>` : ""}
             ${item.case_key === "C" ? `<dt>Blocked reason</dt><dd>${escapeHtml(blockedReason || "—")}</dd><dt>Opportunity created</dt><dd>${result.created === true || result.opportunity_created === true ? "yes" : "no"}</dd><dt>Provenance created</dt><dd>${result.provenance_attached === true || result.provenance_created === true ? "yes" : "no"}</dd>` : ""}
+            ${result.action === "rollback_canary" ? `<dt>Rollback state</dt><dd>${escapeHtml(result.rollback?.rollback_status || "—")}</dd><dt>Opportunity deleted</dt><dd>${result.rollback?.opportunity_deleted === true ? "yes" : "no"}</dd>` : ""}
+            ${result.action === "clear_c2_review_approval" ? `<dt>Review evidence preserved</dt><dd>${result.review_evidence_preserved === true ? "yes" : "no"}</dd><dt>Opportunity/provenance changed</dt><dd>${result.opportunity_mutated === false && result.provenance_mutated === false ? "no" : "unexpected"}</dd>` : ""}
           </dl>
           ${result.ok === false ? `<pre class="phase-c-canary-assertions">${escapeHtml(JSON.stringify(result, null, 2))}</pre>` : ""}
         </div>

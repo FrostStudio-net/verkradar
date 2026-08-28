@@ -50,6 +50,7 @@ test("production/non-admin render has no Phase C2 controls", () => {
   const html = render(false);
   assert.doesNotMatch(html, /Phase C2 — staging only/);
   assert.doesNotMatch(html, /v2-c2-promote/);
+  assert.doesNotMatch(html, /v2-c2-rollback|v2-c2-clear-approval/);
 });
 
 test("staging admin sees exactly the three prepared C2 observations", () => {
@@ -85,6 +86,63 @@ test("Case C displays the exact fail-closed outcome without creating rows", () =
   assert.match(html, /V2_FUZZY_REVIEW_REQUIRED/);
   assert.match(html, /Opportunity created<\/dt><dd>no/);
   assert.match(html, /Provenance created<\/dt><dd>no/);
+});
+
+test("cleanup controls are exact-case, manual, and enabled only for current C2 artifacts", () => {
+  const cleanupRows = rows();
+  for (const source of cleanupRows) {
+    source.mode = "promote";
+    source.promotion_approved = true;
+    for (const item of source.phaseC2Cases) {
+      item.observation.approved_for_promotion = true;
+      if (item.case_key === "A" || item.case_key === "B") {
+        item.observation.promotion_state = "promoted";
+        item.observation.promoted_opportunity_id = item.case_key === "A"
+          ? "acaec64d-81f6-4150-9df3-f66d952713b2"
+          : "a416b17a-4249-41f7-9b14-51063ca9689e";
+        item.provenance = { provenance_type: item.case_key === "A" ? "v2_created" : "existing_opportunity_matched", metadata: { opportunity_mutated: false } };
+        item.opportunity = { id: item.observation.promoted_opportunity_id, raw_payload: item.case_key === "A" ? { promotion_quarantine: "phase_c_canary" } : {} };
+      } else {
+        item.observation.comparison_state = "review_required";
+        item.observation.promotion_state = "review_required";
+        item.observation.promotion_error = '[{"code":"V2_FUZZY_REVIEW_REQUIRED"}]';
+      }
+    }
+  }
+  const html = render(true, { rows: cleanupRows });
+  assert.match(html, /data-action="v2-c2-rollback" data-observation-id="729459ca-3408-4004-a158-7b75f6c6c32f"[^>]*>Roll back Case A/);
+  assert.match(html, /data-action="v2-c2-rollback" data-observation-id="d5a8f0eb-f55e-4b8c-b2c3-146a2eea0df1"[^>]*>Roll back Case B/);
+  assert.match(html, /data-action="v2-c2-clear-approval" data-observation-id="9c6b7648-1685-4d9b-953e-6afdcba208a7"[^>]*>Clear manual approval/);
+  assert.equal((html.match(/data-action="v2-c2-rollback"/g) || []).length, 2);
+  assert.equal((html.match(/data-action="v2-c2-clear-approval"/g) || []).length, 1);
+});
+
+test("Case A/B reuse the fail-closed rollback and Case C clears approval fields only", async () => {
+  const c0 = await readFile(new URL("../../migrations/20260827230000_phase_c0_promotion_safety.sql", import.meta.url), "utf8");
+  assert.match(c0, /if provenance_row\.provenance_type = 'v2_created'.*V2_ROLLBACK_DOWNSTREAM_DEPENDENCIES.*delete from public\.opportunities/s);
+  assert.match(c0, /else\s+delete from public\.opportunity_ingestion_provenance.*rollback_status := 'rolled_back_existing_match'/s);
+  const cleanup = await readFile(new URL("../../migrations/20260828120000_phase_c2_cleanup_approval.sql", import.meta.url), "utf8");
+  assert.match(cleanup, /9c6b7648-1685-4d9b-953e-6afdcba208a7/);
+  assert.match(cleanup, /comparison_state is distinct from 'review_required'.*promotion_state is distinct from 'review_required'.*V2_FUZZY_REVIEW_REQUIRED/s);
+  assert.match(cleanup, /V2_C2_CLEAR_APPROVAL_PROVENANCE_EXISTS/);
+  const update = cleanup.slice(cleanup.indexOf("update public.v2_ingestion_observations"), cleanup.indexOf("where id = target_observation_id;", cleanup.indexOf("update public.v2_ingestion_observations")));
+  assert.match(update, /approved_for_promotion = false/);
+  assert.match(update, /approved_at = null/);
+  assert.match(update, /approved_by = null/);
+  assert.match(update, /approval_note = null/);
+  assert.doesNotMatch(update, /comparison_state\s*=|promotion_state\s*=|promotion_error\s*=|promoted_opportunity_id\s*=/);
+});
+
+test("Case C cleanup Edge action is staging-admin routed and exact-observation scoped", async () => {
+  const edge = await readFile(new URL("../import-source-connectors-v2/index.ts", import.meta.url), "utf8");
+  const adminCheck = edge.indexOf('.from("admin_users")');
+  const route = edge.indexOf('body.action === "clear_c2_review_approval"');
+  assert.ok(route > adminCheck);
+  assert.match(edge, /observationId !== PHASE_C2_CASE_C_OBSERVATION_ID/);
+  assert.match(edge, /adminClient\.rpc\("clear_v2_c2_review_approval"/);
+  assert.match(edge, /review_evidence_preserved: true/);
+  assert.match(edge, /opportunity_mutated: false/);
+  assert.match(edge, /provenance_mutated: false/);
 });
 
 test("page-load service is select-only and mutations use authenticated Edge actions", async () => {

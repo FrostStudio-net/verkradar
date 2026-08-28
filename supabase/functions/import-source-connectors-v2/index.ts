@@ -34,6 +34,7 @@ const STAGING_PROJECT_REF = "ipixuxznqtrcdpzoxric";
 const PRODUCTION_PROJECT_REF = "asojxjbsgqbfpbepojzh";
 const PHASE_C2_CASE_B_OBSERVATION_ID = "d5a8f0eb-f55e-4b8c-b2c3-146a2eea0df1";
 const PHASE_C2_CASE_B_OPPORTUNITY_ID = "a416b17a-4249-41f7-9b14-51063ca9689e";
+const PHASE_C2_CASE_C_OBSERVATION_ID = "9c6b7648-1685-4d9b-953e-6afdcba208a7";
 const ALLOWED_SOURCES = new Set(["akranes-utbod-v2", "borgarbyggd-utbod-v2", "gardabaer-utbod-v2", "rikiskaup-utbod-v2", "vegagerdin-utbod-v2", "isafjordur-utbod-v2", "reykjavik-utbod-v2"]);
 
 const PHASE_A_FIXTURES: Record<string, { sourceKey: string; file: URL; contentType: string }> = {
@@ -102,6 +103,7 @@ Deno.serve(async (req) => {
     if (body.action === "approve_promotion") return await approvePromotion({ body, adminClient, adminUserId: userData.user.id });
     if (body.action === "promote_canary") return await promoteCanary({ body, adminClient });
     if (body.action === "rollback_canary") return await rollbackCanary({ body, adminClient, adminUserId: userData.user.id });
+    if (body.action === "clear_c2_review_approval") return await clearC2ReviewApproval({ body, adminClient, adminUserId: userData.user.id });
     if (body.action === "canary_assertions") return await canaryAssertions({ body, adminClient });
     if (body.action === "compare_c2_candidate") return await compareC2Candidate({ body, adminClient, adminUserId: userData.user.id });
     if (body.action === "set_mode") return await setShadowMode({ body, adminClient });
@@ -485,6 +487,26 @@ async function rollbackCanary({ body, adminClient, adminUserId }: { body: Record
   });
   if (error) throw error;
   return json({ ok: true, action: "rollback_canary", canary: true, rollback: Array.isArray(data) ? data[0] : data });
+}
+
+async function clearC2ReviewApproval({ body, adminClient, adminUserId }: { body: Record<string, unknown>; adminClient: any; adminUserId: string }) {
+  const observationId = requireSingleObservationId(body);
+  if (observationId !== PHASE_C2_CASE_C_OBSERVATION_ID) {
+    return json({ error: "Phase C2 review-approval cleanup is limited to Case C", code: "V2_C2_CLEAR_APPROVAL_NOT_ALLOWED" }, 403);
+  }
+  const { data, error } = await adminClient.rpc("clear_v2_c2_review_approval", {
+    target_observation_id: observationId,
+    clearing_admin_id: adminUserId,
+  });
+  if (error) throw error;
+  return json({
+    ok: true,
+    action: "clear_c2_review_approval",
+    observation: Array.isArray(data) ? data[0] : data,
+    review_evidence_preserved: true,
+    opportunity_mutated: false,
+    provenance_mutated: false,
+  });
 }
 
 async function canaryAssertions({ body, adminClient }: { body: Record<string, unknown>; adminClient: any }) {

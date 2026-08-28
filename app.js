@@ -752,7 +752,7 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
-  if (["v2-c2-approve-source", "v2-c2-revoke-source", "v2-c2-approve-observation", "v2-c2-promote", "v2-c2-assertions"].includes(name)) {
+  if (["v2-c2-approve-source", "v2-c2-revoke-source", "v2-c2-approve-observation", "v2-c2-promote", "v2-c2-assertions", "v2-c2-rollback", "v2-c2-clear-approval"].includes(name)) {
     event.preventDefault();
     if (!supabaseClient || !state.isAdmin || !isPhaseC1StagingRuntime(SUPABASE_URL)) return;
     const observationId = action.dataset.observationId || "";
@@ -776,6 +776,14 @@ document.addEventListener("click", async (event) => {
       } else if (name === "v2-c2-assertions") {
         result = await invokeAdminV2Action(supabaseClient, "canary_assertions", null, null, { opportunity_id: action.dataset.opportunityId });
         state.v2C2Assertions = { ...state.v2C2Assertions, [observationId]: result.assertions || null };
+      } else if (name === "v2-c2-rollback") {
+        if (!["A", "B"].includes(selectedCase.case_key)) return;
+        result = await invokeAdminV2Action(supabaseClient, "rollback_canary", null, null, { observation_id: observationId, reason: `Phase C2 Case ${selectedCase.case_key} staging cleanup` });
+        state.v2C2Results = { ...state.v2C2Results, [observationId]: result };
+      } else if (name === "v2-c2-clear-approval") {
+        if (selectedCase.case_key !== "C") return;
+        result = await invokeAdminV2Action(supabaseClient, "clear_c2_review_approval", null, null, { observation_id: observationId });
+        state.v2C2Results = { ...state.v2C2Results, [observationId]: result };
       }
       if (name !== "v2-c2-assertions") await loadV2IngestionForAdmin();
     } catch (error) {
