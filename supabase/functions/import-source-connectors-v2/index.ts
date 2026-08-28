@@ -34,6 +34,7 @@ const LEGACY_TABLE = "opportunities";
 const STAGING_PROJECT_REF = "ipixuxznqtrcdpzoxric";
 const REYKJAVIK_SOURCE_KEY = "reykjavik-utbod-v2";
 const PRODUCTION_CANARY_CONFIRMATION = "Enable canary controls only — no promotion will occur";
+const PRODUCTION_RELEASE_CONFIRMATION = "Enable release controls only — no release will occur";
 const STAGING_PHASE_C_SOURCES: ReadonlySet<string> = new Set([THREE_SOURCE_KEYS.REYKJAVIK, THREE_SOURCE_KEYS.RIKISKAUP]);
 const ALLOWED_SOURCES = new Set(["akranes-utbod-v2", "borgarbyggd-utbod-v2", "gardabaer-utbod-v2", "rikiskaup-utbod-v2", "vegagerdin-utbod-v2", "isafjordur-utbod-v2", "reykjavik-utbod-v2"]);
 
@@ -100,7 +101,7 @@ Deno.serve(async (req) => {
 
     const body = await safeJson(req);
     if (body.action === "phase_c_capabilities") return await phaseCCapabilities({ adminClient, isProduction });
-    const productionPhaseCAction = ["set_source_promotion_approval", "approve_promotion", "promote_canary", "rollback_canary", "canary_assertions", "approve_release", "release_canary", "disable_released_canary"].includes(String(body.action || ""));
+    const productionPhaseCAction = ["set_source_promotion_approval", "approve_promotion", "promote_canary", "rollback_canary", "canary_assertions", "set_reykjavik_release_enabled", "approve_release", "release_canary", "disable_released_canary"].includes(String(body.action || ""));
     const productionShadowAction = body.action === "run_shadow";
     const productionCanaryToggleAction = body.action === "set_reykjavik_production_canary_enabled";
     if (productionCanaryToggleAction && !isProduction) {
@@ -117,6 +118,10 @@ Deno.serve(async (req) => {
     if (body.action === "approve_promotion") return await approvePromotion({ body, adminClient, adminUserId: userData.user.id });
     if (body.action === "promote_canary") return await promoteCanary({ body, adminClient, adminUserId: userData.user.id });
     if (body.action === "rollback_canary") return await rollbackCanary({ body, adminClient, adminUserId: userData.user.id });
+    if (body.action === "set_reykjavik_release_enabled") {
+      if (!isProduction) return json({ error: "Release controls are production-only", code: "V2_RELEASE_ENVIRONMENT_REQUIRED" }, 403);
+      return await setReykjavikReleaseEnabled({ body, adminClient, adminUserId: userData.user.id });
+    }
     if (body.action === "approve_release") return await approveRelease({ body, adminClient, adminUserId: userData.user.id });
     if (body.action === "release_canary") return await releaseCanary({ body, adminClient, adminUserId: userData.user.id });
     if (body.action === "disable_released_canary") return await disableReleasedCanary({ body, adminClient, adminUserId: userData.user.id });
@@ -539,6 +544,26 @@ async function approveRelease({ body, adminClient, adminUserId }: { body: Record
   return json({ ok: true, action: "approve_release", release: data, automatic: false });
 }
 
+async function setReykjavikReleaseEnabled({ body, adminClient, adminUserId }: { body: Record<string, unknown>; adminClient: any; adminUserId: string }) {
+  const sourceKey = String(body.source_key || "").trim();
+  const observationId = requireSingleObservationId(body);
+  const opportunityId = String(body.opportunity_id || "").trim();
+  if (sourceKey !== REYKJAVIK_SOURCE_KEY) return json({ error: "Only the Reykjavík production canary may enable release controls", code: "V2_RELEASE_SOURCE_NOT_ALLOWED" }, 403);
+  if (!isUuid(opportunityId)) return json({ error: "Exactly one valid opportunity_id is required", code: "V2_SINGLE_OPPORTUNITY_REQUIRED" }, 400);
+  if (typeof body.enabled !== "boolean") return json({ error: "An explicit enabled boolean is required", code: "V2_RELEASE_ENABLE_VALUE_REQUIRED" }, 400);
+  if (body.enabled === true && String(body.confirmation || "") !== PRODUCTION_RELEASE_CONFIRMATION) {
+    return json({ error: "Exact release-control confirmation is required", code: "V2_RELEASE_ENABLE_CONFIRMATION_REQUIRED" }, 400);
+  }
+  const { data, error } = await adminClient.rpc("set_reykjavik_canary_release_enabled", {
+    target_observation_id: observationId,
+    target_opportunity_id: opportunityId,
+    enabled_value: body.enabled,
+    acting_admin_id: adminUserId,
+  });
+  if (error) throw error;
+  return json({ ok: true, action: "set_reykjavik_release_enabled", release_controls: data, release_executed: false, downstream_triggered: false });
+}
+
 async function releaseCanary({ body, adminClient, adminUserId }: { body: Record<string, unknown>; adminClient: any; adminUserId: string }) {
   const observationId = requireSingleObservationId(body);
   const reason = String(body.reason || "").trim();
@@ -610,7 +635,19 @@ async function rollbackCanary({ body, adminClient, adminUserId }: { body: Record
 async function canaryAssertions({ body, adminClient }: { body: Record<string, unknown>; adminClient: any }) {
   const opportunityId = String(body.opportunity_id || "").trim();
   if (!isUuid(opportunityId)) return json({ error: "Exactly one valid opportunity_id is required", code: "V2_SINGLE_OPPORTUNITY_REQUIRED" }, 400);
-  return json({ ok: true, action: "canary_assertions", opportunity_id: opportunityId, assertions: await loadCanaryAssertions(adminClient, opportunityId) });
+  const observationId = String(body.observation_id || "").trim();
+  let releasePreflight = null;
+  if (observationId) {
+    if (!isUuid(observationId)) return json({ error: "A valid observation_id is required", code: "V2_SINGLE_OBSERVATION_REQUIRED" }, 400);
+    const { data, error } = await adminClient.rpc("v2_reykjavik_release_preflight", {
+      target_observation_id: observationId,
+      target_opportunity_id: opportunityId,
+      require_release_enabled: true,
+    });
+    if (error) throw error;
+    releasePreflight = data;
+  }
+  return json({ ok: true, action: "canary_assertions", opportunity_id: opportunityId, assertions: await loadCanaryAssertions(adminClient, opportunityId), release_preflight: releasePreflight });
 }
 
 async function loadCanaryAssertions(adminClient: any, opportunityId: string) {

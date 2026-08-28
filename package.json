@@ -15,7 +15,9 @@
     "test:production-shadow-control": "node --test supabase/functions/tests/production-shadow-control.test.js",
     "test:production-shadow-control-db": "bash scripts/test-production-shadow-control-db.sh",
     "test:production-canary-enable-control": "node --test supabase/functions/tests/production-canary-enable-control.test.js",
-    "test:production-canary-enable-control-db": "bash scripts/test-production-canary-enable-control-db.sh"
+    "test:production-canary-enable-control-db": "bash scripts/test-production-canary-enable-control-db.sh",
+    "test:production-release-controls": "node --test supabase/functions/tests/production-release-controls.test.js",
+    "test:production-release-controls-db": "bash scripts/test-production-release-controls-db.sh"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",

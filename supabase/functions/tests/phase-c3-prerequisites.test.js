@@ -5,6 +5,7 @@ import { isPhaseC3ProductionRuntime } from "../../../src/services/adminV2Ingesti
 import { renderAdminV2IngestionPanel } from "../../../src/pages/adminV2Ingestion.js";
 
 const migrationUrl = new URL("../../migrations/20260828160000_phase_c3_production_prerequisites.sql", import.meta.url);
+const releaseMigrationUrl = new URL("../../migrations/20260828190000_reykjavik_canary_release_controls.sql", import.meta.url);
 const edgeUrl = new URL("../import-source-connectors-v2/index.ts", import.meta.url);
 const productionShadowGateUrl = new URL("../_shared/ingestion-v2/production-shadow.js", import.meta.url);
 
@@ -33,10 +34,11 @@ test("event log is append-only and rollout limits are transactional", async () =
 
 test("release stays held, triggers nothing, and post-release disable never deletes", async () => {
   const sql = await readFile(migrationUrl, "utf8");
-  const release = sql.slice(sql.indexOf("create function public.release_v2_canary"), sql.indexOf("create function public.disable_released_v2_canary"));
-  assert.match(release, /V2_RELEASE_FEATURE_DISABLED/);
-  assert.match(release, /V2_RELEASE_DEADLINE_TOO_CLOSE/);
-  assert.match(release, /V2_RELEASE_DETERMINISTIC_DUPLICATE_FOUND/);
+  const releaseSql = await readFile(releaseMigrationUrl, "utf8");
+  const release = releaseSql.slice(releaseSql.indexOf("create or replace function public.release_v2_canary"));
+  assert.match(releaseSql, /deadline_valid/);
+  assert.match(releaseSql, /deterministic_candidate_count/);
+  assert.match(releaseSql, /fuzzy_candidate_count/);
   assert.match(release, /phase_c_communication_hold=true/);
   assert.match(release, /'matching_triggered',false/);
   assert.doesNotMatch(release, /insert into public\.(opportunity_matches|ai_match_reviews|reports|report_items|company_opportunity_sends)/);

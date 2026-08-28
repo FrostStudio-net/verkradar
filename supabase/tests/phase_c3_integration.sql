@@ -86,6 +86,7 @@ rollback;
 begin;
 select public.c3_insert_candidate('00000000-0000-4000-8000-000000000051','00000000-0000-4000-8000-000000000052','c3-release','C3-R');
 select * from public.promote_v2_observation('00000000-0000-4000-8000-000000000051','00000000-0000-4000-8000-000000000031');
+select * from public.set_v2_source_production_approval('reykjavik-utbod-v2',false,'00000000-0000-4000-8000-000000000031','C3 release source neutralization');
 select public.approve_v2_canary_release('00000000-0000-4000-8000-000000000051','00000000-0000-4000-8000-000000000031','release integration approval');
 select public.release_v2_canary('00000000-0000-4000-8000-000000000051','00000000-0000-4000-8000-000000000031','release integration');
 select public.c3_assert((select status='open' and phase_c_communication_hold and raw_payload->>'promotion_quarantine' is null and raw_payload->>'admin_report_status'='released_held' from public.opportunities where external_id='c3-release'),'release opens only under communication hold');

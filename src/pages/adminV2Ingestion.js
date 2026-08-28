@@ -64,8 +64,14 @@ function renderPhaseC3Production(rows, escapeHtml, formatDateTime, selectedId, a
   const row = rows.find((item) => item.source_key === "reykjavik-utbod-v2");
   const control = row?.phaseC3Production;
   if (!row || !control) return "";
+  const candidates = control.candidates || [];
+  const selected = candidates.find((item) => item.observation.id === selectedId) || null;
+  const observation = selected?.observation;
+  const opportunity = selected?.opportunity;
+  const provenance = selected?.provenance;
   const canaryControlsEnabled = control.enabled === true && row.production_canary_enabled === true;
   const eitherCanaryFlagEnabled = control.enabled === true || row.production_canary_enabled === true;
+  const released = Boolean(opportunity?.phase_c_released_at);
   const busy = Boolean(activeAction);
   const setup = `
     <section class="phase-c-canary" aria-labelledby="phase-c3-enable-title">
@@ -73,30 +79,29 @@ function renderPhaseC3Production(rows, escapeHtml, formatDateTime, selectedId, a
       <dl>
         <dt>phase_c_production_enabled</dt><dd>${control.enabled ? "true" : "false"}</dd>
         <dt>Reykjavík production_canary_enabled</dt><dd>${row.production_canary_enabled ? "true" : "false"}</dd>
-        <dt>Release</dt><dd>${control.release_enabled || row.release_feature_enabled || row.release_approved ? "unexpectedly enabled" : "disabled"}</dd>
+        <dt>Release</dt><dd>${control.release_enabled && row.release_feature_enabled ? "enabled" : control.release_enabled || row.release_feature_enabled || row.release_approved ? "inconsistent — blocked" : "disabled"}</dd>
         <dt>Reykjavík mode</dt><dd>${escapeHtml(row.mode || "—")}</dd>
         <dt>Promotion approved</dt><dd>${row.promotion_approved ? "yes" : "no"}</dd>
       </dl>
       <div class="admin-inline-actions">
         ${!eitherCanaryFlagEnabled ? `<button data-action="v2-c3-enable-controls" ${busy ? "disabled" : ""}>Enable Reykjavík production canary</button>` : ""}
-        ${eitherCanaryFlagEnabled ? `<button data-action="v2-c3-disable-controls" ${busy ? "disabled" : ""}>Disable production canary</button>` : ""}
+        ${eitherCanaryFlagEnabled ? `<button data-action="v2-c3-disable-controls" ${opportunity || busy ? "disabled" : ""}>Disable production canary</button>` : ""}
       </div>
       ${activeAction === "v2-c3-enable-controls" || activeAction === "v2-c3-disable-controls" ? `<p class="admin-message">Updating canary control flags…</p>` : ""}
       ${result ? `<pre class="phase-c-canary-assertions">${escapeHtml(JSON.stringify(result, null, 2))}</pre>` : ""}
       <p><small>No approval, promotion, release, matching, AI, report, or send occurs when these controls are enabled.</small></p>
     </section>`;
   if (!canaryControlsEnabled) return setup;
-  const candidates = control.candidates || [];
-  const selected = candidates.find((item) => item.observation.id === selectedId) || null;
-  const observation = selected?.observation;
-  const opportunity = selected?.opportunity;
-  const provenance = selected?.provenance;
   const sourceApproved = row.mode === "promote" && row.promotion_approved === true;
   const held = opportunity?.phase_c_communication_hold === true || opportunity?.raw_payload?.phase_c_communication_hold === true;
   const quarantined = opportunity?.raw_payload?.promotion_quarantine === "phase_c_canary";
+  const releaseEnabled = control.release_enabled === true && row.release_feature_enabled === true;
+  const releaseApproved = row.release_approved === true && observation?.approved_for_release === true;
+  const releasePreflight = result?.release_preflight || result?.release?.preflight || null;
+  const assertions = result?.assertions || null;
   return `${setup}
     <section class="phase-c-canary" aria-labelledby="phase-c3-production-title">
-      <div class="card-header"><div><h3 id="phase-c3-production-title">Phase C3 production canary</h3><p>One source and one observation only. Promotion, release, and communication are separate.</p></div><span class="status-pill is-error">PRODUCTION — MANUAL</span></div>
+      <div class="card-header"><div><h3 id="phase-c3-production-title">Phase C3 production canary</h3><p>One source and one observation only. Promotion, release, and communication are separate.</p></div><span class="status-pill ${released ? "is-running" : "is-error"}">${released && held ? "RELEASED — COMMUNICATION HOLD ACTIVE" : "PRODUCTION — MANUAL"}</span></div>
       <label>Eligible Reykjavík observation
         <select data-action="v2-c3-select-observation" ${busy ? "disabled" : ""}>
           <option value="">Select exactly one observation</option>
@@ -113,18 +118,27 @@ function renderPhaseC3Production(rows, escapeHtml, formatDateTime, selectedId, a
         <dt>Opportunity</dt><dd>${opportunity ? `<code>${escapeHtml(opportunity.id)}</code> — ${escapeHtml(opportunity.status || "—")}` : "—"}</dd>
         <dt>Provenance</dt><dd>${escapeHtml(provenance?.provenance_type || "—")}</dd>
         <dt>Quarantine / communication hold</dt><dd>${quarantined ? "QUARANTINED" : "no"} / ${held ? "HELD" : "no"}</dd>
+        <dt>Release enabled / approved</dt><dd>${releaseEnabled ? "yes" : "no"} / ${releaseApproved ? "yes" : "no"}</dd>
+        <dt>Source health</dt><dd>${escapeHtml(`${row.health?.status || "—"} / ${row.health?.circuit_state || "—"}`)}</dd>
+        <dt>Duplicate / fuzzy revalidation</dt><dd>${releasePreflight ? escapeHtml(`${releasePreflight.deterministic_candidate_count ?? "—"} deterministic / ${releasePreflight.fuzzy_candidate_count ?? "—"} fuzzy`) : "Run safety assertions to revalidate"}</dd>
+        <dt>Downstream</dt><dd>${assertions ? escapeHtml(JSON.stringify(assertions)) : "Run safety assertions to verify"}</dd>
       </dl>
       <div class="admin-inline-actions">
-        <button data-action="v2-c3-approve-source" ${sourceApproved || busy ? "disabled" : ""}>Approve Reykjavík source</button>
+        ${!opportunity ? `<button data-action="v2-c3-approve-source" ${sourceApproved || busy ? "disabled" : ""}>Approve Reykjavík source</button>
         <button data-action="v2-c3-revoke-source" ${(!row.promotion_approved && row.mode !== "promote") || busy ? "disabled" : ""}>Revoke source</button>
         <button data-action="v2-c3-approve-observation" ${!observation || !sourceApproved || observation.approved_for_promotion || busy ? "disabled" : ""}>Approve observation</button>
-        <button data-action="v2-c3-promote" ${!observation || !sourceApproved || !observation.approved_for_promotion || opportunity || busy ? "disabled" : ""}>Promote once</button>
+        <button data-action="v2-c3-promote" ${!observation || !sourceApproved || !observation.approved_for_promotion || busy ? "disabled" : ""}>Promote once</button>` : ""}
         <button data-action="v2-c3-assertions" ${!opportunity || busy ? "disabled" : ""}>Run safety assertions</button>
-        <button data-action="v2-c3-rollback" ${!opportunity || !quarantined || busy ? "disabled" : ""}>Rollback before release</button>
+        ${!released && quarantined ? `<button data-action="v2-c3-rollback" ${busy ? "disabled" : ""}>Rollback before release</button>` : ""}
+        ${!released && quarantined && !releaseEnabled ? `<button data-action="v2-c3-enable-release" ${busy ? "disabled" : ""}>Enable canary release controls</button>` : ""}
+        ${!released && releaseEnabled ? `<button data-action="v2-c3-disable-release" ${busy ? "disabled" : ""}>Disable release controls</button>` : ""}
+        ${!released && releaseEnabled && !releaseApproved ? `<button data-action="v2-c3-approve-release" ${busy ? "disabled" : ""}>Approve canary release</button>` : ""}
+        ${!released && releaseApproved ? `<button data-action="v2-c3-release" ${busy ? "disabled" : ""}>Release with communication hold</button>` : ""}
+        ${released ? `<button data-action="v2-c3-disable" ${busy ? "disabled" : ""}>Post-release disable</button>` : ""}
       </div>
       ${activeAction ? `<p class="admin-message">Running ${escapeHtml(activeAction)}…</p>` : ""}
       ${result ? `<pre class="phase-c-canary-assertions">${escapeHtml(JSON.stringify(result, null, 2))}</pre>` : ""}
-      <p><small>Release remains unavailable. No matching, AI, report, send, bulk, automatic release, or communication-hold-clear control exists here.</small></p>
+      <p><small>No matching, AI, report, send, bulk, automatic release, or communication-hold-clear control exists here.</small></p>
     </section>`;
 }
 

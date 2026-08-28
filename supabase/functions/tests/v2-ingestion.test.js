@@ -776,7 +776,9 @@ test("admin v2 panel exposes safe shadow/staging actions and separately gated Ph
   assert.match(panel, /phaseC3ProductionControlsEnabled/);
   assert.match(panel, /v2-c3-enable-controls/);
   assert.match(panel, /v2-c3-disable-controls/);
-  assert.doesNotMatch(panel, /v2-c3-approve-release|v2-c3-release/);
+  assert.match(panel, /v2-c3-enable-release/);
+  assert.match(panel, /v2-c3-approve-release/);
+  assert.match(panel, /v2-c3-release/);
   assert.doesNotMatch(panel, /data-action="[^"]*(match|ai|report|send|clear-hold)/i);
 });
 

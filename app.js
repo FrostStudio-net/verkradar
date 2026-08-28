@@ -847,7 +847,7 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
-  if (["v2-c3-approve-source", "v2-c3-revoke-source", "v2-c3-approve-observation", "v2-c3-promote", "v2-c3-assertions", "v2-c3-rollback", "v2-c3-approve-release", "v2-c3-release", "v2-c3-disable"].includes(name)) {
+  if (["v2-c3-approve-source", "v2-c3-revoke-source", "v2-c3-approve-observation", "v2-c3-promote", "v2-c3-assertions", "v2-c3-rollback", "v2-c3-enable-release", "v2-c3-disable-release", "v2-c3-approve-release", "v2-c3-release", "v2-c3-disable"].includes(name)) {
     event.preventDefault();
     const productionRow = (state.v2IngestionRows || []).find((row) => row.source_key === "reykjavik-utbod-v2");
     const enabled = state.isAdmin && isPhaseC3ProductionRuntime(SUPABASE_URL) && productionRow?.phaseC3Production?.enabled === true && productionRow?.production_canary_enabled === true;
@@ -869,9 +869,20 @@ document.addEventListener("click", async (event) => {
       } else if (name === "v2-c3-promote") {
         state.v2C3Result = await invokeAdminV2Action(supabaseClient, "promote_canary", null, null, { observation_id: observationId });
       } else if (name === "v2-c3-assertions") {
-        state.v2C3Result = await invokeAdminV2Action(supabaseClient, "canary_assertions", null, null, { opportunity_id: selected.opportunity.id });
+        state.v2C3Result = await invokeAdminV2Action(supabaseClient, "canary_assertions", null, null, { observation_id: observationId, opportunity_id: selected.opportunity.id });
       } else if (name === "v2-c3-rollback") {
         state.v2C3Result = await invokeAdminV2Action(supabaseClient, "rollback_canary", null, null, { observation_id: observationId, reason });
+      } else if (name === "v2-c3-enable-release" || name === "v2-c3-disable-release") {
+        const enableRelease = name === "v2-c3-enable-release";
+        const confirmation = "Enable release controls only — no release will occur";
+        if (enableRelease && !window.confirm(confirmation)) return;
+        if (!enableRelease && !window.confirm("Disable release controls and clear release approval?")) return;
+        state.v2C3Result = await invokeAdminV2Action(supabaseClient, "set_reykjavik_release_enabled", "reykjavik-utbod-v2", null, {
+          observation_id: observationId,
+          opportunity_id: selected.opportunity.id,
+          enabled: enableRelease,
+          ...(enableRelease ? { confirmation } : {}),
+        });
       } else if (name === "v2-c3-approve-release") {
         state.v2C3Result = await invokeAdminV2Action(supabaseClient, "approve_release", null, null, { observation_id: observationId, reason });
       } else if (name === "v2-c3-release") {
