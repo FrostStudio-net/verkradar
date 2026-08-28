@@ -64,10 +64,9 @@ import {
   loadAdminContactRequests,
   loadAdminV2IngestionOverview,
   invokeAdminV2Action,
-  verifyPhaseC1PromotionIdempotency,
+  getPhaseC2Case,
+  PHASE_C2_CASES,
   isPhaseC1StagingRuntime,
-  PHASE_C1_CANARY_OBSERVATION_ID,
-  PHASE_C1_REYKJAVIK_SOURCE_KEY,
   loadAdminTrialRequests,
   logClientCompanyProfileChange,
   mergeAiReviewsIntoReportMatches,
@@ -272,9 +271,9 @@ let state = {
   v2IngestionLoading: false,
   v2IngestionLoaded: false,
   v2IngestionError: null,
-  v2CanaryAction: "",
-  v2CanaryAssertions: null,
-  v2CanaryIdempotency: null,
+  v2C2Action: "",
+  v2C2Results: {},
+  v2C2Assertions: {},
   expandedSourceId: null,
   adminCompanies: [],
   adminCompaniesLoading: false,
@@ -580,9 +579,9 @@ function clearLocalProfileState() {
   state.v2IngestionLoading = false;
   state.v2IngestionLoaded = false;
   state.v2IngestionError = null;
-  state.v2CanaryAction = "";
-  state.v2CanaryAssertions = null;
-  state.v2CanaryIdempotency = null;
+  state.v2C2Action = "";
+  state.v2C2Results = {};
+  state.v2C2Assertions = {};
   state.adminCompanies = [];
   state.adminCompaniesLoading = false;
   state.adminCompaniesLoaded = false;
@@ -606,9 +605,9 @@ function clearAdminAccessState() {
   state.sourceCoverageLoaded = false;
   state.v2IngestionRows = [];
   state.v2IngestionLoaded = false;
-  state.v2CanaryAction = "";
-  state.v2CanaryAssertions = null;
-  state.v2CanaryIdempotency = null;
+  state.v2C2Action = "";
+  state.v2C2Results = {};
+  state.v2C2Assertions = {};
   state.adminCompanies = [];
   state.adminCompaniesLoaded = false;
   state.adminReviewMatches = [];
@@ -753,39 +752,41 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
-  if (["v2-c1-approve-source", "v2-c1-revoke-source", "v2-c1-approve-observation", "v2-c1-promote", "v2-c1-test-idempotency", "v2-c1-assertions", "v2-c1-rollback"].includes(name)) {
+  if (["v2-c2-approve-source", "v2-c2-revoke-source", "v2-c2-approve-observation", "v2-c2-promote", "v2-c2-assertions"].includes(name)) {
     event.preventDefault();
     if (!supabaseClient || !state.isAdmin || !isPhaseC1StagingRuntime(SUPABASE_URL)) return;
+    const observationId = action.dataset.observationId || "";
+    const selectedCase = observationId ? getPhaseC2Case(observationId) : null;
+    const sourceKey = action.dataset.sourceKey || selectedCase?.source_key || "";
+    if (observationId && !selectedCase) return;
+    if (sourceKey && !PHASE_C2_CASES.some((item) => item.source_key === sourceKey)) return;
     action.disabled = true;
-    state.v2CanaryAction = name;
+    state.v2C2Action = `${name}${selectedCase ? ` — Case ${selectedCase.case_key}` : ""}`;
     state.v2IngestionError = null;
-    if (name === "v2-c1-test-idempotency") state.v2CanaryIdempotency = null;
     render();
     try {
       let result;
-      if (name === "v2-c1-approve-source" || name === "v2-c1-revoke-source") {
-        result = await invokeAdminV2Action(supabaseClient, "set_source_promotion_approval", PHASE_C1_REYKJAVIK_SOURCE_KEY, null, { approved: name === "v2-c1-approve-source" });
-      } else if (name === "v2-c1-approve-observation") {
-        result = await invokeAdminV2Action(supabaseClient, "approve_promotion", null, null, { observation_id: PHASE_C1_CANARY_OBSERVATION_ID, note: "Phase C1 Reykjavík staging canary" });
-      } else if (name === "v2-c1-promote") {
-        result = await invokeAdminV2Action(supabaseClient, "promote_canary", null, null, { observation_id: PHASE_C1_CANARY_OBSERVATION_ID });
-      } else if (name === "v2-c1-test-idempotency") {
-        const expectedOpportunityId = action.dataset.opportunityId;
-        result = await invokeAdminV2Action(supabaseClient, "promote_canary", null, null, { observation_id: PHASE_C1_CANARY_OBSERVATION_ID });
-        state.v2CanaryIdempotency = await verifyPhaseC1PromotionIdempotency(supabaseClient, result, expectedOpportunityId);
-      } else if (name === "v2-c1-assertions") {
+      if (name === "v2-c2-approve-source" || name === "v2-c2-revoke-source") {
+        result = await invokeAdminV2Action(supabaseClient, "set_source_promotion_approval", sourceKey, null, { approved: name === "v2-c2-approve-source" });
+      } else if (name === "v2-c2-approve-observation") {
+        result = await invokeAdminV2Action(supabaseClient, "approve_promotion", null, null, { observation_id: observationId, note: `Phase C2 Case ${selectedCase.case_key} staging batch` });
+      } else if (name === "v2-c2-promote") {
+        result = await invokeAdminV2Action(supabaseClient, "promote_canary", null, null, { observation_id: observationId });
+        state.v2C2Results = { ...state.v2C2Results, [observationId]: result };
+      } else if (name === "v2-c2-assertions") {
         result = await invokeAdminV2Action(supabaseClient, "canary_assertions", null, null, { opportunity_id: action.dataset.opportunityId });
-        state.v2CanaryAssertions = result.assertions || null;
-      } else {
-        result = await invokeAdminV2Action(supabaseClient, "rollback_canary", null, null, { observation_id: PHASE_C1_CANARY_OBSERVATION_ID, reason: "Phase C1 staging canary rollback" });
-        state.v2CanaryAssertions = result.rollback?.assertions || null;
+        state.v2C2Assertions = { ...state.v2C2Assertions, [observationId]: result.assertions || null };
       }
-      if (!["v2-c1-assertions", "v2-c1-test-idempotency"].includes(name)) await loadV2IngestionForAdmin();
+      if (name !== "v2-c2-assertions") await loadV2IngestionForAdmin();
     } catch (error) {
       console.error(error);
+      if (name === "v2-c2-promote" && selectedCase && error.actionResult) {
+        state.v2C2Results = { ...state.v2C2Results, [observationId]: { ...error.actionResult, ok: false } };
+        await loadV2IngestionForAdmin();
+      }
       state.v2IngestionError = formatSupabaseError(error);
     } finally {
-      state.v2CanaryAction = "";
+      state.v2C2Action = "";
       render();
     }
     return;
@@ -9688,10 +9689,10 @@ function renderAdminActiveTab(opportunities) {
         escapeHtml,
         formatDateTime,
         controlsEnabled: isPhaseC1StagingRuntime(SUPABASE_URL),
-        canaryControlsEnabled: state.isAdmin && isPhaseC1StagingRuntime(SUPABASE_URL),
-        canaryAction: state.v2CanaryAction || "",
-        canaryAssertions: state.v2CanaryAssertions || null,
-        canaryIdempotency: state.v2CanaryIdempotency || null
+        phaseC2ControlsEnabled: state.isAdmin && isPhaseC1StagingRuntime(SUPABASE_URL),
+        phaseC2Action: state.v2C2Action || "",
+        phaseC2Results: state.v2C2Results || {},
+        phaseC2Assertions: state.v2C2Assertions || {}
       })}
       ${renderLatestImportRunsTable()}
       ${renderLatestTedOpportunities()}

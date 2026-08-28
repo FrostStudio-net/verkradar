@@ -433,8 +433,9 @@ async function approvePromotion({ body, adminClient, adminUserId }: { body: Reco
 
 async function setSourcePromotionApproval({ body, adminClient }: { body: Record<string, unknown>; adminClient: any }) {
   const sourceKey = String(body.source_key || "").trim();
-  if (sourceKey !== THREE_SOURCE_KEYS.REYKJAVIK) {
-    return json({ error: "Phase C1 source approval is limited to Reykjavík", code: "V2_C1_SOURCE_NOT_ALLOWED" }, 403);
+  const allowedSources = new Set([THREE_SOURCE_KEYS.REYKJAVIK, THREE_SOURCE_KEYS.RIKISKAUP]);
+  if (!allowedSources.has(sourceKey)) {
+    return json({ error: "Phase C manual promotion is limited to the prepared Reykjavík and Ríkiskaup sources", code: "V2_C_SOURCE_NOT_ALLOWED" }, 403);
   }
   if (typeof body.approved !== "boolean") {
     return json({ error: "An explicit approved boolean is required", code: "V2_SOURCE_APPROVAL_VALUE_REQUIRED" }, 400);
@@ -448,7 +449,7 @@ async function setSourcePromotionApproval({ body, adminClient }: { body: Record<
     return json({ ok: true, action: "set_source_promotion_approval", source_key: sourceKey, mode: config.mode, promotion_approved: false, idempotent: true });
   }
   if (approved && !["shadow", "promote"].includes(config.mode)) {
-    return json({ error: "Reykjavík must already be in shadow mode", code: "V2_C1_SHADOW_MODE_REQUIRED" }, 409);
+    return json({ error: "The selected source must already be in shadow mode", code: "V2_C_SHADOW_MODE_REQUIRED" }, 409);
   }
   const { data: updated, error: updateError } = await adminClient.from("v2_source_configs")
     .update({ promotion_approved: approved, mode: approved ? "promote" : "shadow", updated_at: new Date().toISOString() })
@@ -465,7 +466,7 @@ async function promoteCanary({ body, adminClient }: { body: Record<string, unkno
   if (error) throw error;
   const result = Array.isArray(data) ? data[0] : data;
   if (result?.promotion_status !== "promoted") {
-    return json({ ok: false, action: "promote_canary", canary: true, quarantined: false, ...result }, 409);
+    return json({ ok: false, action: "promote_canary", canary: true, quarantined: false, error: "Promotion blocked by the atomic eligibility or identity gate", code: result?.block_code || "V2_PROMOTION_BLOCKED", opportunity_created: false, provenance_created: false, ...result }, 409);
   }
   const assertions = result.opportunity_id
     ? await loadCanaryAssertions(adminClient, String(result.opportunity_id))

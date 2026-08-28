@@ -2,6 +2,15 @@ export const PHASE_C1_STAGING_PROJECT_REF = "ipixuxznqtrcdpzoxric";
 export const PHASE_C1_PRODUCTION_PROJECT_REF = "asojxjbsgqbfpbepojzh";
 export const PHASE_C1_REYKJAVIK_SOURCE_KEY = "reykjavik-utbod-v2";
 export const PHASE_C1_CANARY_OBSERVATION_ID = "a5ded8dc-a745-4297-9dc7-e2783b374630";
+export const PHASE_C2_CASES = Object.freeze([
+  { case_key: "A", source_key: "reykjavik-utbod-v2", observation_id: "729459ca-3408-4004-a158-7b75f6c6c32f", expected: "new_quarantined_opportunity" },
+  { case_key: "B", source_key: "rikiskaup-utbod-v2", observation_id: "d5a8f0eb-f55e-4b8c-b2c3-146a2eea0df1", expected: "existing_opportunity_reuse", expected_opportunity_id: "a416b17a-4249-41f7-9b14-51063ca9689e" },
+  { case_key: "C", source_key: "reykjavik-utbod-v2", observation_id: "9c6b7648-1685-4d9b-953e-6afdcba208a7", expected: "fuzzy_only_block" },
+]);
+
+export function getPhaseC2Case(observationId) {
+  return PHASE_C2_CASES.find((item) => item.observation_id === observationId) || null;
+}
 
 export function isPhaseC1StagingRuntime(supabaseUrl) {
   try {
@@ -15,7 +24,8 @@ export function isPhaseC1StagingRuntime(supabaseUrl) {
 
 export async function loadAdminV2IngestionOverview(supabase) {
   if (!supabase) throw new Error("Supabase client is not configured");
-  const [configsResult, runsResult, observationsResult, comparisonsResult, canaryObservationResult, canaryProvenanceResult] = await Promise.all([
+  const caseIds = PHASE_C2_CASES.map((item) => item.observation_id);
+  const [configsResult, runsResult, observationsResult, comparisonsResult, caseObservationsResult, caseProvenanceResult] = await Promise.all([
     supabase.from("v2_source_configs").select(`
       id, source_id, source_key, display_name, adapter_type, mode, parser_name, parser_version,
       promotion_approved, promotion_reference_required, updated_at,
@@ -36,40 +46,40 @@ export async function loadAdminV2IngestionOverview(supabase) {
       .order("compared_at", { ascending: false }).limit(1000),
     supabase.from("v2_ingestion_observations")
       .select("id, source_config_id, source_id, source_key, external_id, procurement_reference, title, buyer, deadline, canonical_url, validation_state, comparison_state, promotion_state, promoted_opportunity_id, predicted_procurement_stage, predicted_actionable, predicted_confidence, predicted_requires_admin_review, strong_procurement_evidence, deadline_evidence, promotion_enrichment_status, approved_for_promotion, approved_at, approved_by, rolled_back_at, rollback_reason")
-      .eq("id", PHASE_C1_CANARY_OBSERVATION_ID).limit(1),
+      .in("id", caseIds),
     supabase.from("opportunity_ingestion_provenance")
       .select("id, observation_id, opportunity_id, provenance_type, identity_match_type, metadata, attached_at")
-      .eq("observation_id", PHASE_C1_CANARY_OBSERVATION_ID).limit(1),
+      .in("observation_id", caseIds),
   ]);
-  for (const result of [configsResult, runsResult, observationsResult, comparisonsResult, canaryObservationResult, canaryProvenanceResult]) {
+  for (const result of [configsResult, runsResult, observationsResult, comparisonsResult, caseObservationsResult, caseProvenanceResult]) {
     if (result.error) throw result.error;
   }
 
-  const canaryObservation = canaryObservationResult.data?.[0] || null;
-  const canaryProvenance = canaryProvenanceResult.data?.[0] || null;
-  const canaryOpportunityId = canaryObservation?.promoted_opportunity_id || canaryProvenance?.opportunity_id || null;
-  let canaryOpportunity = null;
-  if (canaryOpportunityId) {
+  const observationsById = new Map((caseObservationsResult.data || []).map((row) => [row.id, row]));
+  const provenanceByObservation = new Map((caseProvenanceResult.data || []).map((row) => [row.observation_id, row]));
+  const opportunityIds = [...new Set(PHASE_C2_CASES.map((item) => observationsById.get(item.observation_id)?.promoted_opportunity_id || provenanceByObservation.get(item.observation_id)?.opportunity_id).filter(Boolean))];
+  const opportunitiesById = new Map();
+  if (opportunityIds.length) {
     const opportunityResult = await supabase.from("opportunities")
       .select("id, source_id, external_id, title, buyer, deadline, url, status, raw_payload, procurement_stage, actionable_for_suppliers, classification_confidence, classification_reason, classified_by, classifier_version, requires_admin_review")
-      .eq("id", canaryOpportunityId).limit(1);
+      .in("id", opportunityIds);
     if (opportunityResult.error) throw opportunityResult.error;
-    canaryOpportunity = opportunityResult.data?.[0] || null;
+    for (const opportunity of opportunityResult.data || []) opportunitiesById.set(opportunity.id, opportunity);
   }
+
+  const cases = PHASE_C2_CASES.map((definition) => {
+    const observation = observationsById.get(definition.observation_id) || null;
+    const provenance = provenanceByObservation.get(definition.observation_id) || null;
+    const opportunityId = observation?.promoted_opportunity_id || provenance?.opportunity_id || null;
+    return { ...definition, observation, provenance, opportunity: opportunitiesById.get(opportunityId) || null };
+  });
 
   return buildAdminV2OverviewRows({
     configs: configsResult.data || [],
     runs: runsResult.data || [],
     observations: observationsResult.data || [],
     comparisons: comparisonsResult.data || [],
-  }).map((row) => row.source_key === PHASE_C1_REYKJAVIK_SOURCE_KEY ? {
-    ...row,
-    phaseCCanary: {
-      observation: canaryObservation,
-      provenance: canaryProvenance,
-      opportunity: canaryOpportunity,
-    },
-  } : row);
+  }).map((row) => ({ ...row, phaseC2Cases: cases.filter((item) => item.source_key === row.source_key) }));
 }
 
 export function buildAdminV2OverviewRows({ configs = [], runs = [], observations = [], comparisons = [] }) {
@@ -121,11 +131,18 @@ export async function invokeAdminV2Action(supabase, action, source_key = null, m
   if (error) {
     let detail = error.message || "Edge Function request failed";
     const response = error.context;
+    let errorBody = null;
     if (response?.status) detail = `HTTP ${response.status}: ${detail}`;
-    try { const errorBody = await response?.clone?.().json(); if (errorBody?.error) detail += ` (${errorBody.code || "V2_ERROR"}: ${errorBody.error})`; } catch { /* non-JSON response */ }
-    throw new Error(`${action}${source_key ? ` [${source_key}]` : ""}: ${detail}`);
+    try { errorBody = await response?.clone?.().json(); if (errorBody?.error) detail += ` (${errorBody.code || "V2_ERROR"}: ${errorBody.error})`; } catch { /* non-JSON response */ }
+    const wrapped = new Error(`${action}${source_key ? ` [${source_key}]` : ""}: ${detail}`);
+    wrapped.actionResult = errorBody;
+    throw wrapped;
   }
-  if (!data?.ok) throw new Error(`${data?.code || "V2_ERROR"}: ${data?.error || "V2 action failed"}`);
+  if (!data?.ok) {
+    const wrapped = new Error(`${data?.code || "V2_ERROR"}: ${data?.error || "V2 action failed"}`);
+    wrapped.actionResult = data;
+    throw wrapped;
+  }
   return data;
 }
 

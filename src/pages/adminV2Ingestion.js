@@ -1,6 +1,6 @@
-export function renderAdminV2IngestionPanel({ rows = [], loading = false, error = "", escapeHtml, formatDateTime, controlsEnabled = false, canaryControlsEnabled = false, canaryAction = "", canaryAssertions = null, canaryIdempotency = null }) {
+export function renderAdminV2IngestionPanel({ rows = [], loading = false, error = "", escapeHtml, formatDateTime, controlsEnabled = false, phaseC2ControlsEnabled = false, phaseC2Action = "", phaseC2Results = {}, phaseC2Assertions = {} }) {
   const canMutate = controlsEnabled === true;
-  const reykjavik = rows.find((row) => row.source_key === "reykjavik-utbod-v2") || null;
+  const cases = rows.flatMap((row) => (row.phaseC2Cases || []).map((item) => ({ ...item, source: row }))).sort((left, right) => left.case_key.localeCompare(right.case_key));
   return `
     <section class="ops-card v2-ingestion-panel">
       <div class="card-header">
@@ -31,9 +31,92 @@ export function renderAdminV2IngestionPanel({ rows = [], loading = false, error 
           </table>
         </div>
       ` : error ? "" : `<div class="empty-card">No v2 sources configured. Apply the Phase A migration to create the isolated control plane.</div>`}
-      ${canaryControlsEnabled && reykjavik ? renderPhaseCCanary(reykjavik, escapeHtml, formatDateTime, canaryAction, canaryAssertions, canaryIdempotency) : ""}
+      ${phaseC2ControlsEnabled && cases.length ? renderPhaseC2(cases, escapeHtml, formatDateTime, phaseC2Action, phaseC2Results, phaseC2Assertions) : ""}
     </section>
   `;
+}
+
+function renderPhaseC2(cases, escapeHtml, formatDateTime, activeAction, results, assertions) {
+  return `
+    <section class="phase-c-canary" aria-labelledby="phase-c2-title">
+      <div class="card-header">
+        <div>
+          <h3 id="phase-c2-title">Phase C2 — staging only</h3>
+          <p>Exactly three prepared manual cases. No bulk, release, matching, AI, report, or send controls.</p>
+        </div>
+        <span class="status-pill is-running">STAGING ONLY</span>
+      </div>
+      <div class="phase-c-canary-grid">
+        ${cases.map((item) => renderPhaseC2Case(item, escapeHtml, formatDateTime, activeAction, results[item.observation_id], assertions[item.observation_id])).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderPhaseC2Case(item, escapeHtml, formatDateTime, activeAction, result, assertions) {
+  const row = item.source;
+  const observation = item.observation;
+  const provenance = item.provenance;
+  const opportunity = item.opportunity;
+  const sourceApproved = row.promotion_approved === true && row.mode === "promote";
+  const busy = Boolean(activeAction);
+  const eligibility = getKnownCanaryEligibility(row, observation);
+  const observationApproved = observation?.approved_for_promotion === true && observation?.promotion_state === "eligible";
+  const canPromote = sourceApproved && observationApproved && eligibility.ready && !opportunity && !observation?.promoted_opportunity_id;
+  const payload = opportunity?.raw_payload || {};
+  const unchanged = provenance?.metadata?.opportunity_mutated === false
+    || result?.reasons?.some?.((reason) => reason?.opportunity_mutated === false) === true;
+  const blockedReason = result?.block_code || result?.code || result?.error || "";
+  return `
+    <article class="phase-c-canary-result" data-case-card="${escapeHtml(item.case_key)}">
+      <div class="card-header">
+        <div><h4>CASE ${escapeHtml(item.case_key)}</h4><small>${escapeHtml(expectedLabel(item.expected))}</small></div>
+        <span class="status-pill ${opportunity ? "is-running" : ""}">${escapeHtml(observation?.promotion_state || "not found")}</span>
+      </div>
+      <dl>
+        <dt>Source</dt><dd>${escapeHtml(row.display_name || row.source_key)}</dd>
+        <dt>Observation ID</dt><dd><code>${escapeHtml(item.observation_id)}</code></dd>
+        <dt>Reference</dt><dd>${escapeHtml(observation?.procurement_reference || "—")}</dd>
+        <dt>Title</dt><dd>${escapeHtml(observation?.title || "—")}</dd>
+        <dt>Deadline</dt><dd>${escapeHtml(observation?.deadline || "—")}</dd>
+        <dt>Predicted stage</dt><dd>${escapeHtml(observation?.predicted_procurement_stage || "—")}</dd>
+        <dt>Confidence</dt><dd>${escapeHtml(formatConfidence(observation?.predicted_confidence))}</dd>
+        <dt>Comparison state</dt><dd>${escapeHtml(observation?.comparison_state || "—")}</dd>
+        <dt>Promotion state</dt><dd>${escapeHtml(observation?.promotion_state || "—")}</dd>
+        <dt>Approved</dt><dd>${observation?.approved_for_promotion ? `yes — ${escapeHtml(formatDateTime(observation.approved_at || ""))}` : "no"}</dd>
+        <dt>Promoted opportunity</dt><dd>${observation?.promoted_opportunity_id ? `<code>${escapeHtml(observation.promoted_opportunity_id)}</code>` : "—"}</dd>
+        <dt>Source promotion approved</dt><dd>${row.promotion_approved === true ? "yes" : "no"}</dd>
+      </dl>
+      <div class="admin-inline-actions">
+        <button type="button" data-action="v2-c2-approve-source" data-source-key="${escapeHtml(row.source_key)}" ${sourceApproved || busy ? "disabled" : ""}>Approve source for manual promotion</button>
+        <button type="button" data-action="v2-c2-revoke-source" data-source-key="${escapeHtml(row.source_key)}" ${(!row.promotion_approved && row.mode !== "promote") || busy ? "disabled" : ""}>Revoke source approval</button>
+        <button type="button" data-action="v2-c2-approve-observation" data-observation-id="${escapeHtml(item.observation_id)}" ${!sourceApproved || observation?.approved_for_promotion || busy || Boolean(opportunity) ? "disabled" : ""}>Approve observation</button>
+        <button type="button" data-action="v2-c2-promote" data-observation-id="${escapeHtml(item.observation_id)}" ${!canPromote || busy ? "disabled" : ""}>Promote once</button>
+        ${opportunity ? `<button type="button" data-action="v2-c2-assertions" data-observation-id="${escapeHtml(item.observation_id)}" data-opportunity-id="${escapeHtml(opportunity.id)}" ${busy ? "disabled" : ""}>Run downstream safety assertions</button>` : ""}
+      </div>
+      ${!eligibility.ready && !opportunity ? `<p class="admin-message is-error">Promotion unavailable: ${escapeHtml(eligibility.reasons.join("; "))}</p>` : ""}
+      ${result ? `
+        <div class="admin-message ${result.ok === false ? "is-error" : ""}" role="status">
+          <strong>${result.ok === false ? "PROMOTION BLOCKED" : "PROMOTION RESULT"}</strong>
+          <dl>
+            <dt>Returned opportunity ID</dt><dd>${result.opportunity_id ? `<code>${escapeHtml(result.opportunity_id)}</code>` : "—"}</dd>
+            <dt>Provenance type</dt><dd>${escapeHtml(provenance?.provenance_type || "—")}</dd>
+            ${item.case_key === "B" ? `<dt>Existing opportunity unchanged</dt><dd>${unchanged ? "yes" : "not yet verified"}</dd>` : ""}
+            ${item.case_key === "C" ? `<dt>Blocked reason</dt><dd>${escapeHtml(blockedReason || "—")}</dd><dt>Opportunity created</dt><dd>${result.created === true || result.opportunity_created === true ? "yes" : "no"}</dd><dt>Provenance created</dt><dd>${result.provenance_attached === true || result.provenance_created === true ? "yes" : "no"}</dd>` : ""}
+          </dl>
+          ${result.ok === false ? `<pre class="phase-c-canary-assertions">${escapeHtml(JSON.stringify(result, null, 2))}</pre>` : ""}
+        </div>
+      ` : ""}
+      ${assertions ? `<pre class="phase-c-canary-assertions">${escapeHtml(JSON.stringify(assertions, null, 2))}</pre>` : ""}
+      ${activeAction ? `<p class="admin-message">Running ${escapeHtml(activeAction)}…</p>` : ""}
+    </article>
+  `;
+}
+
+function expectedLabel(expected) {
+  if (expected === "new_quarantined_opportunity") return "Expected: new quarantined opportunity";
+  if (expected === "existing_opportunity_reuse") return "Expected: reuse existing opportunity + provenance only";
+  return "Expected: fuzzy-only promotion block";
 }
 
 function renderPhaseCCanary(row, escapeHtml, formatDateTime, canaryAction, assertions, idempotency) {
@@ -149,7 +232,7 @@ export function getKnownCanaryEligibility(row, observation, today = new Date()) 
   const run = row?.latestShadowRun || {};
   if (!observation) return { ready: false, reasons: ["observation missing"] };
   if (observation.validation_state !== "valid") reasons.push("observation invalid");
-  if (observation.predicted_procurement_stage !== "open_competition") reasons.push("stage is not open_competition");
+  if (!["open_competition", "upcoming_procurement", "market_consultation"].includes(observation.predicted_procurement_stage)) reasons.push("stage is not promotion-eligible");
   if (observation.predicted_actionable !== true) reasons.push("not actionable");
   if (Number(observation.predicted_confidence || 0) < 0.90) reasons.push("confidence below 0.90");
   if (observation.predicted_requires_admin_review !== false) reasons.push("admin review required");
@@ -186,7 +269,7 @@ function renderRow(row, escapeHtml, formatDateTime, canMutate = false) {
     <tr>
       <td><strong>${escapeHtml(row.display_name || row.source_key || "Unknown")}</strong><br><small>${escapeHtml(`${row.parser_name || "parser"}@${row.parser_version || "?"}`)}</small></td>
       <td><span class="status-pill ${row.mode === "promote" ? "is-error" : "is-running"}">${escapeHtml(row.mode || "disabled")}</span></td>
-      <td>${shadowControlsAvailable ? `<button type="button" data-action="v2-enable-shadow" data-source-key="${escapeHtml(row.source_key || "")}" ${row.mode === "shadow" ? "disabled" : ""}>Enable shadow</button><button type="button" data-action="v2-disable-shadow" data-source-key="${escapeHtml(row.source_key || "")}" ${row.mode !== "shadow" ? "disabled" : ""}>Disable shadow</button><button type="button" data-action="v2-run-shadow" data-source-key="${escapeHtml(row.source_key || "")}" ${row.mode !== "shadow" ? "disabled" : ""}>Run shadow now</button>` : canMutate ? `<small>Use Phase C canary controls below</small>` : `<small>Diagnostics only (non-staging)</small>`}</td>
+      <td>${shadowControlsAvailable ? `<button type="button" data-action="v2-enable-shadow" data-source-key="${escapeHtml(row.source_key || "")}" ${row.mode === "shadow" ? "disabled" : ""}>Enable shadow</button><button type="button" data-action="v2-disable-shadow" data-source-key="${escapeHtml(row.source_key || "")}" ${row.mode !== "shadow" ? "disabled" : ""}>Disable shadow</button><button type="button" data-action="v2-run-shadow" data-source-key="${escapeHtml(row.source_key || "")}" ${row.mode !== "shadow" ? "disabled" : ""}>Run shadow now</button>` : canMutate ? `<small>Use Phase C2 controls below</small>` : `<small>Diagnostics only (non-staging)</small>`}</td>
       <td>${escapeHtml(formatDateTime(run.finished_at || run.started_at || run.created_at || health.last_run_at || ""))}</td>
       <td>${escapeHtml(run.status || health.status || "not run")}${run.suspicious_zero_items ? `<br><small>Zero-item anomaly</small>` : ""}</td>
       <td>${Number(row.observationCount || 0)} <small>(${Number(row.validObservationCount || 0)} valid)</small></td>

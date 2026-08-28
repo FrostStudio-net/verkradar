@@ -759,7 +759,7 @@ test("fixture and shadow implementation has no direct opportunities write path",
   assert.match(source, /Phase A permits fixture\/replay input only/);
 });
 
-test("admin v2 panel exposes only safe shadow actions", async () => {
+test("admin v2 panel exposes only safe shadow and staging Phase C2 actions", async () => {
   const service = await readFile(new URL("../../../src/services/adminV2Ingestion.js", import.meta.url), "utf8");
   const panel = await readFile(new URL("../../../src/pages/adminV2Ingestion.js", import.meta.url), "utf8");
   assert.doesNotMatch(service, /\.(insert|update|upsert|delete|rpc)\s*\(/);
@@ -768,7 +768,12 @@ test("admin v2 panel exposes only safe shadow actions", async () => {
   assert.match(panel, /v2-run-shadow/);
   assert.doesNotMatch(panel, /v2-promote|data-action="promote"/);
   assert.match(panel, /fixture\/shadow health/i);
-  assert.match(panel, /canaryControlsEnabled/);
+  assert.match(panel, /phaseC2ControlsEnabled/);
+  assert.match(panel, /v2-c2-approve-source/);
+  assert.match(panel, /v2-c2-approve-observation/);
+  assert.match(panel, /v2-c2-promote/);
+  assert.match(panel, /v2-c2-assertions/);
+  assert.doesNotMatch(panel, /data-action="[^"]*(release|match|ai|report|send)/i);
 });
 
 test("admin v2 panel render path resolves control gating without free variables", () => {
