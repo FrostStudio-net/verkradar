@@ -1,4 +1,4 @@
-export function renderAdminV2IngestionPanel({ rows = [], loading = false, error = "", escapeHtml, formatDateTime, controlsEnabled = false, phaseC2ControlsEnabled = false, phaseC2Action = "", phaseC2Results = {}, phaseC2Assertions = {}, phaseC3ProductionControlsEnabled = false, phaseC3SelectedObservationId = "", phaseC3Action = "", phaseC3Result = null }) {
+export function renderAdminV2IngestionPanel({ rows = [], loading = false, error = "", escapeHtml, formatDateTime, controlsEnabled = false, phaseC2ControlsEnabled = false, phaseC2Action = "", phaseC2Results = {}, phaseC2Assertions = {}, productionShadowControlsEnabled = false, productionShadowAction = "", productionShadowResult = null, phaseC3ProductionControlsEnabled = false, phaseC3SelectedObservationId = "", phaseC3Action = "", phaseC3Result = null }) {
   const canMutate = controlsEnabled === true;
   const cases = rows.flatMap((row) => (row.phaseC2Cases || []).map((item) => ({ ...item, source: row }))).sort((left, right) => left.case_key.localeCompare(right.case_key));
   return `
@@ -31,10 +31,33 @@ export function renderAdminV2IngestionPanel({ rows = [], loading = false, error 
           </table>
         </div>
       ` : error ? "" : `<div class="empty-card">No v2 sources configured. Apply the Phase A migration to create the isolated control plane.</div>`}
+      ${productionShadowControlsEnabled ? renderProductionShadowControl(rows, escapeHtml, productionShadowAction, productionShadowResult) : ""}
       ${phaseC2ControlsEnabled && cases.length ? renderPhaseC2(cases, escapeHtml, formatDateTime, phaseC2Action, phaseC2Results, phaseC2Assertions) : ""}
       ${phaseC3ProductionControlsEnabled ? renderPhaseC3Production(rows, escapeHtml, formatDateTime, phaseC3SelectedObservationId, phaseC3Action, phaseC3Result) : ""}
     </section>
   `;
+}
+
+function renderProductionShadowControl(rows, escapeHtml, activeAction, result) {
+  const row = rows.find((item) => item.source_key === "reykjavik-utbod-v2");
+  if (!row || row.production_shadow_enabled !== true || row.mode !== "shadow" || row.promotion_approved === true) return "";
+  const busy = Boolean(activeAction);
+  return `
+    <section class="phase-c-canary" aria-labelledby="production-shadow-title">
+      <div class="card-header">
+        <div><h3 id="production-shadow-title">Production V2 shadow — Reykjavík only</h3><p>Runs one manual shadow ingestion. It cannot promote, match, report, or send.</p></div>
+        <span class="status-pill is-running">PRODUCTION SHADOW</span>
+      </div>
+      <dl>
+        <dt>Source</dt><dd>${escapeHtml(row.display_name || row.source_key)}</dd>
+        <dt>Mode</dt><dd>${escapeHtml(row.mode)}</dd>
+        <dt>Promotion approved</dt><dd>no</dd>
+      </dl>
+      <button data-action="v2-production-run-shadow" data-source-key="reykjavik-utbod-v2" ${busy ? "disabled" : ""}>Run shadow once</button>
+      ${busy ? `<p class="admin-message">Running one Reykjavík shadow ingestion…</p>` : ""}
+      ${result ? `<pre class="phase-c-canary-assertions">${escapeHtml(JSON.stringify(result, null, 2))}</pre>` : ""}
+      <p><small>No automatic retry, schedule, bulk action, promotion, release, matching, AI, report, or send control is available here.</small></p>
+    </section>`;
 }
 
 function renderPhaseC3Production(rows, escapeHtml, formatDateTime, selectedId, activeAction, result) {

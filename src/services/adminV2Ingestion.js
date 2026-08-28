@@ -36,7 +36,7 @@ export async function loadAdminV2IngestionOverview(supabase) {
   const [configsResult, runsResult, observationsResult, comparisonsResult, caseObservationsResult, caseProvenanceResult, productionCandidatesResult, phaseCFlagResult] = await Promise.all([
     supabase.from("v2_source_configs").select(`
       id, source_id, source_key, display_name, adapter_type, mode, parser_name, parser_version,
-      promotion_approved, promotion_reference_required, production_canary_enabled, release_feature_enabled, release_approved, updated_at,
+      promotion_approved, promotion_reference_required, production_shadow_enabled, production_canary_enabled, release_feature_enabled, release_approved, updated_at,
       v2_source_health (
         status, circuit_state, consecutive_failures, consecutive_zero_item_runs,
         last_run_at, last_success_at, last_fixture_at, last_shadow_at,

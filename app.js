@@ -278,6 +278,8 @@ let state = {
   v2C3SelectedObservationId: "",
   v2C3Action: "",
   v2C3Result: null,
+  v2ProductionShadowAction: "",
+  v2ProductionShadowResult: null,
   expandedSourceId: null,
   adminCompanies: [],
   adminCompaniesLoading: false,
@@ -589,6 +591,8 @@ function clearLocalProfileState() {
   state.v2C3SelectedObservationId = "";
   state.v2C3Action = "";
   state.v2C3Result = null;
+  state.v2ProductionShadowAction = "";
+  state.v2ProductionShadowResult = null;
   state.adminCompanies = [];
   state.adminCompaniesLoading = false;
   state.adminCompaniesLoaded = false;
@@ -618,6 +622,8 @@ function clearAdminAccessState() {
   state.v2C3SelectedObservationId = "";
   state.v2C3Action = "";
   state.v2C3Result = null;
+  state.v2ProductionShadowAction = "";
+  state.v2ProductionShadowResult = null;
   state.adminCompanies = [];
   state.adminCompaniesLoaded = false;
   state.adminReviewMatches = [];
@@ -748,6 +754,36 @@ document.addEventListener("click", async (event) => {
 
   const name = action.dataset.action;
   const id = action.dataset.id;
+
+  if (name === "v2-production-run-shadow") {
+    event.preventDefault();
+    const sourceKey = action.dataset.sourceKey || "";
+    const source = (state.v2IngestionRows || []).find((row) => row.source_key === sourceKey);
+    const allowed = state.isAdmin
+      && isPhaseC3ProductionRuntime(SUPABASE_URL)
+      && sourceKey === "reykjavik-utbod-v2"
+      && source?.production_shadow_enabled === true
+      && source?.mode === "shadow"
+      && source?.promotion_approved !== true;
+    if (!supabaseClient || !allowed) return;
+    action.disabled = true;
+    state.v2ProductionShadowAction = "run_shadow";
+    state.v2ProductionShadowResult = null;
+    state.v2IngestionError = null;
+    render();
+    try {
+      state.v2ProductionShadowResult = await invokeAdminV2Action(supabaseClient, "run_shadow", sourceKey);
+      await loadV2IngestionForAdmin();
+    } catch (error) {
+      console.error(error);
+      state.v2IngestionError = formatSupabaseError(error);
+      state.v2ProductionShadowResult = error.actionResult || { ok: false, error: formatSupabaseError(error) };
+    } finally {
+      state.v2ProductionShadowAction = "";
+      render();
+    }
+    return;
+  }
 
   if (name === "v2-enable-shadow" || name === "v2-disable-shadow" || name === "v2-run-shadow") {
     event.preventDefault();
@@ -9762,6 +9798,9 @@ function renderAdminActiveTab(opportunities) {
         phaseC2Action: state.v2C2Action || "",
         phaseC2Results: state.v2C2Results || {},
         phaseC2Assertions: state.v2C2Assertions || {},
+        productionShadowControlsEnabled: state.isAdmin && isPhaseC3ProductionRuntime(SUPABASE_URL),
+        productionShadowAction: state.v2ProductionShadowAction || "",
+        productionShadowResult: state.v2ProductionShadowResult || null,
         phaseC3ProductionControlsEnabled: state.isAdmin && isPhaseC3ProductionRuntime(SUPABASE_URL),
         phaseC3SelectedObservationId: state.v2C3SelectedObservationId || "",
         phaseC3Action: state.v2C3Action || "",

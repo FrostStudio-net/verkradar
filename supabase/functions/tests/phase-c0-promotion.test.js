@@ -4,6 +4,7 @@ import { test } from "node:test";
 
 const migrationUrl = new URL("../../migrations/20260827230000_phase_c0_promotion_safety.sql", import.meta.url);
 const functionUrl = new URL("../import-source-connectors-v2/index.ts", import.meta.url);
+const productionShadowGateUrl = new URL("../_shared/ingestion-v2/production-shadow.js", import.meta.url);
 const stageUrl = new URL("../_shared/procurement-stage.js", import.meta.url);
 const connectorUrl = new URL("../import-source-connectors/index.ts", import.meta.url);
 const tedUrl = new URL("../import-ted/index.ts", import.meta.url);
@@ -107,8 +108,10 @@ test("downstream assertions cover every current opportunity-linked customer tabl
 
 test("admin surface is staging-only, authenticated, single-observation, and has no bulk/release path", async () => {
   const source = await readFile(functionUrl, "utf8");
+  const productionShadowGate = await readFile(productionShadowGateUrl, "utf8");
   assert.match(source, /STAGING_PROJECT_REF = "ipixuxznqtrcdpzoxric"/);
-  assert.match(source, /PRODUCTION_PROJECT_REF = "asojxjbsgqbfpbepojzh"/);
+  assert.match(source, /PRODUCTION_PROJECT_REF/);
+  assert.match(productionShadowGate, /PRODUCTION_PROJECT_REF = "asojxjbsgqbfpbepojzh"/);
   assert.match(source, /admin_users/);
   for (const action of ["approve_promotion", "promote_canary", "rollback_canary", "canary_assertions"]) assert.match(source, new RegExp(action));
   assert.match(source, /Exactly one valid observation_id is required/);

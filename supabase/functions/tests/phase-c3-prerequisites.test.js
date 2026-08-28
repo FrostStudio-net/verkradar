@@ -6,6 +6,7 @@ import { renderAdminV2IngestionPanel } from "../../../src/pages/adminV2Ingestion
 
 const migrationUrl = new URL("../../migrations/20260828160000_phase_c3_production_prerequisites.sql", import.meta.url);
 const edgeUrl = new URL("../import-source-connectors-v2/index.ts", import.meta.url);
+const productionShadowGateUrl = new URL("../_shared/ingestion-v2/production-shadow.js", import.meta.url);
 
 test("quarantine immutability and downstream guards are database enforced", async () => {
   const sql = await readFile(migrationUrl, "utf8");
@@ -46,7 +47,9 @@ test("release stays held, triggers nothing, and post-release disable never delet
 
 test("production action surface is exact-project, admin authenticated, flagged, and single-item", async () => {
   const source = await readFile(edgeUrl, "utf8");
-  assert.match(source, /PRODUCTION_PROJECT_REF = "asojxjbsgqbfpbepojzh"/);
+  const productionShadowGate = await readFile(productionShadowGateUrl, "utf8");
+  assert.match(source, /PRODUCTION_PROJECT_REF/);
+  assert.match(productionShadowGate, /PRODUCTION_PROJECT_REF = "asojxjbsgqbfpbepojzh"/);
   assert.match(source, /admin_users/);
   assert.match(source, /phase_c_production_enabled/);
   assert.match(source, /Exactly one valid observation_id is required/);

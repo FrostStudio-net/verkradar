@@ -5,6 +5,7 @@ import { assertCircuitAllowsRun, detectZeroItemAnomaly, nextCircuitState } from 
 import { assertRunDeadline, createRunLease, heartbeatLease } from "../_shared/ingestion-v2/run-control.js";
 import { fetchWithRetry } from "../_shared/ingestion-v2/fetching.js";
 import { compareObservationToLegacy } from "../_shared/ingestion-v2/comparison.js";
+import { assertProductionShadowAllowed, isExactSupabaseProject, PRODUCTION_PROJECT_REF } from "../_shared/ingestion-v2/production-shadow.js";
 import { classifyProcurementStage, classificationColumns } from "../_shared/procurement-stage.js";
 import { extractAkranesDetailMetadata } from "../_shared/ingestion-v2/adapters/akranes-enrichment.js";
 import { extractRikiskaupDetailMetadata } from "../_shared/ingestion-v2/adapters/rikiskaup-enrichment.js";
@@ -31,8 +32,7 @@ const corsHeaders = {
 };
 const LEGACY_TABLE = "opportunities";
 const STAGING_PROJECT_REF = "ipixuxznqtrcdpzoxric";
-const PRODUCTION_PROJECT_REF = "asojxjbsgqbfpbepojzh";
-const STAGING_PHASE_C_SOURCES = new Set([THREE_SOURCE_KEYS.REYKJAVIK, THREE_SOURCE_KEYS.RIKISKAUP]);
+const STAGING_PHASE_C_SOURCES: ReadonlySet<string> = new Set([THREE_SOURCE_KEYS.REYKJAVIK, THREE_SOURCE_KEYS.RIKISKAUP]);
 const ALLOWED_SOURCES = new Set(["akranes-utbod-v2", "borgarbyggd-utbod-v2", "gardabaer-utbod-v2", "rikiskaup-utbod-v2", "vegagerdin-utbod-v2", "isafjordur-utbod-v2", "reykjavik-utbod-v2"]);
 
 const PHASE_A_FIXTURES: Record<string, { sourceKey: string; file: URL; contentType: string }> = {
@@ -75,8 +75,8 @@ Deno.serve(async (req) => {
   let runId = "";
   try {
     const supabaseUrl = requiredEnv("SUPABASE_URL");
-    const isStaging = supabaseUrl.includes(STAGING_PROJECT_REF);
-    const isProduction = supabaseUrl.includes(PRODUCTION_PROJECT_REF);
+    const isStaging = isExactSupabaseProject(supabaseUrl, STAGING_PROJECT_REF);
+    const isProduction = isExactSupabaseProject(supabaseUrl, PRODUCTION_PROJECT_REF);
     if (!isStaging && !isProduction) return json({ error: "Unknown Supabase project", code: "V2_ENVIRONMENT_BLOCKED" }, 409);
     const anonKey = requiredEnv("SUPABASE_ANON_KEY");
     const serviceRoleKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
@@ -99,10 +99,11 @@ Deno.serve(async (req) => {
     const body = await safeJson(req);
     if (body.action === "phase_c_capabilities") return await phaseCCapabilities({ adminClient, isProduction });
     const productionPhaseCAction = ["set_source_promotion_approval", "approve_promotion", "promote_canary", "rollback_canary", "canary_assertions", "approve_release", "release_canary", "disable_released_canary"].includes(String(body.action || ""));
+    const productionShadowAction = body.action === "run_shadow";
     if (isProduction && productionPhaseCAction && !(await isPhaseCProductionEnabled(adminClient))) {
       return json({ error: "Phase C production canary feature is disabled", code: "V2_PRODUCTION_FEATURE_DISABLED" }, 409);
     }
-    if (isProduction && !productionPhaseCAction) {
+    if (isProduction && !productionPhaseCAction && !productionShadowAction) {
       return json({ error: "This action is not available in production", code: "V2_PRODUCTION_ACTION_BLOCKED" }, 403);
     }
     if (body.action === "set_source_promotion_approval") return await setSourcePromotionApproval({ body, adminClient, adminUserId: userData.user.id });
@@ -120,6 +121,10 @@ Deno.serve(async (req) => {
       if (!ALLOWED_SOURCES.has(requestedSource)) return json({ error: "Source is not allowlisted", code: "V2_SOURCE_NOT_ALLOWED", action: "run_shadow", source_key: requestedSource }, 403);
       const { data: shadowConfig, error: shadowError } = await adminClient.from("v2_source_configs").select("*").eq("source_key", requestedSource).single();
       if (shadowError) throw shadowError;
+      if (isProduction) {
+        const releaseEnabled = await isPhaseCReleaseEnabled(adminClient);
+        assertProductionShadowAllowed({ isProduction, sourceKey: requestedSource, config: shadowConfig, releaseEnabled });
+      }
       if (shadowConfig.mode !== "shadow") return json({ error: "Source must be in shadow mode", code: "V2_SHADOW_MODE_REQUIRED", action: "run_shadow", source_key: requestedSource }, 409);
       return await runShadow({ body, config: shadowConfig, adminClient });
     }
@@ -319,9 +324,29 @@ async function runShadow({ body: _body, config, adminClient }: { body: Record<st
   }
   const started = Date.now();
   const now = new Date();
+  await closeExpiredShadowRuns(adminClient, config.id, now);
+  const { data: activeRuns, error: activeRunError } = await adminClient
+    .from("v2_ingestion_runs")
+    .select("id,status,lease_expires_at")
+    .eq("source_config_id", config.id)
+    .in("status", ["queued", "running"])
+    .limit(1);
+  if (activeRunError) throw activeRunError;
+  if (activeRuns?.length) {
+    const error = new Error("A shadow run is already active for this source");
+    (error as any).code = "V2_RUN_ALREADY_ACTIVE";
+    throw error;
+  }
   const lease = createRunLease({ now, leaseMs: 30000, deadlineMs: Number(config.run_deadline_ms || 30000) });
   const { data: run, error: runError } = await adminClient.from("v2_ingestion_runs").insert({ source_config_id: config.id, mode: "shadow", trigger_type: "shadow", status: "running", attempt_count: 1, started_at: now.toISOString(), ...lease, details: { phase: "B", live_requests_allowed: true, customer_visible_writes: 0, promotion_allowed: false } }).select("id").single();
-  if (runError) throw runError;
+  if (runError) {
+    if (runError.code === "23505") {
+      const error = new Error("A shadow run is already active for this source");
+      (error as any).code = "V2_RUN_ALREADY_ACTIVE";
+      throw error;
+    }
+    throw runError;
+  }
   const headers = { "user-agent": "VerkRadar/2 shadow ingestion (+https://verkradar.is)" };
   let fetched: any;
   try {
@@ -501,6 +526,31 @@ async function isPhaseCProductionEnabled(adminClient: any) {
   const { data, error } = await adminClient.from("automation_settings").select("value").eq("key", "phase_c_production_enabled").maybeSingle();
   if (error) throw error;
   return data?.value === true || data?.value === "true";
+}
+
+async function isPhaseCReleaseEnabled(adminClient: any) {
+  const { data, error } = await adminClient.from("automation_settings").select("value").eq("key", "phase_c_release_enabled").maybeSingle();
+  if (error) throw error;
+  return data?.value === true || data?.value === "true";
+}
+
+async function closeExpiredShadowRuns(adminClient: any, sourceConfigId: string, now: Date) {
+  const timestamp = now.toISOString();
+  const { error } = await adminClient
+    .from("v2_ingestion_runs")
+    .update({
+      status: "timed_out",
+      error_count: 1,
+      error_code: "V2_LEASE_EXPIRED",
+      error_message: "Run lease expired before completion.",
+      finished_at: timestamp,
+      lease_expires_at: timestamp,
+      updated_at: timestamp,
+    })
+    .eq("source_config_id", sourceConfigId)
+    .in("status", ["queued", "running"])
+    .lt("lease_expires_at", timestamp);
+  if (error) throw error;
 }
 
 async function phaseCCapabilities({ adminClient, isProduction }: { adminClient: any; isProduction: boolean }) {
