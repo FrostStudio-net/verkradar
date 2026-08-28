@@ -32,6 +32,8 @@ const corsHeaders = {
 const LEGACY_TABLE = "opportunities";
 const STAGING_PROJECT_REF = "ipixuxznqtrcdpzoxric";
 const PRODUCTION_PROJECT_REF = "asojxjbsgqbfpbepojzh";
+const PHASE_C2_CASE_B_OBSERVATION_ID = "d5a8f0eb-f55e-4b8c-b2c3-146a2eea0df1";
+const PHASE_C2_CASE_B_OPPORTUNITY_ID = "a416b17a-4249-41f7-9b14-51063ca9689e";
 const ALLOWED_SOURCES = new Set(["akranes-utbod-v2", "borgarbyggd-utbod-v2", "gardabaer-utbod-v2", "rikiskaup-utbod-v2", "vegagerdin-utbod-v2", "isafjordur-utbod-v2", "reykjavik-utbod-v2"]);
 
 const PHASE_A_FIXTURES: Record<string, { sourceKey: string; file: URL; contentType: string }> = {
@@ -101,6 +103,7 @@ Deno.serve(async (req) => {
     if (body.action === "promote_canary") return await promoteCanary({ body, adminClient });
     if (body.action === "rollback_canary") return await rollbackCanary({ body, adminClient, adminUserId: userData.user.id });
     if (body.action === "canary_assertions") return await canaryAssertions({ body, adminClient });
+    if (body.action === "compare_c2_candidate") return await compareC2Candidate({ body, adminClient, adminUserId: userData.user.id });
     if (body.action === "set_mode") return await setShadowMode({ body, adminClient });
     if (body.action === "diagnostics") return await diagnostics({ adminClient });
     if (body.action === "run_shadow") {
@@ -487,6 +490,23 @@ async function canaryAssertions({ body, adminClient }: { body: Record<string, un
   const opportunityId = String(body.opportunity_id || "").trim();
   if (!isUuid(opportunityId)) return json({ error: "Exactly one valid opportunity_id is required", code: "V2_SINGLE_OPPORTUNITY_REQUIRED" }, 400);
   return json({ ok: true, action: "canary_assertions", opportunity_id: opportunityId, assertions: await loadCanaryAssertions(adminClient, opportunityId) });
+}
+
+async function compareC2Candidate({ body, adminClient, adminUserId }: { body: Record<string, unknown>; adminClient: any; adminUserId: string }) {
+  const observationId = requireSingleObservationId(body);
+  if (observationId !== PHASE_C2_CASE_B_OBSERVATION_ID) {
+    return json({ error: "Phase C2 comparison is limited to the selected Case B observation", code: "V2_C2_COMPARISON_NOT_ALLOWED" }, 403);
+  }
+  const { data, error } = await adminClient.rpc("compare_v2_observation_deterministically", {
+    target_observation_id: observationId,
+    comparing_admin_id: adminUserId,
+  });
+  if (error) throw error;
+  const result = Array.isArray(data) ? data[0] : data;
+  if (result?.opportunity_id !== PHASE_C2_CASE_B_OPPORTUNITY_ID || result?.comparison_state !== "legacy_match") {
+    return json({ ok: false, action: "compare_c2_candidate", code: "V2_C2_UNEXPECTED_COMPARISON_RESULT", comparison: result }, 409);
+  }
+  return json({ ok: true, action: "compare_c2_candidate", comparison: result, promotion_executed: false, opportunity_mutated: false });
 }
 
 async function loadCanaryAssertions(adminClient: any, opportunityId: string) {
