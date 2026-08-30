@@ -36,6 +36,7 @@ const LEGACY_TABLE = "opportunities";
 const STAGING_PROJECT_REF = "ipixuxznqtrcdpzoxric";
 const REYKJAVIK_SOURCE_KEY = "reykjavik-utbod-v2";
 const GARDABAER_SOURCE_KEY = "gardabaer-utbod-v2";
+const BORGARBYGGD_SOURCE_KEY = "borgarbyggd-utbod-v2";
 const REYKJAVIK_HOLD_CLEAR_OBSERVATION_ID = "32713ed0-089d-45a0-97f9-24fabdbf08dd";
 const REYKJAVIK_HOLD_CLEAR_OPPORTUNITY_ID = "1c4b107b-999c-47df-82a7-d87b43b20185";
 const PRODUCTION_CANARY_CONFIRMATION = "Enable canary controls only — no promotion will occur";
@@ -92,6 +93,7 @@ Deno.serve(async (req) => {
     const preAuthBody = await safeJson(req.clone());
     const routineAutomation = preAuthBody.action === "run_reykjavik_production";
     const gardabaerRoutineAutomation = preAuthBody.action === "run_gardabaer_production";
+    const borgarbyggdRoutineAutomation = preAuthBody.action === "run_borgarbyggd_production";
     const routineAutomationAuthorized = routineAutomation
       && isProduction
       && String(preAuthBody.source_key || "") === REYKJAVIK_SOURCE_KEY
@@ -102,6 +104,11 @@ Deno.serve(async (req) => {
       && String(preAuthBody.source_key || "") === GARDABAER_SOURCE_KEY
       && Boolean(requiredEnv("AUTOMATION_SECRET"))
       && req.headers.get("x-automation-secret") === requiredEnv("AUTOMATION_SECRET");
+    const borgarbyggdRoutineAutomationAuthorized = borgarbyggdRoutineAutomation
+      && isProduction
+      && String(preAuthBody.source_key || "") === BORGARBYGGD_SOURCE_KEY
+      && Boolean(requiredEnv("AUTOMATION_SECRET"))
+      && req.headers.get("x-automation-secret") === requiredEnv("AUTOMATION_SECRET");
     const authHeader = req.headers.get("authorization") || "";
     const userClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
@@ -109,7 +116,7 @@ Deno.serve(async (req) => {
     });
     const adminClient = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
     let adminUserId = "";
-    if (!routineAutomationAuthorized && !gardabaerRoutineAutomationAuthorized) {
+    if (!routineAutomationAuthorized && !gardabaerRoutineAutomationAuthorized && !borgarbyggdRoutineAutomationAuthorized) {
       const { data: userData, error: userError } = await userClient.auth.getUser();
       if (userError || !userData.user) return json({ error: "Unauthorized" }, 401);
       const { data: adminRow, error: adminError } = await adminClient
@@ -127,14 +134,18 @@ Deno.serve(async (req) => {
     if (gardabaerRoutineAutomation && !gardabaerRoutineAutomationAuthorized) {
       return json({ error: "Garðabær routine automation authentication failed", code: "V2_ROUTINE_AUTOMATION_UNAUTHORIZED" }, 401);
     }
+    if (borgarbyggdRoutineAutomation && !borgarbyggdRoutineAutomationAuthorized) {
+      return json({ error: "Borgarbyggð routine automation authentication failed", code: "V2_ROUTINE_AUTOMATION_UNAUTHORIZED" }, 401);
+    }
     const body = await safeJson(req);
     if (routineAutomationAuthorized) return await runReykjavikRoutineProduction({ body, adminClient });
     if (gardabaerRoutineAutomationAuthorized) return await runGardabaerRoutineProduction({ body, adminClient });
+    if (borgarbyggdRoutineAutomationAuthorized) return await runBorgarbyggdRoutineProduction({ body, adminClient });
     if (body.action === "phase_c_capabilities") return await phaseCCapabilities({ adminClient, isProduction });
     const productionPhaseCAction = ["set_source_promotion_approval", "approve_promotion", "promote_canary", "rollback_canary", "canary_assertions", "set_reykjavik_release_enabled", "approve_release", "release_canary", "clear_communication_hold", "disable_released_canary"].includes(String(body.action || ""));
     const productionShadowAction = body.action === "run_shadow";
     const productionCanaryToggleAction = body.action === "set_reykjavik_production_canary_enabled";
-    const productionRoutineToggleAction = ["set_reykjavik_routine_production", "set_gardabaer_routine_production"].includes(String(body.action || ""));
+    const productionRoutineToggleAction = ["set_reykjavik_routine_production", "set_gardabaer_routine_production", "set_borgarbyggd_routine_production"].includes(String(body.action || ""));
     if (productionCanaryToggleAction && !isProduction) {
       return json({ error: "This action is available only in the production project", code: "V2_PRODUCTION_CANARY_ENVIRONMENT_REQUIRED" }, 403);
     }
@@ -147,6 +158,7 @@ Deno.serve(async (req) => {
     if (productionCanaryToggleAction) return await setReykjavikProductionCanaryEnabled({ body, adminClient, adminUserId });
     if (body.action === "set_reykjavik_routine_production") return await setReykjavikRoutineProduction({ body, adminClient, adminUserId, isProduction });
     if (body.action === "set_gardabaer_routine_production") return await setGardabaerRoutineProduction({ body, adminClient, adminUserId, isProduction });
+    if (body.action === "set_borgarbyggd_routine_production") return await setBorgarbyggdRoutineProduction({ body, adminClient, adminUserId, isProduction });
     if (body.action === "set_source_promotion_approval") return await setSourcePromotionApproval({ body, adminClient, adminUserId });
     if (body.action === "approve_promotion") return await approvePromotion({ body, adminClient, adminUserId });
     if (body.action === "promote_canary") return await promoteCanary({ body, adminClient, adminUserId });
@@ -545,8 +557,10 @@ async function runShadow({ body, config, adminClient }: { body: Record<string, u
     const finished = new Date().toISOString();
     const qualityBlockers: string[] = [];
     if (config.source_key === THREE_SOURCE_KEYS.BORGARBYGGD) {
+      const procurementRows = candidates.filter((candidate: any) => candidate?.safe_source_payload?.shadow_enrichment?.request_for_bids === true);
       if (!pagination || pagination.reported_total_pages === null || pagination.fetched_pages !== pagination.reported_total_pages || pagination.unique_items !== candidates.length) qualityBlockers.push("pagination_incomplete");
       if (recoveryMetrics.buyers !== candidates.length) qualityBlockers.push("buyer_recovery_incomplete");
+      if (procurementRows.length > 0 && recoveryMetrics.deadlines === 0) qualityBlockers.push("deadline_recovery_suspicious_zero");
       if (classificationMetrics.expired_or_completed_actionable !== 0) qualityBlockers.push("expired_or_completed_actionable");
       if (classificationMetrics.actionable > recoveryMetrics.deadlines || classificationMetrics.actionable > classificationMetrics.strong_evidence) qualityBlockers.push("actionable_metadata_incomplete");
       if (comparisonMetrics.errors !== 0 || comparisonMetrics.baseline_unavailable !== 0) qualityBlockers.push("comparison_incomplete");
@@ -612,6 +626,27 @@ async function runGardabaerRoutineProduction({ body, adminClient }: { body: Reco
   return json({ ...runResult, action: "run_gardabaer_production", routine_admission: admission, customer_visible_writes: 0, matching_triggered: false, downstream_triggered: false });
 }
 
+async function runBorgarbyggdRoutineProduction({ body, adminClient }: { body: Record<string, unknown>; adminClient: any }) {
+  if (String(body.source_key || "") !== BORGARBYGGD_SOURCE_KEY) {
+    return json({ error: "Only Borgarbyggð routine production is allowed by this action", code: "V2_ROUTINE_SOURCE_NOT_ALLOWED" }, 403);
+  }
+  const { data: config, error: configError } = await adminClient.from("v2_source_configs").select("*").eq("source_key", BORGARBYGGD_SOURCE_KEY).single();
+  if (configError) throw configError;
+  if (config.routine_production_enabled !== true || config.mode !== "shadow" || config.promotion_approved === true
+      || config.production_canary_enabled === true || config.release_feature_enabled === true || config.release_approved === true) {
+    return json({ error: "Borgarbyggð routine production is disabled or the source state is unsafe", code: "V2_ROUTINE_SOURCE_DISABLED" }, 409);
+  }
+  const runResponse = await runShadow({ body: { ...body, trigger_type: "automation" }, config, adminClient });
+  const runResult = await runResponse.clone().json();
+  if (!runResponse.ok || runResult?.status !== "succeeded" || !runResult?.run_id) return runResponse;
+  const { data: admission, error: admissionError } = await adminClient.rpc("admit_borgarbyggd_v2_run", {
+    target_run_id: runResult.run_id,
+    runtime_project_ref: PRODUCTION_PROJECT_REF,
+  });
+  if (admissionError) throw admissionError;
+  return json({ ...runResult, action: "run_borgarbyggd_production", routine_admission: admission, customer_visible_writes: 0, matching_triggered: false, downstream_triggered: false });
+}
+
 async function setReykjavikRoutineProduction({ body, adminClient, adminUserId, isProduction }: { body: Record<string, unknown>; adminClient: any; adminUserId: string; isProduction: boolean }) {
   if (!isProduction || String(body.source_key || "") !== REYKJAVIK_SOURCE_KEY) {
     return json({ error: "Reykjavík routine controls are production-only", code: "V2_ROUTINE_ENVIRONMENT_BLOCKED" }, 403);
@@ -642,6 +677,22 @@ async function setGardabaerRoutineProduction({ body, adminClient, adminUserId, i
   });
   if (error) throw error;
   return json({ ok: true, action: "set_gardabaer_routine_production", source: data, automatic_approval: false, downstream_triggered: false });
+}
+
+async function setBorgarbyggdRoutineProduction({ body, adminClient, adminUserId, isProduction }: { body: Record<string, unknown>; adminClient: any; adminUserId: string; isProduction: boolean }) {
+  if (!isProduction || String(body.source_key || "") !== BORGARBYGGD_SOURCE_KEY) {
+    return json({ error: "Borgarbyggð routine controls are production-only", code: "V2_ROUTINE_ENVIRONMENT_BLOCKED" }, 403);
+  }
+  if (typeof body.enabled !== "boolean") return json({ error: "An explicit enabled boolean is required", code: "V2_ROUTINE_VALUE_REQUIRED" }, 400);
+  const reason = String(body.reason || "").trim();
+  if (!reason) return json({ error: "An audit reason is required", code: "V2_ROUTINE_REASON_REQUIRED" }, 400);
+  const { data, error } = await adminClient.rpc("set_borgarbyggd_routine_production", {
+    enabled_value: body.enabled,
+    acting_admin_id: adminUserId,
+    reason_text: reason,
+  });
+  if (error) throw error;
+  return json({ ok: true, action: "set_borgarbyggd_routine_production", source: data, automatic_approval: false, downstream_triggered: false });
 }
 
 async function approvePromotion({ body, adminClient, adminUserId }: { body: Record<string, unknown>; adminClient: any; adminUserId: string }) {

@@ -768,6 +768,7 @@ document.addEventListener("click", async (event) => {
     const routineActions = {
       "reykjavik-utbod-v2": { action: "set_reykjavik_routine_production", label: "Reykjavík" },
       "gardabaer-utbod-v2": { action: "set_gardabaer_routine_production", label: "Garðabær" },
+      "borgarbyggd-utbod-v2": { action: "set_borgarbyggd_routine_production", label: "Borgarbyggð" },
     };
     const routine = routineActions[sourceKey];
     const source = (state.v2IngestionRows || []).find((row) => row.source_key === sourceKey);

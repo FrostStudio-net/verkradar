@@ -176,7 +176,8 @@ export function buildAdminV2OverviewRows({ configs = [], runs = [], observations
       pendingComparisonCount: sourceObservations.filter((row) => row.comparison_state === "not_compared" || row.comparison_state === "review_required").length,
       comparisonCounts: comparisonCounts.get(config.id) || {},
       routineMetrics: {
-        admitted: latestRunObservations.filter((row) => row.promotion_state === "promoted").length,
+        admitted: Number(latestRun?.details?.routine_admission?.admitted ?? latestRunObservations.filter((row) => row.promotion_state === "promoted").length),
+        reused: Number(latestRun?.details?.routine_admission?.reused || 0),
         review_required: latestRunObservations.filter((row) => row.promotion_state === "review_required" || row.comparison_state === "review_required").length,
         blocked: latestRunObservations.filter((row) => row.promotion_state === "blocked").length,
         duplicates: Number(latestRun?.duplicate_count || 0),

@@ -65,6 +65,7 @@ function renderRoutineProduction(rows, escapeHtml, formatDateTime, activeAction,
   return [
     { sourceKey: "reykjavik-utbod-v2", label: "Reykjavík", description: "Scheduled official-HTML ingestion with strict automatic admission." },
     { sourceKey: "gardabaer-utbod-v2", label: "Garðabær", description: "Scheduled card-local official-HTML ingestion with strict automatic admission." },
+    { sourceKey: "borgarbyggd-utbod-v2", label: "Borgarbyggð", description: "Scheduled bounded WordPress procurement ingestion with strict automatic admission." },
   ].map((source) => {
     const row = rows.find((item) => item.source_key === source.sourceKey);
     if (!row || row.routine_admission_scan_limit == null) return "";
@@ -77,6 +78,9 @@ function renderRoutineSource(row, source, escapeHtml, formatDateTime, activeActi
   const health = row.health || {};
   const metrics = row.routineMetrics || {};
   const latest = row.latestRun || {};
+  const parserHealth = health.parser_health || {};
+  const pagination = parserHealth.pagination || latest.details?.pagination || {};
+  const classification = parserHealth.classification || latest.details?.classification || {};
   const actionBusy = String(activeAction || "").startsWith(`${source.sourceKey}:`);
   return `<section class="phase-c-canary" aria-labelledby="${source.sourceKey}-routine-title">
     <div class="card-header"><div><h3 id="${source.sourceKey}-routine-title">${escapeHtml(source.label)} V2 — normal production</h3><p>${escapeHtml(source.description)} Legacy ingestion remains independent.</p></div><span class="status-pill ${enabled ? "is-running" : "is-error"}">${enabled ? "ENABLED" : "EMERGENCY STOPPED"}</span></div>
@@ -85,9 +89,10 @@ function renderRoutineSource(row, source, escapeHtml, formatDateTime, activeActi
       <dt>Source state</dt><dd>${escapeHtml(`${row.mode || "—"} / promotion approval ${row.promotion_approved ? "yes" : "no"}`)}</dd>
       <dt>Health / circuit</dt><dd>${escapeHtml(`${health.status || "—"} / ${health.circuit_state || "—"}`)}</dd>
       <dt>Last run</dt><dd>${escapeHtml(latest.id || "—")} — ${escapeHtml(latest.status || "—")} — ${escapeHtml(formatDateTime(latest.finished_at || latest.created_at || ""))}</dd>
-      <dt>Latest observations</dt><dd>${Number(row.observationCount || 0)}</dd>
+      <dt>Pages / parsed items</dt><dd>${Number(pagination.fetched_pages || latest.fetched_count || 0)} / ${Number(parserHealth.parsed_count || latest.parsed_count || row.observationCount || 0)}</dd>
+      <dt>Actionable / non-actionable / uncertain</dt><dd>${Number(classification.actionable || 0)} / ${Number(classification.non_actionable || 0)} / ${Number(classification.uncertain || 0)}</dd>
       <dt>Admitted / review-required / blocked</dt><dd>${Number(metrics.admitted || 0)} / ${Number(metrics.review_required || 0)} / ${Number(metrics.blocked || 0)}</dd>
-      <dt>Duplicates / errors</dt><dd>${Number(metrics.duplicates || 0)} / ${Number(metrics.errors || 0)}</dd>
+      <dt>Duplicates / reused / errors</dt><dd>${Number(metrics.duplicates || 0)} / ${Number(metrics.reused || 0)} / ${Number(metrics.errors || 0)}</dd>
       <dt>Limits</dt><dd>${Number(row.routine_admission_max_new_per_run || 0)} new/run, ${Number(row.routine_admission_max_new_per_day || 0)} new/day, scan ${Number(row.routine_admission_scan_limit || 0)}</dd>
     </dl>
     <button data-action="v2-routine-toggle" data-source-key="${source.sourceKey}" data-enabled="${enabled ? "false" : "true"}" ${activeAction ? "disabled" : ""}>${enabled ? `Emergency disable ${escapeHtml(source.label)} V2 admissions` : `Re-enable ${escapeHtml(source.label)} V2 admissions`}</button>
