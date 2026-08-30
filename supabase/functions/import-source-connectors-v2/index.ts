@@ -457,6 +457,9 @@ async function runShadow({ body, config, adminClient }: { body: Record<string, u
     const defaultDetailLimit = (DETAIL_ENRICHMENT_LIMITS as Record<string, number>)[String(config.source_key)];
     if (config.source_key !== "akranes-utbod-v2" && defaultDetailLimit) {
       const configuredLimit = config.settings?.shadow_quality?.detail_limit;
+      let nextIsafjordurRequestAt = config.source_key === THREE_SOURCE_KEYS.ISAFJORDUR
+        ? Date.now() + Math.max(5000, Number(config.settings?.access_policy?.crawl_delay_ms || 0))
+        : 0;
       const enrichment = await enrichCandidatesBounded(candidates, {
         sourceKey: config.source_key,
         limit: configuredLimit || defaultDetailLimit,
@@ -473,6 +476,12 @@ async function runShadow({ body, config, adminClient }: { body: Record<string, u
               ? UTBODSVEFUR_DETAIL_EXTRACTORS[config.source_key]
             : undefined,
         fetchDetail: async (url: string) => {
+          if (config.source_key === THREE_SOURCE_KEYS.ISAFJORDUR) {
+            const delayMs = Math.max(0, nextIsafjordurRequestAt - Date.now());
+            if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+            assertRunDeadline(lease.run_deadline_at);
+            nextIsafjordurRequestAt = Date.now() + Math.max(5000, Number(config.settings?.access_policy?.crawl_delay_ms || 0));
+          }
           const detail = await fetchWithRetry(url, { maxAttempts: 2, timeoutMs: Math.min(Number(config.request_timeout_ms || 5000), 5000), deadlineAt: Date.parse(lease.run_deadline_at), request: { headers } });
           return { body: await detail.response.text() };
         },
