@@ -1,4 +1,4 @@
-export function renderAdminV2IngestionPanel({ rows = [], loading = false, error = "", escapeHtml, formatDateTime, controlsEnabled = false, phaseC2ControlsEnabled = false, phaseC2Action = "", phaseC2Results = {}, phaseC2Assertions = {}, productionShadowControlsEnabled = false, productionShadowAction = "", productionShadowResult = null, phaseC3ProductionControlsEnabled = false, phaseC3SelectedObservationId = "", phaseC3Action = "", phaseC3Result = null }) {
+export function renderAdminV2IngestionPanel({ rows = [], loading = false, error = "", escapeHtml, formatDateTime, controlsEnabled = false, phaseC2ControlsEnabled = false, phaseC2Action = "", phaseC2Results = {}, phaseC2Assertions = {}, productionShadowControlsEnabled = false, productionShadowAction = "", productionShadowResult = null, phaseC3ProductionControlsEnabled = false, phaseC3SelectedObservationId = "", phaseC3Action = "", phaseC3Result = null, routineProductionControlsEnabled = false, routineProductionAction = "", routineProductionResult = null }) {
   const canMutate = controlsEnabled === true;
   const cases = rows.flatMap((row) => (row.phaseC2Cases || []).map((item) => ({ ...item, source: row }))).sort((left, right) => left.case_key.localeCompare(right.case_key));
   return `
@@ -31,6 +31,7 @@ export function renderAdminV2IngestionPanel({ rows = [], loading = false, error 
           </table>
         </div>
       ` : error ? "" : `<div class="empty-card">No v2 sources configured. Apply the Phase A migration to create the isolated control plane.</div>`}
+      ${routineProductionControlsEnabled ? renderRoutineProduction(rows, escapeHtml, formatDateTime, routineProductionAction, routineProductionResult) : ""}
       ${productionShadowControlsEnabled ? renderProductionShadowControl(rows, escapeHtml, productionShadowAction, productionShadowResult) : ""}
       ${phaseC2ControlsEnabled && cases.length ? renderPhaseC2(cases, escapeHtml, formatDateTime, phaseC2Action, phaseC2Results, phaseC2Assertions) : ""}
       ${phaseC3ProductionControlsEnabled ? renderPhaseC3Production(rows, escapeHtml, formatDateTime, phaseC3SelectedObservationId, phaseC3Action, phaseC3Result) : ""}
@@ -40,7 +41,7 @@ export function renderAdminV2IngestionPanel({ rows = [], loading = false, error 
 
 function renderProductionShadowControl(rows, escapeHtml, activeAction, result) {
   const row = rows.find((item) => item.source_key === "reykjavik-utbod-v2");
-  if (!row || row.production_shadow_enabled !== true || row.mode !== "shadow" || row.promotion_approved === true) return "";
+  if (!row || row.routine_production_enabled === true || row.production_shadow_enabled !== true || row.mode !== "shadow" || row.promotion_approved === true) return "";
   const busy = Boolean(activeAction);
   return `
     <section class="phase-c-canary" aria-labelledby="production-shadow-title">
@@ -60,10 +61,36 @@ function renderProductionShadowControl(rows, escapeHtml, activeAction, result) {
     </section>`;
 }
 
+function renderRoutineProduction(rows, escapeHtml, formatDateTime, activeAction, result) {
+  const row = rows.find((item) => item.source_key === "reykjavik-utbod-v2");
+  if (!row || row.routine_admission_scan_limit == null) return "";
+  const enabled = row.routine_production_enabled === true;
+  const health = row.health || {};
+  const metrics = row.routineMetrics || {};
+  const latest = row.latestRun || {};
+  return `<section class="phase-c-canary" aria-labelledby="reykjavik-routine-title">
+    <div class="card-header"><div><h3 id="reykjavik-routine-title">Reykjavík V2 — normal production</h3><p>Scheduled official-HTML ingestion with strict automatic admission. Legacy ingestion remains independent.</p></div><span class="status-pill ${enabled ? "is-running" : "is-error"}">${enabled ? "ENABLED" : "EMERGENCY STOPPED"}</span></div>
+    <dl>
+      <dt>Production ingestion</dt><dd>${enabled ? "enabled" : "disabled"}</dd>
+      <dt>Source state</dt><dd>${escapeHtml(`${row.mode || "—"} / promotion approval ${row.promotion_approved ? "yes" : "no"}`)}</dd>
+      <dt>Health / circuit</dt><dd>${escapeHtml(`${health.status || "—"} / ${health.circuit_state || "—"}`)}</dd>
+      <dt>Last run</dt><dd>${escapeHtml(latest.id || "—")} — ${escapeHtml(latest.status || "—")} — ${escapeHtml(formatDateTime(latest.finished_at || latest.created_at || ""))}</dd>
+      <dt>Latest observations</dt><dd>${Number(row.observationCount || 0)}</dd>
+      <dt>Admitted / review-required / blocked</dt><dd>${Number(metrics.admitted || 0)} / ${Number(metrics.review_required || 0)} / ${Number(metrics.blocked || 0)}</dd>
+      <dt>Duplicates / errors</dt><dd>${Number(metrics.duplicates || 0)} / ${Number(metrics.errors || 0)}</dd>
+      <dt>Limits</dt><dd>${Number(row.routine_admission_max_new_per_run || 0)} new/run, ${Number(row.routine_admission_max_new_per_day || 0)} new/day, scan ${Number(row.routine_admission_scan_limit || 0)}</dd>
+    </dl>
+    <button data-action="v2-routine-toggle" data-enabled="${enabled ? "false" : "true"}" ${activeAction ? "disabled" : ""}>${enabled ? "Emergency disable Reykjavík V2 admissions" : "Re-enable Reykjavík V2 admissions"}</button>
+    ${activeAction ? `<p class="admin-message">Updating Reykjavík routine production state…</p>` : ""}
+    ${result ? `<pre class="phase-c-canary-assertions">${escapeHtml(JSON.stringify(result, null, 2))}</pre>` : ""}
+    <p><small>This control stops future scheduled runs/admissions only. It does not delete opportunities, alter provenance, or affect TED/legacy imports.</small></p>
+  </section>`;
+}
+
 function renderPhaseC3Production(rows, escapeHtml, formatDateTime, selectedId, activeAction, result) {
   const row = rows.find((item) => item.source_key === "reykjavik-utbod-v2");
   const control = row?.phaseC3Production;
-  if (!row || !control) return "";
+  if (!row || !control || row.routine_production_enabled === true) return "";
   const candidates = control.candidates || [];
   const selected = candidates.find((item) => item.observation.id === selectedId) || null;
   const observation = selected?.observation;

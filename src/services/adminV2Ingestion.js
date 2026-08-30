@@ -37,7 +37,8 @@ export async function loadAdminV2IngestionOverview(supabase) {
   const [configsResult, runsResult, observationsResult, comparisonsResult, caseObservationsResult, caseProvenanceResult, productionCandidatesResult, phaseCFlagResult] = await Promise.all([
     supabase.from("v2_source_configs").select(`
       id, source_id, source_key, display_name, adapter_type, mode, parser_name, parser_version,
-      promotion_approved, promotion_reference_required, production_shadow_enabled, production_canary_enabled, release_feature_enabled, release_approved, updated_at,
+      promotion_approved, promotion_reference_required, production_shadow_enabled, production_canary_enabled, release_feature_enabled, release_approved,
+      routine_production_enabled, routine_admission_max_new_per_run, routine_admission_max_new_per_day, routine_admission_scan_limit, updated_at,
       v2_source_health (
         status, circuit_state, consecutive_failures, consecutive_zero_item_runs,
         last_run_at, last_success_at, last_fixture_at, last_shadow_at,
@@ -48,7 +49,7 @@ export async function loadAdminV2IngestionOverview(supabase) {
       .select("id, source_config_id, mode, trigger_type, fixture_name, status, fetched_count, parsed_count, observation_count, invalid_count, duplicate_count, error_count, suspicious_zero_items, error_code, error_message, details, started_at, finished_at, created_at")
       .order("created_at", { ascending: false }).limit(200),
     supabase.from("v2_ingestion_observations")
-      .select("id, source_config_id, validation_state, comparison_state, promotion_state, created_at")
+      .select("id, run_id, source_config_id, validation_state, comparison_state, promotion_state, created_at")
       .order("created_at", { ascending: false }).limit(1000),
     supabase.from("v2_legacy_comparisons")
       .select("id, observation_id, match_type, decision, compared_at")
@@ -159,6 +160,7 @@ export function buildAdminV2OverviewRows({ configs = [], runs = [], observations
     const sourceObservations = observations.filter((row) => row.source_config_id === config.id);
     const health = Array.isArray(config.v2_source_health) ? config.v2_source_health[0] : config.v2_source_health;
     const latestRun = sourceRuns[0] || null;
+    const latestRunObservations = latestRun ? sourceObservations.filter((row) => row.run_id === latestRun.id) : [];
     const parserHealth = health?.parser_health || {};
     const storedObservationCount = numberOrFallback(latestRun?.observation_count, health?.last_observation_count, sourceObservations.length);
     const storedInvalidCount = numberOrFallback(latestRun?.invalid_count, parserHealth.invalid_count, sourceObservations.filter((row) => row.validation_state !== "valid").length);
@@ -173,6 +175,13 @@ export function buildAdminV2OverviewRows({ configs = [], runs = [], observations
       invalidObservationCount: storedInvalidCount,
       pendingComparisonCount: sourceObservations.filter((row) => row.comparison_state === "not_compared" || row.comparison_state === "review_required").length,
       comparisonCounts: comparisonCounts.get(config.id) || {},
+      routineMetrics: {
+        admitted: latestRunObservations.filter((row) => row.promotion_state === "promoted").length,
+        review_required: latestRunObservations.filter((row) => row.promotion_state === "review_required" || row.comparison_state === "review_required").length,
+        blocked: latestRunObservations.filter((row) => row.promotion_state === "blocked").length,
+        duplicates: Number(latestRun?.duplicate_count || 0),
+        errors: Number(latestRun?.error_count || 0),
+      },
     };
   });
 }

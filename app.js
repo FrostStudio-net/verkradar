@@ -281,6 +281,8 @@ let state = {
   v2C3Result: null,
   v2ProductionShadowAction: "",
   v2ProductionShadowResult: null,
+  v2RoutineProductionAction: "",
+  v2RoutineProductionResult: null,
   expandedSourceId: null,
   adminCompanies: [],
   adminCompaniesLoading: false,
@@ -594,6 +596,8 @@ function clearLocalProfileState() {
   state.v2C3Result = null;
   state.v2ProductionShadowAction = "";
   state.v2ProductionShadowResult = null;
+  state.v2RoutineProductionAction = "";
+  state.v2RoutineProductionResult = null;
   state.adminCompanies = [];
   state.adminCompaniesLoading = false;
   state.adminCompaniesLoaded = false;
@@ -625,6 +629,8 @@ function clearAdminAccessState() {
   state.v2C3Result = null;
   state.v2ProductionShadowAction = "";
   state.v2ProductionShadowResult = null;
+  state.v2RoutineProductionAction = "";
+  state.v2RoutineProductionResult = null;
   state.adminCompanies = [];
   state.adminCompaniesLoaded = false;
   state.adminReviewMatches = [];
@@ -755,6 +761,33 @@ document.addEventListener("click", async (event) => {
 
   const name = action.dataset.action;
   const id = action.dataset.id;
+
+  if (name === "v2-routine-toggle") {
+    event.preventDefault();
+    const source = (state.v2IngestionRows || []).find((row) => row.source_key === "reykjavik-utbod-v2");
+    if (!supabaseClient || !state.isAdmin || !isPhaseC3ProductionRuntime(SUPABASE_URL) || !source) return;
+    const enabled = action.dataset.enabled === "true";
+    const promptText = enabled ? "Reason for re-enabling Reykjavík V2 admissions" : "Emergency-disable reason";
+    const reason = window.prompt(promptText)?.trim();
+    if (!reason || !window.confirm(`${enabled ? "Re-enable" : "Disable"} scheduled Reykjavík V2 admissions? This does not affect legacy ingestion or existing opportunities.`)) return;
+    action.disabled = true;
+    state.v2RoutineProductionAction = enabled ? "enable" : "disable";
+    state.v2RoutineProductionResult = null;
+    state.v2IngestionError = null;
+    render();
+    try {
+      state.v2RoutineProductionResult = await invokeAdminV2Action(supabaseClient, "set_reykjavik_routine_production", "reykjavik-utbod-v2", null, { enabled, reason });
+      await loadV2IngestionForAdmin();
+    } catch (error) {
+      console.error(error);
+      state.v2IngestionError = formatSupabaseError(error);
+      state.v2RoutineProductionResult = error.actionResult || { ok: false, error: formatSupabaseError(error) };
+    } finally {
+      state.v2RoutineProductionAction = "";
+      render();
+    }
+    return;
+  }
 
   if (name === "v2-production-run-shadow") {
     event.preventDefault();
@@ -9864,7 +9897,10 @@ function renderAdminActiveTab(opportunities) {
         phaseC3ProductionControlsEnabled: state.isAdmin && isPhaseC3ProductionRuntime(SUPABASE_URL),
         phaseC3SelectedObservationId: state.v2C3SelectedObservationId || "",
         phaseC3Action: state.v2C3Action || "",
-        phaseC3Result: state.v2C3Result || null
+        phaseC3Result: state.v2C3Result || null,
+        routineProductionControlsEnabled: state.isAdmin && isPhaseC3ProductionRuntime(SUPABASE_URL),
+        routineProductionAction: state.v2RoutineProductionAction || "",
+        routineProductionResult: state.v2RoutineProductionResult || null
       })}
       ${renderLatestImportRunsTable()}
       ${renderLatestTedOpportunities()}

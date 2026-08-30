@@ -27,7 +27,7 @@ import {
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-automation-secret",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 const LEGACY_TABLE = "opportunities";
@@ -86,52 +86,68 @@ Deno.serve(async (req) => {
     if (!isStaging && !isProduction) return json({ error: "Unknown Supabase project", code: "V2_ENVIRONMENT_BLOCKED" }, 409);
     const anonKey = requiredEnv("SUPABASE_ANON_KEY");
     const serviceRoleKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
+    const preAuthBody = await safeJson(req.clone());
+    const routineAutomation = preAuthBody.action === "run_reykjavik_production";
+    const routineAutomationAuthorized = routineAutomation
+      && isProduction
+      && String(preAuthBody.source_key || "") === REYKJAVIK_SOURCE_KEY
+      && Boolean(requiredEnv("AUTOMATION_SECRET"))
+      && req.headers.get("x-automation-secret") === requiredEnv("AUTOMATION_SECRET");
     const authHeader = req.headers.get("authorization") || "";
     const userClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
       auth: { persistSession: false },
     });
     const adminClient = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
-    const { data: userData, error: userError } = await userClient.auth.getUser();
-    if (userError || !userData.user) return json({ error: "Unauthorized" }, 401);
-    const { data: adminRow, error: adminError } = await adminClient
-      .from("admin_users")
-      .select("user_id")
-      .eq("user_id", userData.user.id)
-      .maybeSingle();
-    if (adminError) throw adminError;
-    if (!adminRow) return json({ error: "Admin access required" }, 403);
-
+    let adminUserId = "";
+    if (!routineAutomationAuthorized) {
+      const { data: userData, error: userError } = await userClient.auth.getUser();
+      if (userError || !userData.user) return json({ error: "Unauthorized" }, 401);
+      const { data: adminRow, error: adminError } = await adminClient
+        .from("admin_users")
+        .select("user_id")
+        .eq("user_id", userData.user.id)
+        .maybeSingle();
+      if (adminError) throw adminError;
+      if (!adminRow) return json({ error: "Admin access required" }, 403);
+      adminUserId = userData.user.id;
+    }
+    if (routineAutomation && !routineAutomationAuthorized) {
+      return json({ error: "Reykjavík routine automation authentication failed", code: "V2_ROUTINE_AUTOMATION_UNAUTHORIZED" }, 401);
+    }
     const body = await safeJson(req);
+    if (routineAutomationAuthorized) return await runReykjavikRoutineProduction({ body, adminClient });
     if (body.action === "phase_c_capabilities") return await phaseCCapabilities({ adminClient, isProduction });
     const productionPhaseCAction = ["set_source_promotion_approval", "approve_promotion", "promote_canary", "rollback_canary", "canary_assertions", "set_reykjavik_release_enabled", "approve_release", "release_canary", "clear_communication_hold", "disable_released_canary"].includes(String(body.action || ""));
     const productionShadowAction = body.action === "run_shadow";
     const productionCanaryToggleAction = body.action === "set_reykjavik_production_canary_enabled";
+    const productionRoutineToggleAction = body.action === "set_reykjavik_routine_production";
     if (productionCanaryToggleAction && !isProduction) {
       return json({ error: "This action is available only in the production project", code: "V2_PRODUCTION_CANARY_ENVIRONMENT_REQUIRED" }, 403);
     }
     if (isProduction && productionPhaseCAction && !(await isPhaseCProductionEnabled(adminClient))) {
       return json({ error: "Phase C production canary feature is disabled", code: "V2_PRODUCTION_FEATURE_DISABLED" }, 409);
     }
-    if (isProduction && !productionPhaseCAction && !productionShadowAction && !productionCanaryToggleAction) {
+    if (isProduction && !productionPhaseCAction && !productionShadowAction && !productionCanaryToggleAction && !productionRoutineToggleAction) {
       return json({ error: "This action is not available in production", code: "V2_PRODUCTION_ACTION_BLOCKED" }, 403);
     }
-    if (productionCanaryToggleAction) return await setReykjavikProductionCanaryEnabled({ body, adminClient, adminUserId: userData.user.id });
-    if (body.action === "set_source_promotion_approval") return await setSourcePromotionApproval({ body, adminClient, adminUserId: userData.user.id });
-    if (body.action === "approve_promotion") return await approvePromotion({ body, adminClient, adminUserId: userData.user.id });
-    if (body.action === "promote_canary") return await promoteCanary({ body, adminClient, adminUserId: userData.user.id });
-    if (body.action === "rollback_canary") return await rollbackCanary({ body, adminClient, adminUserId: userData.user.id });
+    if (productionCanaryToggleAction) return await setReykjavikProductionCanaryEnabled({ body, adminClient, adminUserId });
+    if (body.action === "set_reykjavik_routine_production") return await setReykjavikRoutineProduction({ body, adminClient, adminUserId, isProduction });
+    if (body.action === "set_source_promotion_approval") return await setSourcePromotionApproval({ body, adminClient, adminUserId });
+    if (body.action === "approve_promotion") return await approvePromotion({ body, adminClient, adminUserId });
+    if (body.action === "promote_canary") return await promoteCanary({ body, adminClient, adminUserId });
+    if (body.action === "rollback_canary") return await rollbackCanary({ body, adminClient, adminUserId });
     if (body.action === "set_reykjavik_release_enabled") {
       if (!isProduction) return json({ error: "Release controls are production-only", code: "V2_RELEASE_ENVIRONMENT_REQUIRED" }, 403);
-      return await setReykjavikReleaseEnabled({ body, adminClient, adminUserId: userData.user.id });
+      return await setReykjavikReleaseEnabled({ body, adminClient, adminUserId });
     }
-    if (body.action === "approve_release") return await approveRelease({ body, adminClient, adminUserId: userData.user.id });
-    if (body.action === "release_canary") return await releaseCanary({ body, adminClient, adminUserId: userData.user.id });
+    if (body.action === "approve_release") return await approveRelease({ body, adminClient, adminUserId });
+    if (body.action === "release_canary") return await releaseCanary({ body, adminClient, adminUserId });
     if (body.action === "clear_communication_hold") {
       if (!isProduction) return json({ error: "Communication hold clearing is production-only", code: "V2_COMMUNICATION_HOLD_PRODUCTION_REQUIRED" }, 403);
-      return await clearCommunicationHold({ body, adminClient, adminUserId: userData.user.id });
+      return await clearCommunicationHold({ body, adminClient, adminUserId });
     }
-    if (body.action === "disable_released_canary") return await disableReleasedCanary({ body, adminClient, adminUserId: userData.user.id });
+    if (body.action === "disable_released_canary") return await disableReleasedCanary({ body, adminClient, adminUserId });
     if (body.action === "canary_assertions") return await canaryAssertions({ body, adminClient });
     if (body.action === "set_mode") return await setShadowMode({ body, adminClient });
     if (body.action === "diagnostics") return await diagnostics({ adminClient });
@@ -335,7 +351,7 @@ Deno.serve(async (req) => {
   }
 });
 
-async function runShadow({ body: _body, config, adminClient }: { body: Record<string, unknown>; config: any; adminClient: any }) {
+async function runShadow({ body, config, adminClient }: { body: Record<string, unknown>; config: any; adminClient: any }) {
   if (config?.settings?.operational_state === "automated_live_access_not_cleared" || config?.settings?.access_policy?.automated_live_access_cleared === false) {
     const error = new Error("Automated live access has not been operationally cleared for this source");
     (error as any).code = "V2_LIVE_ACCESS_NOT_CLEARED";
@@ -357,7 +373,8 @@ async function runShadow({ body: _body, config, adminClient }: { body: Record<st
     throw error;
   }
   const lease = createRunLease({ now, leaseMs: 30000, deadlineMs: Number(config.run_deadline_ms || 30000) });
-  const { data: run, error: runError } = await adminClient.from("v2_ingestion_runs").insert({ source_config_id: config.id, mode: "shadow", trigger_type: "shadow", status: "running", attempt_count: 1, started_at: now.toISOString(), ...lease, details: { phase: "B", live_requests_allowed: true, customer_visible_writes: 0, promotion_allowed: false } }).select("id").single();
+  const triggerType = body.trigger_type === "automation" ? "automation" : "shadow";
+  const { data: run, error: runError } = await adminClient.from("v2_ingestion_runs").insert({ source_config_id: config.id, mode: "shadow", trigger_type: triggerType, status: "running", attempt_count: 1, started_at: now.toISOString(), ...lease, details: { phase: "B", live_requests_allowed: true, customer_visible_writes: 0, promotion_allowed: false, routine_production: triggerType === "automation" } }).select("id").single();
   if (runError) {
     if (runError.code === "23505") {
       const error = new Error("A shadow run is already active for this source");
@@ -471,6 +488,43 @@ async function runShadow({ body: _body, config, adminClient }: { body: Record<st
     await adminClient.from("v2_ingestion_runs").update({ status: code === "V2_RUN_DEADLINE" ? "timed_out" : "failed", error_count: 1, error_code: code || "V2_SHADOW_ERROR", error_message: errorMessage(error), finished_at: new Date().toISOString() }).eq("id", run.id);
     throw error;
   }
+}
+
+async function runReykjavikRoutineProduction({ body, adminClient }: { body: Record<string, unknown>; adminClient: any }) {
+  if (String(body.source_key || "") !== REYKJAVIK_SOURCE_KEY) {
+    return json({ error: "Only Reykjavík routine production is allowlisted", code: "V2_ROUTINE_SOURCE_NOT_ALLOWED" }, 403);
+  }
+  const { data: config, error: configError } = await adminClient.from("v2_source_configs").select("*").eq("source_key", REYKJAVIK_SOURCE_KEY).single();
+  if (configError) throw configError;
+  if (config.routine_production_enabled !== true || config.mode !== "shadow" || config.promotion_approved === true
+      || config.production_canary_enabled === true || config.release_feature_enabled === true || config.release_approved === true) {
+    return json({ error: "Reykjavík routine production is disabled or the source state is unsafe", code: "V2_ROUTINE_SOURCE_DISABLED" }, 409);
+  }
+  const runResponse = await runShadow({ body: { ...body, trigger_type: "automation" }, config, adminClient });
+  const runResult = await runResponse.clone().json();
+  if (!runResponse.ok || runResult?.status !== "succeeded" || !runResult?.run_id) return runResponse;
+  const { data: admission, error: admissionError } = await adminClient.rpc("admit_reykjavik_v2_run", {
+    target_run_id: runResult.run_id,
+    runtime_project_ref: PRODUCTION_PROJECT_REF,
+  });
+  if (admissionError) throw admissionError;
+  return json({ ...runResult, action: "run_reykjavik_production", routine_admission: admission, customer_visible_writes: 0, matching_triggered: false, downstream_triggered: false });
+}
+
+async function setReykjavikRoutineProduction({ body, adminClient, adminUserId, isProduction }: { body: Record<string, unknown>; adminClient: any; adminUserId: string; isProduction: boolean }) {
+  if (!isProduction || String(body.source_key || "") !== REYKJAVIK_SOURCE_KEY) {
+    return json({ error: "Reykjavík routine controls are production-only", code: "V2_ROUTINE_ENVIRONMENT_BLOCKED" }, 403);
+  }
+  if (typeof body.enabled !== "boolean") return json({ error: "An explicit enabled boolean is required", code: "V2_ROUTINE_VALUE_REQUIRED" }, 400);
+  const reason = String(body.reason || "").trim();
+  if (!reason) return json({ error: "An audit reason is required", code: "V2_ROUTINE_REASON_REQUIRED" }, 400);
+  const { data, error } = await adminClient.rpc("set_reykjavik_routine_production", {
+    enabled_value: body.enabled,
+    acting_admin_id: adminUserId,
+    reason_text: reason,
+  });
+  if (error) throw error;
+  return json({ ok: true, action: "set_reykjavik_routine_production", source: data, automatic_approval: false, downstream_triggered: false });
 }
 
 async function approvePromotion({ body, adminClient, adminUserId }: { body: Record<string, unknown>; adminClient: any; adminUserId: string }) {
