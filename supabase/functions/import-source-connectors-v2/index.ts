@@ -11,6 +11,7 @@ import { extractAkranesDetailMetadata } from "../_shared/ingestion-v2/adapters/a
 import { extractRikiskaupDetailMetadata } from "../_shared/ingestion-v2/adapters/rikiskaup-enrichment.js";
 import { extractIsafjordurDetailMetadata } from "../_shared/ingestion-v2/adapters/isafjordur-enrichment.js";
 import { extractReykjavikDetailMetadata } from "../_shared/ingestion-v2/adapters/reykjavik-enrichment.js";
+import { extractGardabaerDetailMetadata } from "../_shared/ingestion-v2/adapters/gardabaer-enrichment.js";
 import { extractLandsnetDetailMetadata, extractLandsvirkjunDetailMetadata, extractOrkuveitanDetailMetadata, extractVeiturDetailMetadata } from "../_shared/ingestion-v2/adapters/utbodsvefur-enrichment.js";
 import { getUtbodsvefurParserDiagnostics } from "../_shared/ingestion-v2/adapters/utbodsvefur-buyers.js";
 import {
@@ -413,7 +414,7 @@ async function runShadow({ body, config, adminClient }: { body: Record<string, u
     }
     let candidates = parseWithV2Adapter(config.parser_name, config.parser_version, text);
     const indexDiagnostics = getUtbodsvefurParserDiagnostics(candidates);
-    if ([THREE_SOURCE_KEYS.RIKISKAUP, THREE_SOURCE_KEYS.VEGAGERDIN, THREE_SOURCE_KEYS.ISAFJORDUR, THREE_SOURCE_KEYS.REYKJAVIK, ...Object.keys(UTBODSVEFUR_DETAIL_EXTRACTORS)].includes(config.source_key)) {
+    if ([THREE_SOURCE_KEYS.GARDABAER, THREE_SOURCE_KEYS.RIKISKAUP, THREE_SOURCE_KEYS.VEGAGERDIN, THREE_SOURCE_KEYS.ISAFJORDUR, THREE_SOURCE_KEYS.REYKJAVIK, ...Object.keys(UTBODSVEFUR_DETAIL_EXTRACTORS)].includes(config.source_key)) {
       duplicateCount += countSemanticDuplicates(candidates);
     }
     let enrichmentMetrics = { attempted: 0, succeeded: 0, failed: 0, enriched: 0, no_supported_fields: 0, skipped: candidates.length, limit: 0 };
@@ -434,6 +435,8 @@ async function runShadow({ body, config, adminClient }: { body: Record<string, u
         now,
         metadataExtractor: config.source_key === THREE_SOURCE_KEYS.RIKISKAUP
           ? extractRikiskaupDetailMetadata
+          : config.source_key === THREE_SOURCE_KEYS.GARDABAER
+            ? extractGardabaerDetailMetadata
           : config.source_key === THREE_SOURCE_KEYS.ISAFJORDUR
             ? extractIsafjordurDetailMetadata
             : config.source_key === THREE_SOURCE_KEYS.REYKJAVIK
@@ -449,6 +452,16 @@ async function runShadow({ body, config, adminClient }: { body: Record<string, u
       candidates = enrichment.candidates;
       enrichmentMetrics = enrichment.metrics;
     }
+    const recoveryMetrics = {
+      deadlines: candidates.filter((candidate) => Boolean(candidate.deadline)).length,
+      references: candidates.filter((candidate) => Boolean(candidate.procurement_reference)).length,
+      buyers: candidates.filter((candidate) => Boolean(candidate.buyer)).length,
+      source_status_distribution: candidates.reduce((counts: Record<string, number>, candidate) => {
+        const status = String(candidate?.safe_source_payload?.shadow_enrichment?.source_status || candidate?.safe_source_payload?.source_status || "unknown");
+        counts[status] = (counts[status] || 0) + 1;
+        return counts;
+      }, {}),
+    };
     const observations = await Promise.all(candidates.map((candidate) => createObservation(candidate, { run_id: run.id, source_config_id: config.id, source_id: config.source_id, source_key: config.source_key, source_name: config.display_name, parser_name: config.parser_name, parser_version: config.parser_version, fetched_at: new Date().toISOString(), fetch_metadata: { live_request: true, http_status: fetched.response.status, content_type: fetched.response.headers.get("content-type"), attempts: fetched.attempts, latency_ms: fetched.latencyMs, mode: "shadow" } })));
     const invalidCount = observations.filter((row) => row.validation_state !== "valid").length;
     const validCount = observations.length - invalidCount;
@@ -459,7 +472,7 @@ async function runShadow({ body, config, adminClient }: { body: Record<string, u
     let storedObservations: any[] = observations;
     if (observations.length) { const { data, error } = await adminClient.from("v2_ingestion_observations").insert(observations).select("*"); if (error) throw error; storedObservations = data || observations; }
     const classificationContext = getSourceClassificationContext(config);
-    const classificationMetrics: { stage_distribution: Record<string, number>; actionable: number; non_actionable: number } = { stage_distribution: {}, actionable: 0, non_actionable: 0 };
+    const classificationMetrics: { stage_distribution: Record<string, number>; actionable: number; non_actionable: number; uncertain: number; strong_evidence: number } = { stage_distribution: {}, actionable: 0, non_actionable: 0, uncertain: 0, strong_evidence: 0 };
     for (const observation of storedObservations) {
       const enrichment = observation.safe_source_payload?.shadow_enrichment || {};
       const classified = classificationColumns(classifyProcurementStage({ title: observation.title, body_text: observation.description, description: observation.description, buyer: observation.buyer, deadline: observation.deadline, publication_date: observation.publication_date, ...classificationContext, authoritative_metadata: { ...(observation.safe_source_payload || {}), ...enrichment } }));
@@ -469,15 +482,26 @@ async function runShadow({ body, config, adminClient }: { body: Record<string, u
       classificationMetrics.stage_distribution[stage] = (classificationMetrics.stage_distribution[stage] || 0) + 1;
       if (prediction.actionable_for_suppliers === true) classificationMetrics.actionable += 1;
       else classificationMetrics.non_actionable += 1;
+      if (prediction.requires_admin_review === true || stage === "uncertain") classificationMetrics.uncertain += 1;
+      if (promotionEvidence.strong_procurement_evidence === true) classificationMetrics.strong_evidence += 1;
       const { error: predictionError } = await adminClient.from("v2_ingestion_observations").update({ predicted_procurement_stage: prediction.procurement_stage, predicted_actionable: prediction.actionable_for_suppliers, predicted_confidence: prediction.classification_confidence, predicted_reason: prediction.classification_reason, predicted_requires_admin_review: prediction.requires_admin_review, enrichment_status: enrichment.enrichment_status || null, shadow_quality_category: category, ...promotionEvidence }).eq("id", observation.id);
       if (predictionError) throw predictionError;
     }
-    const { data: legacy } = await adminClient.from(LEGACY_TABLE).select("id,source_id,external_id,procurement_reference,canonical_url,url,title,description,buyer,deadline,publication_date,location").eq("source_id", config.source_id);
-    for (const observation of storedObservations) { const comparison = await compareObservationToLegacy(observation, legacy || []); const { comparison_state, ...comparisonRecord } = comparison; const { error: comparisonError } = await adminClient.from("v2_legacy_comparisons").upsert({ observation_id: observation.id, ...comparisonRecord }, { onConflict: "observation_id,legacy_opportunity_id,match_type" }); if (comparisonError) throw comparisonError; const state = comparison_state || (comparison.match_type === "v2_only" ? "v2_only" : comparison.match_type === "fuzzy_review_candidate" ? "review_required" : "legacy_match"); const { error: stateError } = await adminClient.from("v2_ingestion_observations").update({ comparison_state: state }).eq("id", observation.id); if (stateError) throw stateError; }
+    const { data: legacy, error: legacyError } = await adminClient.from(LEGACY_TABLE)
+      .select("id,source_id,external_id,url,title,description,buyer,deadline,published_date,location,raw_payload")
+      .eq("source_id", config.source_id);
+    if (legacyError) throw legacyError;
+    const legacyComparisonRows = (legacy || []).map((row) => ({
+      ...row,
+      canonical_url: row.url,
+      publication_date: row.published_date,
+      procurement_reference: row.raw_payload?.procurement_reference || row.raw_payload?.reference_number || row.raw_payload?.notice_number || null,
+    }));
+    for (const observation of storedObservations) { const comparison = await compareObservationToLegacy(observation, legacyComparisonRows); const { comparison_state, ...comparisonRecord } = comparison; const { error: comparisonError } = await adminClient.from("v2_legacy_comparisons").upsert({ observation_id: observation.id, ...comparisonRecord }, { onConflict: "observation_id,legacy_opportunity_id,match_type" }); if (comparisonError) throw comparisonError; const state = comparison_state || (comparison.match_type === "v2_only" ? "v2_only" : comparison.match_type === "fuzzy_review_candidate" ? "review_required" : "legacy_match"); const { error: stateError } = await adminClient.from("v2_ingestion_observations").update({ comparison_state: state }).eq("id", observation.id); if (stateError) throw stateError; }
     const finished = new Date().toISOString();
     const runStatus = zeroItem.suspicious ? "quarantined" : invalidCount ? "partial" : "succeeded";
-    const parserHealth = buildShadowParserHealth({ config, fetched: fetchedCount, parsed: candidates.length, valid: validCount, invalid: invalidCount, duplicates: duplicateCount, parserErrors, enrichment: enrichmentMetrics, suspiciousZero: zeroItem.suspicious, pagination, classification: classificationMetrics, indexDiagnostics });
-    const details = { phase: "B", live_requests_allowed: true, customer_visible_writes: 0, promotion_allowed: false, promote_count: 0, pagination, index_diagnostics: indexDiagnostics, enrichment: enrichmentMetrics, classification: classificationMetrics };
+    const parserHealth = buildShadowParserHealth({ config, fetched: fetchedCount, parsed: candidates.length, valid: validCount, invalid: invalidCount, duplicates: duplicateCount, parserErrors, enrichment: enrichmentMetrics, suspiciousZero: zeroItem.suspicious, pagination, classification: classificationMetrics, indexDiagnostics, recovery: recoveryMetrics });
+    const details = { phase: "B", live_requests_allowed: true, customer_visible_writes: 0, promotion_allowed: false, promote_count: 0, pagination, index_diagnostics: indexDiagnostics, enrichment: enrichmentMetrics, classification: classificationMetrics, recovery: recoveryMetrics };
     const { error: finalizeError } = await adminClient.from("v2_ingestion_runs").update({ status: runStatus, fetched_count: fetchedCount, parsed_count: candidates.length, observation_count: observations.length, invalid_count: invalidCount, duplicate_count: duplicateCount, suspicious_zero_items: zeroItem.suspicious, error_count: parserErrors.length + (zeroItem.suspicious ? 1 : 0), error_code: zeroItem.reason, error_message: zeroItem.suspicious ? "HTTP success but zero parsed items" : null, details, finished_at: finished, lease_expires_at: finished, updated_at: finished }).eq("id", run.id);
     if (finalizeError) throw finalizeError;
     const { error: healthUpdateError } = await adminClient.from("v2_source_health").upsert({ source_config_id: config.id, status: runStatus === "succeeded" ? "healthy" : "degraded", circuit_state: zeroItem.circuit_should_open ? "open" : "closed", consecutive_zero_item_runs: zeroItem.consecutive_zero_item_runs, last_run_id: run.id, last_run_at: finished, last_success_at: runStatus === "succeeded" ? finished : health?.last_success_at || null, last_shadow_at: finished, last_http_status: fetched.response.status, last_latency_ms: fetched.latencyMs, last_observation_count: observations.length, last_error_code: zeroItem.reason, last_error_message: zeroItem.suspicious ? "HTTP success but zero parsed items" : null, parser_health: parserHealth, updated_at: finished }, { onConflict: "source_config_id" });

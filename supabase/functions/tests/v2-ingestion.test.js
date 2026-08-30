@@ -24,6 +24,10 @@ import {
   extractReykjavikDetailMetadata,
 } from "../_shared/ingestion-v2/adapters/reykjavik-enrichment.js";
 import {
+  extractGardabaerDetailMetadata,
+  normalizeGardabaerDetailStatus,
+} from "../_shared/ingestion-v2/adapters/gardabaer-enrichment.js";
+import {
   classifyLandsvirkjunProcurementType,
   extractLandsvirkjunDetailMetadata,
 } from "../_shared/ingestion-v2/adapters/landsvirkjun-enrichment.js";
@@ -89,11 +93,106 @@ test("parses the Borgarbyggð WordPress REST fixture", async () => {
 
 test("parses the current-style Garðabær page-monitor fixture", async () => {
   const input = await readFile(new URL("gardabaer-page-monitor.html", fixtureRoot), "utf8");
-  const rows = parseWithV2Adapter("gardabaer-page-monitor", "1.0.0", input);
+  const rows = parseWithV2Adapter("gardabaer-page-monitor", "2.0.0", input);
   assert.equal(rows.length, 2);
   assert.equal(rows[0].external_id, "gardabaer-fixture-2026-31");
   assert.equal(rows[0].procurement_reference, "GAR-2026-31");
   assert.equal(rows[0].canonical_url, "https://www.gardabaer.is/framkvaemdir/utbod/holtahverfi-lagnir");
+});
+
+test("Garðabær current cards are parsed independently without deadline or status bleed", async () => {
+  const input = await readFile(new URL("gardabaer-current-cards.html", detailFixtureRoot), "utf8");
+  const rows = parseWithV2Adapter("gardabaer-page-monitor", "2.0.0", input);
+  assert.equal(rows.length, 3);
+  assert.deepEqual(rows.map((row) => row.deadline), ["2026-09-28", "2026-09-15", "2026-08-20"]);
+  assert.deepEqual(rows.map((row) => row.safe_source_payload.source_status), ["active", "active", "completed"]);
+  assert.equal(rows[0].title.startsWith("Hjúkrunarheimili"), true);
+  assert.equal(rows[1].title, "Hreinsun gatna í Garðabæ 2027-2028");
+  assert.equal(rows.some((row) => row.canonical_url.includes("unrelated-footer-link")), false);
+  assert.ok(rows.every((row) => row.procurement_reference === null));
+  assert.ok(rows.every((row) => row.external_id.startsWith("gardabaer:")));
+});
+
+test("Garðabær detail enrichment recovers local metadata without inventing a reference", async () => {
+  const open = extractGardabaerDetailMetadata(await readFile(new URL("gardabaer-detail-open.html", detailFixtureRoot), "utf8"));
+  assert.equal(open.deadline, "2026-09-15");
+  assert.equal(open.source_status, "active");
+  assert.equal(open.procurement_type, "open_tender");
+  assert.equal(open.request_for_bids, true);
+  assert.equal(open.buyer, "Garðabær");
+  assert.equal(open.procurement_reference, null);
+  assert.equal(open.municipal_case_id, "2603065");
+  assert.equal(open.identity_basis, "canonical_path");
+  const forval = extractGardabaerDetailMetadata(await readFile(new URL("gardabaer-detail-forval.html", detailFixtureRoot), "utf8"));
+  assert.equal(forval.deadline, "2026-09-28");
+  assert.equal(forval.procurement_type, "prequalification");
+  const completed = extractGardabaerDetailMetadata(await readFile(new URL("gardabaer-detail-completed.html", detailFixtureRoot), "utf8"));
+  assert.equal(completed.source_status, "completed");
+  assert.equal(completed.procurement_type, "award_or_followup");
+  assert.equal(normalizeGardabaerDetailStatus("Í auglýsingu"), "active");
+  assert.equal(normalizeGardabaerDetailStatus("Lokið"), "completed");
+  const explicit = extractGardabaerDetailMetadata(`<!doctype html><html><head><link rel="canonical" href="https://www.gardabaer.is/framkvaemdir/utbod/merkt-utbod"></head><body><main><article><h1>Merkt útboð</h1><div class="details"><div class="detailsTitle">Staða útboðs</div><div class="detailsContent">Í auglýsingu</div></div><p>Útboðsnúmer: GAR-2026-31. Garðabær óskar eftir tilboðum.</p></article></main></body></html>`);
+  assert.equal(explicit.procurement_reference, "GAR-2026-31");
+});
+
+test("Garðabær enrichment is bounded to active current cards and isolates failures", async () => {
+  const input = await readFile(new URL("gardabaer-current-cards.html", detailFixtureRoot), "utf8");
+  const candidates = parseWithV2Adapter("gardabaer-page-monitor", "2.0.0", input);
+  const openDetail = await readFile(new URL("gardabaer-detail-open.html", detailFixtureRoot), "utf8");
+  const result = await enrichCandidatesBounded(candidates, {
+    sourceKey: THREE_SOURCE_KEYS.GARDABAER,
+    limit: 10,
+    now: new Date("2026-08-30T00:00:00Z"),
+    metadataExtractor: extractGardabaerDetailMetadata,
+    fetchDetail: async (_url, candidate) => candidate.title.startsWith("Hjúkrunarheimili")
+      ? Promise.reject(Object.assign(new Error("timeout"), { code: "V2_FETCH_TIMEOUT" }))
+      : openDetail,
+  });
+  assert.deepEqual(result.metrics, { attempted: 2, succeeded: 1, failed: 1, enriched: 1, no_supported_fields: 0, skipped: 1, limit: 3 });
+  assert.equal(result.candidates[0].safe_source_payload.shadow_enrichment.enrichment_status, "failed");
+  assert.equal(result.candidates[2].safe_source_payload.shadow_enrichment.enrichment_status, "skipped_not_candidate");
+});
+
+test("Garðabær source classification uses detail evidence and completed/expired guards", () => {
+  const base = { procurement_stage: "uncertain", actionable_for_suppliers: false, requires_admin_review: true, classification_confidence: 0.35 };
+  const map = (procurement_type, deadline, source_status = "active") => applySourcePredictionPolicy(base, {
+    deadline,
+    safe_source_payload: { source_status, shadow_enrichment: { procurement_type, source_status } },
+  }, { source_key: THREE_SOURCE_KEYS.GARDABAER }, new Date("2026-08-30T12:00:00Z")).prediction;
+  assert.equal(map("open_tender", "2026-09-15").procurement_stage, "open_competition");
+  assert.equal(map("open_tender", "2026-09-15").actionable_for_suppliers, true);
+  assert.equal(map("prequalification", "2026-09-28").procurement_stage, "open_competition");
+  assert.equal(map("award_or_followup", "2026-08-20", "completed").procurement_stage, "completed");
+  assert.equal(map("award_or_followup", "2026-08-20", "completed").actionable_for_suppliers, false);
+  assert.equal(map("open_tender", "2026-08-29").actionable_for_suppliers, false);
+  assert.equal(map("unknown", "2026-09-15").actionable_for_suppliers, false);
+  assert.deepEqual(getSourceClassificationContext({ source_key: THREE_SOURCE_KEYS.GARDABAER }), {
+    source_type: "municipal_procurement_portal",
+    connector_type: "municipal_html_index",
+    source_organisation: "Garðabær procurement",
+  });
+});
+
+test("Garðabær health reports current live recovery rather than fixture metadata", () => {
+  const health = buildShadowParserHealth({
+    config: { parser_name: "gardabaer-page-monitor", parser_version: "2.0.0" },
+    fetched: 1,
+    parsed: 18,
+    valid: 18,
+    invalid: 0,
+    duplicates: 0,
+    parserErrors: [],
+    enrichment: { attempted: 4, succeeded: 4, failed: 0, enriched: 4, no_supported_fields: 0, skipped: 14, limit: 10 },
+    suspiciousZero: false,
+    classification: { stage_distribution: { open_competition: 4, completed: 14 }, actionable: 4, non_actionable: 14, uncertain: 0, strong_evidence: 4 },
+    recovery: { deadlines: 18, references: 0, buyers: 18, source_status_distribution: { active: 4, completed: 14 } },
+  });
+  assert.equal(health.fixture_only, false);
+  assert.equal(health.parsed_count, 18);
+  assert.equal(health.enrichment.failed, 0);
+  assert.equal(health.recovery.deadlines, 18);
+  assert.equal(health.recovery.references, 0);
+  assert.deepEqual(health.recovery.source_status_distribution, { active: 4, completed: 14 });
 });
 
 for (const [name, parser, file] of [["Ríkiskaup", "rikiskaup-wordpress", "rikiskaup-wordpress.json"], ["Vegagerðin", "vegagerdin-rss", "vegagerdin-rss.xml"], ["Ísafjarðarbær", "isafjordur-rss", "isafjordur-rss.xml"]]) {
@@ -819,6 +918,15 @@ test("comparison persistence keeps comparison_state on observations only", async
   assert.match(source, /const \{ comparison_state, \.\.\.comparisonRecord \} = comparison/);
   assert.match(source, /v2_legacy_comparisons.*comparisonRecord/s);
   assert.match(source, /v2_ingestion_observations.*comparison_state/s);
+});
+
+test("shadow comparison reads the actual legacy opportunity schema and fails on query errors", async () => {
+  const source = await readFile(functionUrl, "utf8");
+  assert.match(source, /select\("id,source_id,external_id,url,title,description,buyer,deadline,published_date,location,raw_payload"\)/);
+  assert.match(source, /if \(legacyError\) throw legacyError/);
+  assert.match(source, /canonical_url: row\.url/);
+  assert.match(source, /procurement_reference: row\.raw_payload\?\.procurement_reference/);
+  assert.doesNotMatch(source, /select\("id,source_id,external_id,procurement_reference,canonical_url,url/);
 });
 
 test("baseline_unavailable is an observation-only comparison state", async () => {
