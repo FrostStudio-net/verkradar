@@ -2,6 +2,7 @@ import { extractProcurementDetailMetadata } from "./adapters/procurement-metadat
 import { applyDeadlineActionabilityGuard } from "../procurement-stage.js";
 
 export const THREE_SOURCE_KEYS = Object.freeze({
+  BORGARBYGGD: "borgarbyggd-utbod-v2",
   GARDABAER: "gardabaer-utbod-v2",
   RIKISKAUP: "rikiskaup-utbod-v2",
   VEGAGERDIN: "vegagerdin-utbod-v2",
@@ -49,10 +50,13 @@ export function getSourceClassificationContext(config) {
   if (sourceKey === THREE_SOURCE_KEYS.GARDABAER) {
     return { source_type: "municipal_procurement_portal", connector_type: "municipal_html_index", source_organisation: "Garðabær procurement" };
   }
+  if (sourceKey === THREE_SOURCE_KEYS.BORGARBYGGD) {
+    return { source_type: "municipal_procurement_portal", connector_type: "wordpress_procurement_category", source_organisation: "Borgarbyggð procurement" };
+  }
   if (UTBODSVEFUR_SOURCE_BUYERS[sourceKey]) {
     return { source_type: "energy_utility_procurement_portal", connector_type: "public_procurement_html_index", source_organisation: `${UTBODSVEFUR_SOURCE_BUYERS[sourceKey]} procurement` };
   }
-  if (["akranes-utbod-v2", "borgarbyggd-utbod-v2"].includes(sourceKey)) {
+  if (sourceKey === "akranes-utbod-v2") {
     return { source_type: "municipal", connector_type: "rss_feed", source_organisation: String(config?.display_name || sourceKey) };
   }
   return {
@@ -94,8 +98,8 @@ export async function fetchBoundedWordpressPages(options) {
       items.push(item);
       if (items.length >= maxItems) break;
     }
-    if (pageItems.length < perPage) { stopped = "short_page"; break; }
     if (reportedTotalPages !== null && page >= reportedTotalPages) { stopped = "reported_end"; break; }
+    if (pageItems.length < perPage) { stopped = "short_page"; break; }
     if (items.length >= maxItems) stopped = "item_cap";
   }
 
@@ -207,6 +211,8 @@ export function applySourcePredictionPolicy(prediction, observation, config, now
       ? applyReykjavikProcurementType(prediction, observation)
       : sourceKey === THREE_SOURCE_KEYS.GARDABAER
         ? applyGardabaerProcurementType(prediction, observation)
+      : sourceKey === THREE_SOURCE_KEYS.BORGARBYGGD
+        ? applyBorgarbyggdProcurementType(prediction, observation)
       : UTBODSVEFUR_SOURCE_BUYERS[sourceKey]
         ? applyUtbodsvefurProcurementType(prediction, observation, UTBODSVEFUR_SOURCE_BUYERS[sourceKey])
     : { ...prediction };
@@ -220,6 +226,26 @@ export function applySourcePredictionPolicy(prediction, observation, config, now
     adjusted.requires_admin_review = true;
   }
   return { prediction: adjusted, category };
+}
+
+export function applyBorgarbyggdSourceStatus(candidates, now = new Date()) {
+  const referenceDate = new Date(now).toISOString().slice(0, 10);
+  return candidates.map((candidate) => {
+    const enrichment = candidate?.safe_source_payload?.shadow_enrichment || {};
+    const status = enrichment.follow_up === true
+      ? "completed"
+      : candidate?.deadline
+        ? String(candidate.deadline).slice(0, 10) < referenceDate ? "completed" : "active"
+        : "unknown";
+    return {
+      ...candidate,
+      safe_source_payload: {
+        ...(candidate.safe_source_payload || {}),
+        source_status: status,
+        shadow_enrichment: { ...enrichment, source_status: status },
+      },
+    };
+  });
 }
 
 export function derivePromotionEvidence(observation, prediction) {
@@ -236,11 +262,14 @@ export function derivePromotionEvidence(observation, prediction) {
   const strongSignals = Array.isArray(prediction?.positive_signals)
     ? prediction.positive_signals.map(String)
     : [];
-  const strongProcurementEvidence = strongType || enrichment.request_for_bids === true ||
-    strongSignals.some((signal) => ["request_for_bids", "market_consultation", "supplier_deadline", "procurement_reference"].includes(signal));
+  const followUpOrCompleted = procurementType === "award_or_followup" || enrichment.follow_up === true ||
+    ["award_or_contract_signed", "work_underway", "completed"].includes(String(prediction?.procurement_stage || ""));
+  const strongProcurementEvidence = !followUpOrCompleted && (strongType || enrichment.request_for_bids === true ||
+    strongSignals.some((signal) => ["request_for_bids", "market_consultation", "supplier_deadline", "procurement_reference"].includes(signal)));
   const deadlineEvidence = observation?.deadline ? "explicit_source" : null;
   let promotionEnrichmentStatus = "failed";
-  if (["enriched", "no_supported_fields"].includes(enrichmentStatus)) promotionEnrichmentStatus = "succeeded";
+  if (enrichmentStatus === "not_needed" && strongProcurementEvidence && deadlineEvidence) promotionEnrichmentStatus = "not_needed";
+  else if (["enriched", "no_supported_fields"].includes(enrichmentStatus)) promotionEnrichmentStatus = "succeeded";
   else if (!enrichmentStatus && strongProcurementEvidence && deadlineEvidence) promotionEnrichmentStatus = "not_needed";
   return {
     strong_procurement_evidence: strongProcurementEvidence,
@@ -311,6 +340,26 @@ function applyGardabaerProcurementType(prediction, observation) {
   return { ...prediction, actionable_for_suppliers: false, requires_admin_review: true };
 }
 
+function applyBorgarbyggdProcurementType(prediction, observation) {
+  const enrichment = observation?.safe_source_payload?.shadow_enrichment || {};
+  const procurementType = String(enrichment.procurement_type || "");
+  const sourceStatus = String(enrichment.source_status || observation?.safe_source_payload?.source_status || "unknown");
+  if (sourceStatus === "completed" || procurementType === "award_or_followup") {
+    return mappedPrediction(prediction, "completed", false, false, "Borgarbyggð notice is expired, completed, or procurement follow-up content.");
+  }
+  if (sourceStatus === "active" && procurementType === "open_tender" && observation?.deadline) {
+    return mappedPrediction(prediction, "open_competition", true, false, "Explicit Borgarbyggð invitation to tender with a current submission deadline.");
+  }
+  return {
+    ...prediction,
+    procurement_stage: "uncertain",
+    actionable_for_suppliers: false,
+    requires_admin_review: true,
+    classification_confidence: Math.min(Number(prediction?.classification_confidence || 0.35), 0.7),
+    classification_reason: "Borgarbyggð notice lacks enough current tender evidence for automatic actionability.",
+  };
+}
+
 function applyRikiskaupProcurementType(prediction, observation) {
   const procurementType = String(observation?.safe_source_payload?.shadow_enrichment?.procurement_type || "");
   if (procurementType === "market_consultation") {
@@ -357,7 +406,7 @@ export function categorizeShadowObservation(observation, prediction, sourceKey, 
 
 /** @param {any} input */
 export function buildShadowParserHealth(input) {
-  const { config, fetched, parsed, valid, invalid, duplicates, parserErrors = [], enrichment, suspiciousZero, pagination, classification, indexDiagnostics, recovery } = input;
+  const { config, fetched, parsed, valid, invalid, duplicates, parserErrors = [], enrichment, suspiciousZero, pagination, classification, comparison, quality, indexDiagnostics, recovery } = input;
   return {
     parser_name: config.parser_name,
     parser_version: config.parser_version,
@@ -372,6 +421,8 @@ export function buildShadowParserHealth(input) {
     pagination: pagination || null,
     index_diagnostics: indexDiagnostics || null,
     classification: classification || { stage_distribution: {}, actionable: 0, non_actionable: 0 },
+    comparison: comparison || { state_distribution: {}, errors: 0 },
+    quality: quality || { healthy: true, blockers: [] },
     recovery: recovery || { deadlines: 0, references: 0, buyers: 0, source_status_distribution: {} },
     fixture_only: false,
   };

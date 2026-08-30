@@ -84,7 +84,7 @@ test("parses the narrow Akranes RSS fixture", async () => {
 
 test("parses the Borgarbyggð WordPress REST fixture", async () => {
   const input = await readFile(new URL("borgarbyggd-wordpress.json", fixtureRoot), "utf8");
-  const rows = parseWithV2Adapter("borgarbyggd-wordpress", "1.0.0", input);
+  const rows = parseWithV2Adapter("borgarbyggd-wordpress", "2.0.0", input);
   assert.equal(rows.length, 2);
   assert.equal(rows[0].external_id, "4201");
   assert.equal(rows[0].procurement_reference, "BOR-2026-09");
@@ -802,7 +802,7 @@ test("overall run deadline prevents any request attempt after expiry", async () 
 });
 
 test("deterministic parser failures are invalid and non-retryable", () => {
-  assert.throws(() => parseWithV2Adapter("borgarbyggd-wordpress", "1.0.0", "{invalid"), (error) => {
+  assert.throws(() => parseWithV2Adapter("borgarbyggd-wordpress", "2.0.0", "{invalid"), (error) => {
     assert.equal(error.code, "V2_PARSER_INVALID_JSON");
     assert.equal(error.retryable, false);
     return true;
