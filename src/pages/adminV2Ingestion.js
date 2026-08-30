@@ -62,14 +62,24 @@ function renderProductionShadowControl(rows, escapeHtml, activeAction, result) {
 }
 
 function renderRoutineProduction(rows, escapeHtml, formatDateTime, activeAction, result) {
-  const row = rows.find((item) => item.source_key === "reykjavik-utbod-v2");
-  if (!row || row.routine_admission_scan_limit == null) return "";
+  return [
+    { sourceKey: "reykjavik-utbod-v2", label: "Reykjavík", description: "Scheduled official-HTML ingestion with strict automatic admission." },
+    { sourceKey: "gardabaer-utbod-v2", label: "Garðabær", description: "Scheduled card-local official-HTML ingestion with strict automatic admission." },
+  ].map((source) => {
+    const row = rows.find((item) => item.source_key === source.sourceKey);
+    if (!row || row.routine_admission_scan_limit == null) return "";
+    return renderRoutineSource(row, source, escapeHtml, formatDateTime, activeAction, result);
+  }).join("");
+}
+
+function renderRoutineSource(row, source, escapeHtml, formatDateTime, activeAction, result) {
   const enabled = row.routine_production_enabled === true;
   const health = row.health || {};
   const metrics = row.routineMetrics || {};
   const latest = row.latestRun || {};
-  return `<section class="phase-c-canary" aria-labelledby="reykjavik-routine-title">
-    <div class="card-header"><div><h3 id="reykjavik-routine-title">Reykjavík V2 — normal production</h3><p>Scheduled official-HTML ingestion with strict automatic admission. Legacy ingestion remains independent.</p></div><span class="status-pill ${enabled ? "is-running" : "is-error"}">${enabled ? "ENABLED" : "EMERGENCY STOPPED"}</span></div>
+  const actionBusy = String(activeAction || "").startsWith(`${source.sourceKey}:`);
+  return `<section class="phase-c-canary" aria-labelledby="${source.sourceKey}-routine-title">
+    <div class="card-header"><div><h3 id="${source.sourceKey}-routine-title">${escapeHtml(source.label)} V2 — normal production</h3><p>${escapeHtml(source.description)} Legacy ingestion remains independent.</p></div><span class="status-pill ${enabled ? "is-running" : "is-error"}">${enabled ? "ENABLED" : "EMERGENCY STOPPED"}</span></div>
     <dl>
       <dt>Production ingestion</dt><dd>${enabled ? "enabled" : "disabled"}</dd>
       <dt>Source state</dt><dd>${escapeHtml(`${row.mode || "—"} / promotion approval ${row.promotion_approved ? "yes" : "no"}`)}</dd>
@@ -80,9 +90,9 @@ function renderRoutineProduction(rows, escapeHtml, formatDateTime, activeAction,
       <dt>Duplicates / errors</dt><dd>${Number(metrics.duplicates || 0)} / ${Number(metrics.errors || 0)}</dd>
       <dt>Limits</dt><dd>${Number(row.routine_admission_max_new_per_run || 0)} new/run, ${Number(row.routine_admission_max_new_per_day || 0)} new/day, scan ${Number(row.routine_admission_scan_limit || 0)}</dd>
     </dl>
-    <button data-action="v2-routine-toggle" data-enabled="${enabled ? "false" : "true"}" ${activeAction ? "disabled" : ""}>${enabled ? "Emergency disable Reykjavík V2 admissions" : "Re-enable Reykjavík V2 admissions"}</button>
-    ${activeAction ? `<p class="admin-message">Updating Reykjavík routine production state…</p>` : ""}
-    ${result ? `<pre class="phase-c-canary-assertions">${escapeHtml(JSON.stringify(result, null, 2))}</pre>` : ""}
+    <button data-action="v2-routine-toggle" data-source-key="${source.sourceKey}" data-enabled="${enabled ? "false" : "true"}" ${activeAction ? "disabled" : ""}>${enabled ? `Emergency disable ${escapeHtml(source.label)} V2 admissions` : `Re-enable ${escapeHtml(source.label)} V2 admissions`}</button>
+    ${actionBusy ? `<p class="admin-message">Updating ${escapeHtml(source.label)} routine production state…</p>` : ""}
+    ${actionBusy && result ? `<pre class="phase-c-canary-assertions">${escapeHtml(JSON.stringify(result, null, 2))}</pre>` : ""}
     <p><small>This control stops future scheduled runs/admissions only. It does not delete opportunities, alter provenance, or affect TED/legacy imports.</small></p>
   </section>`;
 }

@@ -764,19 +764,25 @@ document.addEventListener("click", async (event) => {
 
   if (name === "v2-routine-toggle") {
     event.preventDefault();
-    const source = (state.v2IngestionRows || []).find((row) => row.source_key === "reykjavik-utbod-v2");
-    if (!supabaseClient || !state.isAdmin || !isPhaseC3ProductionRuntime(SUPABASE_URL) || !source) return;
+    const sourceKey = action.dataset.sourceKey || "";
+    const routineActions = {
+      "reykjavik-utbod-v2": { action: "set_reykjavik_routine_production", label: "Reykjavík" },
+      "gardabaer-utbod-v2": { action: "set_gardabaer_routine_production", label: "Garðabær" },
+    };
+    const routine = routineActions[sourceKey];
+    const source = (state.v2IngestionRows || []).find((row) => row.source_key === sourceKey);
+    if (!supabaseClient || !state.isAdmin || !isPhaseC3ProductionRuntime(SUPABASE_URL) || !source || !routine) return;
     const enabled = action.dataset.enabled === "true";
-    const promptText = enabled ? "Reason for re-enabling Reykjavík V2 admissions" : "Emergency-disable reason";
+    const promptText = enabled ? `Reason for re-enabling ${routine.label} V2 admissions` : `${routine.label} emergency-disable reason`;
     const reason = window.prompt(promptText)?.trim();
-    if (!reason || !window.confirm(`${enabled ? "Re-enable" : "Disable"} scheduled Reykjavík V2 admissions? This does not affect legacy ingestion or existing opportunities.`)) return;
+    if (!reason || !window.confirm(`${enabled ? "Re-enable" : "Disable"} scheduled ${routine.label} V2 admissions? This does not affect legacy ingestion or existing opportunities.`)) return;
     action.disabled = true;
-    state.v2RoutineProductionAction = enabled ? "enable" : "disable";
+    state.v2RoutineProductionAction = `${sourceKey}:${enabled ? "enable" : "disable"}`;
     state.v2RoutineProductionResult = null;
     state.v2IngestionError = null;
     render();
     try {
-      state.v2RoutineProductionResult = await invokeAdminV2Action(supabaseClient, "set_reykjavik_routine_production", "reykjavik-utbod-v2", null, { enabled, reason });
+      state.v2RoutineProductionResult = await invokeAdminV2Action(supabaseClient, routine.action, sourceKey, null, { enabled, reason });
       await loadV2IngestionForAdmin();
     } catch (error) {
       console.error(error);
