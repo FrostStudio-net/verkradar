@@ -779,7 +779,8 @@ test("admin v2 panel exposes safe shadow/staging actions and separately gated Ph
   assert.match(panel, /v2-c3-enable-release/);
   assert.match(panel, /v2-c3-approve-release/);
   assert.match(panel, /v2-c3-release/);
-  assert.doesNotMatch(panel, /data-action="[^"]*(match|ai|report|send|clear-hold)/i);
+  assert.match(panel, /v2-c3-clear-hold/);
+  assert.doesNotMatch(panel, /data-action="[^"]*(match|ai|report|send)/i);
 });
 
 test("admin v2 panel render path resolves control gating without free variables", () => {

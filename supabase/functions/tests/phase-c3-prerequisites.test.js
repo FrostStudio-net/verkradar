@@ -56,7 +56,8 @@ test("production action surface is exact-project, admin authenticated, flagged, 
   assert.match(source, /phase_c_production_enabled/);
   assert.match(source, /Exactly one valid observation_id is required/);
   for (const action of ["approve_release", "release_canary", "disable_released_canary"]) assert.match(source, new RegExp(action));
-  assert.doesNotMatch(source, /promote_bulk|automatic_release|clear_communication_hold/);
+  assert.doesNotMatch(source, /promote_bulk|automatic_release/);
+  assert.match(source, /clear_communication_hold/);
 });
 
 test("production UI exposes only the enable control until both feature gates allow canary actions", () => {

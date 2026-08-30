@@ -17,7 +17,9 @@
     "test:production-canary-enable-control": "node --test supabase/functions/tests/production-canary-enable-control.test.js",
     "test:production-canary-enable-control-db": "bash scripts/test-production-canary-enable-control-db.sh",
     "test:production-release-controls": "node --test supabase/functions/tests/production-release-controls.test.js",
-    "test:production-release-controls-db": "bash scripts/test-production-release-controls-db.sh"
+    "test:production-release-controls-db": "bash scripts/test-production-release-controls-db.sh",
+    "test:production-hold-clear": "node --test supabase/functions/tests/production-communication-hold-clear.test.js",
+    "test:production-hold-clear-db": "bash scripts/test-production-hold-clear-db.sh"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",

@@ -847,14 +847,14 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
-  if (["v2-c3-approve-source", "v2-c3-revoke-source", "v2-c3-approve-observation", "v2-c3-promote", "v2-c3-assertions", "v2-c3-rollback", "v2-c3-enable-release", "v2-c3-disable-release", "v2-c3-approve-release", "v2-c3-release", "v2-c3-disable"].includes(name)) {
+  if (["v2-c3-approve-source", "v2-c3-revoke-source", "v2-c3-approve-observation", "v2-c3-promote", "v2-c3-assertions", "v2-c3-rollback", "v2-c3-enable-release", "v2-c3-disable-release", "v2-c3-approve-release", "v2-c3-release", "v2-c3-clear-hold", "v2-c3-disable"].includes(name)) {
     event.preventDefault();
     const productionRow = (state.v2IngestionRows || []).find((row) => row.source_key === "reykjavik-utbod-v2");
     const enabled = state.isAdmin && isPhaseC3ProductionRuntime(SUPABASE_URL) && productionRow?.phaseC3Production?.enabled === true && productionRow?.production_canary_enabled === true;
     const observationId = state.v2C3SelectedObservationId;
     const selected = productionRow?.phaseC3Production?.candidates?.find((item) => item.observation.id === observationId);
     if (!supabaseClient || !enabled || (!["v2-c3-approve-source", "v2-c3-revoke-source"].includes(name) && !selected)) return;
-    const reasonActions = new Set(["v2-c3-rollback", "v2-c3-approve-release", "v2-c3-release", "v2-c3-disable"]);
+    const reasonActions = new Set(["v2-c3-rollback", "v2-c3-approve-release", "v2-c3-release", "v2-c3-clear-hold", "v2-c3-disable"]);
     const reason = reasonActions.has(name) ? window.prompt("Required audit reason")?.trim() : "";
     if (reasonActions.has(name) && !reason) return;
     action.disabled = true;
@@ -887,6 +887,15 @@ document.addEventListener("click", async (event) => {
         state.v2C3Result = await invokeAdminV2Action(supabaseClient, "approve_release", null, null, { observation_id: observationId, reason });
       } else if (name === "v2-c3-release") {
         state.v2C3Result = await invokeAdminV2Action(supabaseClient, "release_canary", null, null, { observation_id: observationId, reason });
+      } else if (name === "v2-c3-clear-hold") {
+        const confirmation = "Clear communication hold only — no matching or communication will run";
+        if (!window.confirm(confirmation)) return;
+        state.v2C3Result = await invokeAdminV2Action(supabaseClient, "clear_communication_hold", "reykjavik-utbod-v2", null, {
+          observation_id: observationId,
+          opportunity_id: selected.opportunity.id,
+          reason,
+          confirmation,
+        });
       } else if (name === "v2-c3-disable") {
         state.v2C3Result = await invokeAdminV2Action(supabaseClient, "disable_released_canary", null, null, { observation_id: observationId, reason });
       }

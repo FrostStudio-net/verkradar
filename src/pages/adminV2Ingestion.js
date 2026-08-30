@@ -99,9 +99,22 @@ function renderPhaseC3Production(rows, escapeHtml, formatDateTime, selectedId, a
   const releaseApproved = row.release_approved === true && observation?.approved_for_release === true;
   const releasePreflight = result?.release_preflight || result?.release?.preflight || null;
   const assertions = result?.assertions || null;
+  const exactHoldClearTarget = observation?.id === "32713ed0-089d-45a0-97f9-24fabdbf08dd"
+    && opportunity?.id === "1c4b107b-999c-47df-82a7-d87b43b20185"
+    && observation?.promoted_opportunity_id === opportunity?.id
+    && observation?.promotion_state === "promoted"
+    && provenance?.provenance_type === "v2_created";
+  const holdClearReady = exactHoldClearTarget
+    && released
+    && opportunity?.status === "open"
+    && held
+    && !quarantined
+    && opportunity?.phase_c_disabled_at == null
+    && assertions?.zero_downstream === true;
+  const holdCleared = exactHoldClearTarget && released && !held && !quarantined;
   return `${setup}
     <section class="phase-c-canary" aria-labelledby="phase-c3-production-title">
-      <div class="card-header"><div><h3 id="phase-c3-production-title">Phase C3 production canary</h3><p>One source and one observation only. Promotion, release, and communication are separate.</p></div><span class="status-pill ${released ? "is-running" : "is-error"}">${released && held ? "RELEASED — COMMUNICATION HOLD ACTIVE" : "PRODUCTION — MANUAL"}</span></div>
+      <div class="card-header"><div><h3 id="phase-c3-production-title">Phase C3 production canary</h3><p>One source and one observation only. Promotion, release, and communication are separate.</p></div><span class="status-pill ${released ? "is-running" : "is-error"}">${holdCleared ? "RELEASED — COMMUNICATION HOLD CLEARED" : released && held ? "RELEASED — COMMUNICATION HOLD ACTIVE" : "PRODUCTION — MANUAL"}</span></div>
       <label>Eligible Reykjavík observation
         <select data-action="v2-c3-select-observation" ${busy ? "disabled" : ""}>
           <option value="">Select exactly one observation</option>
@@ -122,6 +135,11 @@ function renderPhaseC3Production(rows, escapeHtml, formatDateTime, selectedId, a
         <dt>Source health</dt><dd>${escapeHtml(`${row.health?.status || "—"} / ${row.health?.circuit_state || "—"}`)}</dd>
         <dt>Duplicate / fuzzy revalidation</dt><dd>${releasePreflight ? escapeHtml(`${releasePreflight.deterministic_candidate_count ?? "—"} deterministic / ${releasePreflight.fuzzy_candidate_count ?? "—"} fuzzy`) : "Run safety assertions to revalidate"}</dd>
         <dt>Downstream</dt><dd>${assertions ? escapeHtml(JSON.stringify(assertions)) : "Run safety assertions to verify"}</dd>
+        ${released ? `<dt>Match count</dt><dd>${escapeHtml(String(assertions?.opportunity_matches ?? "Run safety assertions"))}</dd>
+        <dt>AI reviews/usages</dt><dd>${escapeHtml(assertions ? `${assertions.ai_reviews ?? 0} / ${assertions.ai_usages ?? 0}` : "Run safety assertions")}</dd>
+        <dt>Reports/items</dt><dd>${escapeHtml(assertions ? `${assertions.reports ?? 0} / ${assertions.report_items ?? 0}` : "Run safety assertions")}</dd>
+        <dt>Actions/sends</dt><dd>${escapeHtml(assertions ? `${assertions.actions ?? 0} / ${assertions.sends ?? 0}` : "Run safety assertions")}</dd>
+        <dt>Customer-visible linkages</dt><dd>${escapeHtml(String(assertions?.customer_visible_linkages ?? "Run safety assertions"))}</dd>` : ""}
       </dl>
       <div class="admin-inline-actions">
         ${!opportunity ? `<button data-action="v2-c3-approve-source" ${sourceApproved || busy ? "disabled" : ""}>Approve Reykjavík source</button>
@@ -134,11 +152,12 @@ function renderPhaseC3Production(rows, escapeHtml, formatDateTime, selectedId, a
         ${!released && releaseEnabled ? `<button data-action="v2-c3-disable-release" ${busy ? "disabled" : ""}>Disable release controls</button>` : ""}
         ${!released && releaseEnabled && !releaseApproved ? `<button data-action="v2-c3-approve-release" ${busy ? "disabled" : ""}>Approve canary release</button>` : ""}
         ${!released && releaseApproved ? `<button data-action="v2-c3-release" ${busy ? "disabled" : ""}>Release with communication hold</button>` : ""}
+        ${holdClearReady ? `<button data-action="v2-c3-clear-hold" ${busy ? "disabled" : ""}>Clear communication hold</button>` : ""}
         ${released ? `<button data-action="v2-c3-disable" ${busy ? "disabled" : ""}>Post-release disable</button>` : ""}
       </div>
       ${activeAction ? `<p class="admin-message">Running ${escapeHtml(activeAction)}…</p>` : ""}
       ${result ? `<pre class="phase-c-canary-assertions">${escapeHtml(JSON.stringify(result, null, 2))}</pre>` : ""}
-      <p><small>No matching, AI, report, send, bulk, automatic release, or communication-hold-clear control exists here.</small></p>
+      <p><small>Clearing communication hold does not trigger matching, AI, reports, actions, sends, or any daily pipeline. Post-release disable remains the fail-safe.</small></p>
     </section>`;
 }
 

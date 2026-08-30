@@ -33,8 +33,11 @@ const corsHeaders = {
 const LEGACY_TABLE = "opportunities";
 const STAGING_PROJECT_REF = "ipixuxznqtrcdpzoxric";
 const REYKJAVIK_SOURCE_KEY = "reykjavik-utbod-v2";
+const REYKJAVIK_HOLD_CLEAR_OBSERVATION_ID = "32713ed0-089d-45a0-97f9-24fabdbf08dd";
+const REYKJAVIK_HOLD_CLEAR_OPPORTUNITY_ID = "1c4b107b-999c-47df-82a7-d87b43b20185";
 const PRODUCTION_CANARY_CONFIRMATION = "Enable canary controls only — no promotion will occur";
 const PRODUCTION_RELEASE_CONFIRMATION = "Enable release controls only — no release will occur";
+const COMMUNICATION_HOLD_CLEAR_CONFIRMATION = "Clear communication hold only — no matching or communication will run";
 const STAGING_PHASE_C_SOURCES: ReadonlySet<string> = new Set([THREE_SOURCE_KEYS.REYKJAVIK, THREE_SOURCE_KEYS.RIKISKAUP]);
 const ALLOWED_SOURCES = new Set(["akranes-utbod-v2", "borgarbyggd-utbod-v2", "gardabaer-utbod-v2", "rikiskaup-utbod-v2", "vegagerdin-utbod-v2", "isafjordur-utbod-v2", "reykjavik-utbod-v2"]);
 
@@ -101,7 +104,7 @@ Deno.serve(async (req) => {
 
     const body = await safeJson(req);
     if (body.action === "phase_c_capabilities") return await phaseCCapabilities({ adminClient, isProduction });
-    const productionPhaseCAction = ["set_source_promotion_approval", "approve_promotion", "promote_canary", "rollback_canary", "canary_assertions", "set_reykjavik_release_enabled", "approve_release", "release_canary", "disable_released_canary"].includes(String(body.action || ""));
+    const productionPhaseCAction = ["set_source_promotion_approval", "approve_promotion", "promote_canary", "rollback_canary", "canary_assertions", "set_reykjavik_release_enabled", "approve_release", "release_canary", "clear_communication_hold", "disable_released_canary"].includes(String(body.action || ""));
     const productionShadowAction = body.action === "run_shadow";
     const productionCanaryToggleAction = body.action === "set_reykjavik_production_canary_enabled";
     if (productionCanaryToggleAction && !isProduction) {
@@ -124,6 +127,10 @@ Deno.serve(async (req) => {
     }
     if (body.action === "approve_release") return await approveRelease({ body, adminClient, adminUserId: userData.user.id });
     if (body.action === "release_canary") return await releaseCanary({ body, adminClient, adminUserId: userData.user.id });
+    if (body.action === "clear_communication_hold") {
+      if (!isProduction) return json({ error: "Communication hold clearing is production-only", code: "V2_COMMUNICATION_HOLD_PRODUCTION_REQUIRED" }, 403);
+      return await clearCommunicationHold({ body, adminClient, adminUserId: userData.user.id });
+    }
     if (body.action === "disable_released_canary") return await disableReleasedCanary({ body, adminClient, adminUserId: userData.user.id });
     if (body.action === "canary_assertions") return await canaryAssertions({ body, adminClient });
     if (body.action === "set_mode") return await setShadowMode({ body, adminClient });
@@ -571,6 +578,39 @@ async function releaseCanary({ body, adminClient, adminUserId }: { body: Record<
   const { data, error } = await adminClient.rpc("release_v2_canary", { target_observation_id: observationId, releasing_admin_id: adminUserId, reason_text: reason });
   if (error) throw error;
   return json({ ok: true, action: "release_canary", release: data, matching_triggered: false, communication_hold: true });
+}
+
+async function clearCommunicationHold({ body, adminClient, adminUserId }: { body: Record<string, unknown>; adminClient: any; adminUserId: string }) {
+  const sourceKey = String(body.source_key || "").trim();
+  const observationId = requireSingleObservationId(body);
+  const opportunityId = String(body.opportunity_id || "").trim();
+  const reason = String(body.reason || "").trim();
+  if (sourceKey !== REYKJAVIK_SOURCE_KEY
+      || observationId !== REYKJAVIK_HOLD_CLEAR_OBSERVATION_ID
+      || opportunityId !== REYKJAVIK_HOLD_CLEAR_OPPORTUNITY_ID) {
+    return json({ error: "Only the exact released Reykjavík production canary may clear communication hold", code: "V2_COMMUNICATION_HOLD_TARGET_NOT_ALLOWED" }, 403);
+  }
+  if (!isUuid(opportunityId)) return json({ error: "Exactly one valid opportunity_id is required", code: "V2_SINGLE_OPPORTUNITY_REQUIRED" }, 400);
+  if (!reason) return json({ error: "A communication-hold audit reason is required", code: "V2_COMMUNICATION_HOLD_REASON_REQUIRED" }, 400);
+  if (String(body.confirmation || "") !== COMMUNICATION_HOLD_CLEAR_CONFIRMATION) {
+    return json({ error: "Exact communication-hold confirmation is required", code: "V2_COMMUNICATION_HOLD_CONFIRMATION_REQUIRED" }, 400);
+  }
+  const { data, error } = await adminClient.rpc("clear_reykjavik_v2_canary_communication_hold", {
+    target_observation_id: observationId,
+    target_opportunity_id: opportunityId,
+    clearing_admin_id: adminUserId,
+    reason_text: reason,
+    runtime_project_ref: PRODUCTION_PROJECT_REF,
+  });
+  if (error) throw error;
+  return json({
+    ok: true,
+    action: "clear_communication_hold",
+    hold_clear: data,
+    assertions: await loadCanaryAssertions(adminClient, opportunityId),
+    matching_triggered: false,
+    downstream_triggered: false,
+  });
 }
 
 async function disableReleasedCanary({ body, adminClient, adminUserId }: { body: Record<string, unknown>; adminClient: any; adminUserId: string }) {
