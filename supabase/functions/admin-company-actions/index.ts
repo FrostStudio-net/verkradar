@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { isProcurementOpportunityEligible } from "../_shared/procurement-stage.js";
+import { isExplicitLocationAliasMatch } from "../_shared/location-aliases.js";
 
 const MIN_MATCH_SCORE = 50;
 const corsHeaders = {
@@ -2204,8 +2205,7 @@ function localLocationMatches(profile: CompanyProfile, opportunity: Record<strin
   return selectedLocations.some((selected) => {
     if (!selected) return false;
     if (selected === opportunityLocation) return true;
-    if (selected === "reykjavik" && ["reykjavik", "capital area", "hofudborgarsvaedid"].includes(opportunityLocation)) return true;
-    if (selected === "capital area" && ["reykjavik", "capital area", "hofudborgarsvaedid"].includes(opportunityLocation)) return true;
+    if (isExplicitLocationAliasMatch(selected, opportunityLocation)) return true;
     return opportunityLocation.includes(selected) || selected.includes(opportunityLocation);
   });
 }
