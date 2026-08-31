@@ -648,7 +648,7 @@ async function runShadow({ body, config, adminClient }: { body: Record<string, u
       if (currentCount === 0 || currentRows.length !== currentCount || indexDiagnostics?.structure_matched !== true) qualityBlockers.push("current_listing_structure_mismatch");
       if (currentReferences !== currentCount) qualityBlockers.push("current_reference_recovery_incomplete");
       if (currentBuyers !== currentCount) qualityBlockers.push("current_buyer_recovery_incomplete");
-      if (currentCount > 0 && currentDeadlines === 0) qualityBlockers.push("current_deadline_recovery_suspicious_zero");
+      if (currentDeadlines !== currentCount) qualityBlockers.push("current_deadline_recovery_incomplete");
       if (enrichmentMetrics.failed !== 0 || enrichmentMetrics.no_supported_fields !== 0 || enrichmentMetrics.succeeded !== currentCount) qualityBlockers.push("current_detail_enrichment_ineffective");
       if (classificationMetrics.expired_or_completed_actionable !== 0) qualityBlockers.push("expired_or_completed_actionable");
       if (comparisonMetrics.errors !== 0 || comparisonMetrics.baseline_unavailable !== 0 || comparisonMetrics.global_completed !== storedObservations.length) qualityBlockers.push("comparison_incomplete");

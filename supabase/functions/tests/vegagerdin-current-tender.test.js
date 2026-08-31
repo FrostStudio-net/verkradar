@@ -13,7 +13,7 @@ const functionUrl = new URL("../import-source-connectors-v2/index.ts", import.me
 
 test("Vegagerðin combined index keeps current and planned roles separate", async () => {
   const payload = await readFile(new URL("vegagerdin-html-index.json", fixtureRoot), "utf8");
-  const rows = parseWithV2Adapter("vegagerdin-html-index", "1.1.0", payload);
+  const rows = parseWithV2Adapter("vegagerdin-html-index", "1.1.1", payload);
   assert.equal(rows.length, 3);
   assert.deepEqual(rows.filter((row) => row.safe_source_payload.listing_role === "current_tender").map((row) => row.procurement_reference), ["25-025", "24-029"]);
   assert.deepEqual(rows.filter((row) => row.safe_source_payload.listing_role === "planned_tender").map((row) => row.procurement_reference), ["26-118"]);
@@ -63,6 +63,18 @@ test("Vegagerðin detail extracts active reference, deadline, lifecycle, and evi
   assert.equal(metadata.procurement_type, "open_tender");
   assert.equal(metadata.request_for_bids, true);
   assert.equal(metadata.buyer, "Vegagerðin");
+});
+
+test("Vegagerðin detail deadline is recovered from article body singular tilboði wording", () => {
+  const metadata = extractVegagerdinDetailMetadata(`
+    <span class="Headline_eyebrow__x">Útboðsnúmer 24-029</span>
+    <h1 class="Headline_headline__x">Búðafossvegur</h1>
+    <div class="PageHeader_intro__x"><p>Vegagerðin býður hér með út verkið.</p></div>
+    <li class="ProgressTracker_milestone__x ProgressTracker_current__x">1 Auglýst júlí 2026</li>
+    <article><p>Tilboði skal skila rafrænt í TendSign fyrir kl. 14:00 þriðjudaginn 22. september 2026.</p></article>
+  `);
+  assert.equal(metadata.deadline, "2026-09-22");
+  assert.equal(metadata.source_status, "active");
 });
 
 test("Vegagerðin completed detail is follow-up and never actionable", async () => {

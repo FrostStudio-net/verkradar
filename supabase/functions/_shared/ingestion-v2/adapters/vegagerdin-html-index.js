@@ -13,7 +13,7 @@ const RESERVED_PATHS = new Set([
 
 export const vegagerdinHtmlIndexAdapter = {
   parserName: "vegagerdin-html-index",
-  parserVersion: "1.1.0",
+  parserVersion: "1.1.1",
   parse(input) {
     let payload;
     try { payload = typeof input === "string" ? JSON.parse(input) : input; }
@@ -165,9 +165,9 @@ export function normalizeDetailUrl(value) {
 
 export function extractSubmissionDeadline(value) {
   const text = stripHtml(value);
-  const numeric = text.match(/(?:(?:tilboðum|umsóknum)\s+skal\s+skila(?:ð)?|skal\s+(?:tilboðum|umsóknum)\s+skila(?:ð)?).{0,180}?(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})/i);
+  const numeric = text.match(/(?:(?:tilboði|tilboðum|umsókn|umsóknum)\s+skal\s+skila(?:ð)?|skal\s+(?:tilboði|tilboðum|umsókn|umsóknum)\s+skila(?:ð)?).{0,180}?(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})/i);
   if (numeric) return validDate(numeric[3], numeric[2], numeric[1]);
-  const named = text.match(/(?:(?:tilboðum|umsóknum)\s+skal\s+skila(?:ð)?|skal\s+(?:tilboðum|umsóknum)\s+skila(?:ð)?).{0,220}?(\d{1,2})\.?\s+([A-Za-zÁÉÍÓÚÝÞÐÆÖáéíóúýþðæö]+)\s+(\d{4})/i);
+  const named = text.match(/(?:(?:tilboði|tilboðum|umsókn|umsóknum)\s+skal\s+skila(?:ð)?|skal\s+(?:tilboði|tilboðum|umsókn|umsóknum)\s+skila(?:ð)?).{0,220}?(\d{1,2})\.?\s+([A-Za-zÁÉÍÓÚÝÞÐÆÖáéíóúýþðæö]+)\s+(\d{4})/i);
   if (!named) return null;
   const month = icelandicMonth(named[2]);
   return month ? validDate(named[3], month, named[1]) : null;

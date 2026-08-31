@@ -9,7 +9,10 @@ export function extractVegagerdinDetailMetadata(html = "") {
   const title = stripHtml(headline.replace(/<span\b[\s\S]*?<\/span>/i, "")) || null;
   const intro = extractBalancedDivByClass(source, "PageHeader_intro__");
   const description = stripHtml(intro) || null;
-  const deadline = extractSubmissionDeadline(description || "");
+  // Current pages usually place the submission deadline in the article body,
+  // outside PageHeader_intro. The deadline extractor itself requires an
+  // explicit submission phrase, so searching this page-local HTML is safe.
+  const deadline = extractSubmissionDeadline(source);
   const currentMilestone = extractCurrentMilestone(source);
   const sourceStatus = normalizeLifecycle(currentMilestone);
   const procurementType = sourceStatus === "active" ? "open_tender"

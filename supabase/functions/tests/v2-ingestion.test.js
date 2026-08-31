@@ -195,7 +195,7 @@ test("Garðabær health reports current live recovery rather than fixture metada
   assert.deepEqual(health.recovery.source_status_distribution, { active: 4, completed: 14 });
 });
 
-for (const [name, parser, version, file] of [["Ríkiskaup", "rikiskaup-wordpress", "1.0.0", "rikiskaup-wordpress.json"], ["Vegagerðin", "vegagerdin-html-index", "1.1.0", "vegagerdin-html-index.json"], ["Ísafjarðarbær", "isafjordur-rss", "1.1.0", "isafjordur-rss.xml"]]) {
+for (const [name, parser, version, file] of [["Ríkiskaup", "rikiskaup-wordpress", "1.0.0", "rikiskaup-wordpress.json"], ["Vegagerðin", "vegagerdin-html-index", "1.1.1", "vegagerdin-html-index.json"], ["Ísafjarðarbær", "isafjordur-rss", "1.1.0", "isafjordur-rss.xml"]]) {
   test(`parses ${name} V2 fixture conservatively`, async () => {
     const rows = parseWithV2Adapter(parser, version, await readFile(new URL(file, fixtureRoot), "utf8"));
     assert.ok(rows.length >= 1);
