@@ -100,6 +100,7 @@ Deno.serve(async (req) => {
     const gardabaerRoutineAutomation = preAuthBody.action === "run_gardabaer_production";
     const borgarbyggdRoutineAutomation = preAuthBody.action === "run_borgarbyggd_production";
     const isafjordurRoutineAutomation = preAuthBody.action === "run_isafjordur_production";
+    const vegagerdinRoutineAutomation = preAuthBody.action === "run_vegagerdin_production";
     const routineAutomationAuthorized = routineAutomation
       && isProduction
       && String(preAuthBody.source_key || "") === REYKJAVIK_SOURCE_KEY
@@ -120,6 +121,11 @@ Deno.serve(async (req) => {
       && String(preAuthBody.source_key || "") === ISAFJORDUR_SOURCE_KEY
       && Boolean(requiredEnv("AUTOMATION_SECRET"))
       && req.headers.get("x-automation-secret") === requiredEnv("AUTOMATION_SECRET");
+    const vegagerdinRoutineAutomationAuthorized = vegagerdinRoutineAutomation
+      && isProduction
+      && String(preAuthBody.source_key || "") === THREE_SOURCE_KEYS.VEGAGERDIN
+      && Boolean(requiredEnv("AUTOMATION_SECRET"))
+      && req.headers.get("x-automation-secret") === requiredEnv("AUTOMATION_SECRET");
     const authHeader = req.headers.get("authorization") || "";
     const userClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
@@ -127,7 +133,7 @@ Deno.serve(async (req) => {
     });
     const adminClient = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
     let adminUserId = "";
-    if (!routineAutomationAuthorized && !gardabaerRoutineAutomationAuthorized && !borgarbyggdRoutineAutomationAuthorized && !isafjordurRoutineAutomationAuthorized) {
+    if (!routineAutomationAuthorized && !gardabaerRoutineAutomationAuthorized && !borgarbyggdRoutineAutomationAuthorized && !isafjordurRoutineAutomationAuthorized && !vegagerdinRoutineAutomationAuthorized) {
       const { data: userData, error: userError } = await userClient.auth.getUser();
       if (userError || !userData.user) return json({ error: "Unauthorized" }, 401);
       const { data: adminRow, error: adminError } = await adminClient
@@ -151,16 +157,20 @@ Deno.serve(async (req) => {
     if (isafjordurRoutineAutomation && !isafjordurRoutineAutomationAuthorized) {
       return json({ error: "Ísafjarðarbær routine automation authentication failed", code: "V2_ROUTINE_AUTOMATION_UNAUTHORIZED" }, 401);
     }
+    if (vegagerdinRoutineAutomation && !vegagerdinRoutineAutomationAuthorized) {
+      return json({ error: "Vegagerðin routine automation authentication failed", code: "V2_ROUTINE_AUTOMATION_UNAUTHORIZED" }, 401);
+    }
     const body = await safeJson(req);
     if (routineAutomationAuthorized) return await runReykjavikRoutineProduction({ body, adminClient });
     if (gardabaerRoutineAutomationAuthorized) return await runGardabaerRoutineProduction({ body, adminClient });
     if (borgarbyggdRoutineAutomationAuthorized) return await runBorgarbyggdRoutineProduction({ body, adminClient });
     if (isafjordurRoutineAutomationAuthorized) return await runIsafjordurRoutineProduction({ body, adminClient });
+    if (vegagerdinRoutineAutomationAuthorized) return await runVegagerdinRoutineProduction({ body, adminClient });
     if (body.action === "phase_c_capabilities") return await phaseCCapabilities({ adminClient, isProduction });
     const productionPhaseCAction = ["set_source_promotion_approval", "approve_promotion", "promote_canary", "rollback_canary", "canary_assertions", "set_reykjavik_release_enabled", "approve_release", "release_canary", "clear_communication_hold", "disable_released_canary"].includes(String(body.action || ""));
     const productionShadowAction = body.action === "run_shadow";
     const productionCanaryToggleAction = body.action === "set_reykjavik_production_canary_enabled";
-    const productionRoutineToggleAction = ["set_reykjavik_routine_production", "set_gardabaer_routine_production", "set_borgarbyggd_routine_production", "set_isafjordur_routine_production"].includes(String(body.action || ""));
+    const productionRoutineToggleAction = ["set_reykjavik_routine_production", "set_gardabaer_routine_production", "set_borgarbyggd_routine_production", "set_isafjordur_routine_production", "set_vegagerdin_routine_production"].includes(String(body.action || ""));
     if (productionCanaryToggleAction && !isProduction) {
       return json({ error: "This action is available only in the production project", code: "V2_PRODUCTION_CANARY_ENVIRONMENT_REQUIRED" }, 403);
     }
@@ -175,6 +185,7 @@ Deno.serve(async (req) => {
     if (body.action === "set_gardabaer_routine_production") return await setGardabaerRoutineProduction({ body, adminClient, adminUserId, isProduction });
     if (body.action === "set_borgarbyggd_routine_production") return await setBorgarbyggdRoutineProduction({ body, adminClient, adminUserId, isProduction });
     if (body.action === "set_isafjordur_routine_production") return await setIsafjordurRoutineProduction({ body, adminClient, adminUserId, isProduction });
+    if (body.action === "set_vegagerdin_routine_production") return await setVegagerdinRoutineProduction({ body, adminClient, adminUserId, isProduction });
     if (body.action === "set_source_promotion_approval") return await setSourcePromotionApproval({ body, adminClient, adminUserId });
     if (body.action === "approve_promotion") return await approvePromotion({ body, adminClient, adminUserId });
     if (body.action === "promote_canary") return await promoteCanary({ body, adminClient, adminUserId });
@@ -759,6 +770,28 @@ async function runIsafjordurRoutineProduction({ body, adminClient }: { body: Rec
   return json({ ...runResult, action: "run_isafjordur_production", routine_admission: admission, customer_visible_writes: 0, matching_triggered: false, downstream_triggered: false });
 }
 
+async function runVegagerdinRoutineProduction({ body, adminClient }: { body: Record<string, unknown>; adminClient: any }) {
+  if (String(body.source_key || "") !== THREE_SOURCE_KEYS.VEGAGERDIN) {
+    return json({ error: "Only Vegagerðin routine production is allowed by this action", code: "V2_ROUTINE_SOURCE_NOT_ALLOWED" }, 403);
+  }
+  const { data: config, error: configError } = await adminClient.from("v2_source_configs").select("*").eq("source_key", THREE_SOURCE_KEYS.VEGAGERDIN).single();
+  if (configError) throw configError;
+  if (config.routine_production_enabled !== true || config.mode !== "shadow" || config.promotion_approved === true
+      || config.production_canary_enabled === true || config.release_feature_enabled === true || config.release_approved === true
+      || config.parser_name !== "vegagerdin-html-index" || config.parser_version !== "1.1.1") {
+    return json({ error: "Vegagerðin routine production is disabled or the source state is unsafe", code: "V2_ROUTINE_SOURCE_DISABLED" }, 409);
+  }
+  const runResponse = await runShadow({ body: { ...body, trigger_type: "automation" }, config, adminClient });
+  const runResult = await runResponse.clone().json();
+  if (!runResponse.ok || runResult?.status !== "succeeded" || !runResult?.run_id) return runResponse;
+  const { data: admission, error: admissionError } = await adminClient.rpc("admit_vegagerdin_v2_run", {
+    target_run_id: runResult.run_id,
+    runtime_project_ref: PRODUCTION_PROJECT_REF,
+  });
+  if (admissionError) throw admissionError;
+  return json({ ...runResult, action: "run_vegagerdin_production", routine_admission: admission, customer_visible_writes: 0, matching_triggered: false, downstream_triggered: false });
+}
+
 async function setReykjavikRoutineProduction({ body, adminClient, adminUserId, isProduction }: { body: Record<string, unknown>; adminClient: any; adminUserId: string; isProduction: boolean }) {
   if (!isProduction || String(body.source_key || "") !== REYKJAVIK_SOURCE_KEY) {
     return json({ error: "Reykjavík routine controls are production-only", code: "V2_ROUTINE_ENVIRONMENT_BLOCKED" }, 403);
@@ -821,6 +854,22 @@ async function setIsafjordurRoutineProduction({ body, adminClient, adminUserId, 
   });
   if (error) throw error;
   return json({ ok: true, action: "set_isafjordur_routine_production", source: data, automatic_approval: false, downstream_triggered: false });
+}
+
+async function setVegagerdinRoutineProduction({ body, adminClient, adminUserId, isProduction }: { body: Record<string, unknown>; adminClient: any; adminUserId: string; isProduction: boolean }) {
+  if (!isProduction || String(body.source_key || "") !== THREE_SOURCE_KEYS.VEGAGERDIN) {
+    return json({ error: "Vegagerðin routine controls are production-only", code: "V2_ROUTINE_ENVIRONMENT_BLOCKED" }, 403);
+  }
+  if (typeof body.enabled !== "boolean") return json({ error: "An explicit enabled boolean is required", code: "V2_ROUTINE_VALUE_REQUIRED" }, 400);
+  const reason = String(body.reason || "").trim();
+  if (!reason) return json({ error: "An audit reason is required", code: "V2_ROUTINE_REASON_REQUIRED" }, 400);
+  const { data, error } = await adminClient.rpc("set_vegagerdin_routine_production", {
+    enabled_value: body.enabled,
+    acting_admin_id: adminUserId,
+    reason_text: reason,
+  });
+  if (error) throw error;
+  return json({ ok: true, action: "set_vegagerdin_routine_production", source: data, automatic_approval: false, downstream_triggered: false });
 }
 
 async function approvePromotion({ body, adminClient, adminUserId }: { body: Record<string, unknown>; adminClient: any; adminUserId: string }) {

@@ -770,6 +770,7 @@ document.addEventListener("click", async (event) => {
       "gardabaer-utbod-v2": { action: "set_gardabaer_routine_production", label: "Garðabær" },
       "borgarbyggd-utbod-v2": { action: "set_borgarbyggd_routine_production", label: "Borgarbyggð" },
       "isafjordur-utbod-v2": { action: "set_isafjordur_routine_production", label: "Ísafjarðarbær" },
+      "vegagerdin-utbod-v2": { action: "set_vegagerdin_routine_production", label: "Vegagerðin" },
     };
     const routine = routineActions[sourceKey];
     const source = (state.v2IngestionRows || []).find((row) => row.source_key === sourceKey);
