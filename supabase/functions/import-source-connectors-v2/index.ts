@@ -12,6 +12,8 @@ import { extractRikiskaupDetailMetadata } from "../_shared/ingestion-v2/adapters
 import { extractIsafjordurDetailMetadata } from "../_shared/ingestion-v2/adapters/isafjordur-enrichment.js";
 import { extractReykjavikDetailMetadata } from "../_shared/ingestion-v2/adapters/reykjavik-enrichment.js";
 import { extractGardabaerDetailMetadata } from "../_shared/ingestion-v2/adapters/gardabaer-enrichment.js";
+import { extractVegagerdinDetailMetadata } from "../_shared/ingestion-v2/adapters/vegagerdin-enrichment.js";
+import { getVegagerdinIndexDiagnostics } from "../_shared/ingestion-v2/adapters/vegagerdin-html-index.js";
 import { extractLandsnetDetailMetadata, extractLandsvirkjunDetailMetadata, extractOrkuveitanDetailMetadata, extractVeiturDetailMetadata } from "../_shared/ingestion-v2/adapters/utbodsvefur-enrichment.js";
 import { getUtbodsvefurParserDiagnostics } from "../_shared/ingestion-v2/adapters/utbodsvefur-buyers.js";
 import {
@@ -65,6 +67,7 @@ const PHASE_A_FIXTURES: Record<string, { sourceKey: string; file: URL; contentTy
   },
   "rikiskaup-wordpress": { sourceKey: "rikiskaup-utbod-v2", file: new URL("./_fixtures/rikiskaup-wordpress.json", import.meta.url), contentType: "application/json" },
   "vegagerdin-rss": { sourceKey: "vegagerdin-utbod-v2", file: new URL("./_fixtures/vegagerdin-rss.xml", import.meta.url), contentType: "application/rss+xml" },
+  "vegagerdin-html-index": { sourceKey: "vegagerdin-utbod-v2", file: new URL("./_fixtures/vegagerdin-html-index.json", import.meta.url), contentType: "application/json" },
   "isafjordur-rss": { sourceKey: "isafjordur-utbod-v2", file: new URL("./_fixtures/isafjordur-rss.xml", import.meta.url), contentType: "application/rss+xml" },
   "reykjavik-html-index": { sourceKey: "reykjavik-utbod-v2", file: new URL("./_fixtures/reykjavik-html-index.html", import.meta.url), contentType: "text/html" },
   "landsvirkjun-html-index": { sourceKey: "landsvirkjun-utbod-v2", file: new URL("./_fixtures/utbodsvefur-buyers-html-index.html", import.meta.url), contentType: "text/html" },
@@ -429,7 +432,15 @@ async function runShadow({ body, config, adminClient }: { body: Record<string, u
     let fetchedCount = 1;
     let duplicateCount = 0;
     let pagination = null;
-    if ([THREE_SOURCE_KEYS.RIKISKAUP, THREE_SOURCE_KEYS.BORGARBYGGD].includes(config.source_key)) {
+    if (config.source_key === THREE_SOURCE_KEYS.VEGAGERDIN) {
+      fetched = await fetchWithRetry(config.endpoint_url, { maxAttempts: config.max_attempts, timeoutMs: config.request_timeout_ms, deadlineAt: Date.parse(lease.run_deadline_at), request: { headers } });
+      const currentHtml = await fetched.response.text();
+      const plannedUrl = String(config.settings?.shadow_quality?.planned_endpoint_url || "");
+      if (!plannedUrl) throw Object.assign(new Error("Vegagerðin planned-tender endpoint is not configured"), { code: "V2_VEGAGERDIN_PLANNED_ENDPOINT_REQUIRED" });
+      const planned = await fetchWithRetry(plannedUrl, { maxAttempts: config.max_attempts, timeoutMs: config.request_timeout_ms, deadlineAt: Date.parse(lease.run_deadline_at), request: { headers } });
+      text = JSON.stringify({ current_html: currentHtml, planned_html: await planned.response.text() });
+      fetchedCount = 2;
+    } else if ([THREE_SOURCE_KEYS.RIKISKAUP, THREE_SOURCE_KEYS.BORGARBYGGD].includes(config.source_key)) {
       const qualitySettings = config.settings?.shadow_quality || {};
       const paged = await fetchBoundedWordpressPages({
         endpointUrl: config.endpoint_url,
@@ -454,7 +465,9 @@ async function runShadow({ body, config, adminClient }: { body: Record<string, u
     if (config.source_key === THREE_SOURCE_KEYS.BORGARBYGGD) {
       candidates = applyBorgarbyggdSourceStatus(candidates, now);
     }
-    const indexDiagnostics = getUtbodsvefurParserDiagnostics(candidates);
+    const indexDiagnostics = config.source_key === THREE_SOURCE_KEYS.VEGAGERDIN
+      ? getVegagerdinIndexDiagnostics(candidates)
+      : getUtbodsvefurParserDiagnostics(candidates);
     if ([THREE_SOURCE_KEYS.BORGARBYGGD, THREE_SOURCE_KEYS.GARDABAER, THREE_SOURCE_KEYS.RIKISKAUP, THREE_SOURCE_KEYS.VEGAGERDIN, THREE_SOURCE_KEYS.ISAFJORDUR, THREE_SOURCE_KEYS.REYKJAVIK, ...Object.keys(UTBODSVEFUR_DETAIL_EXTRACTORS)].includes(config.source_key)) {
       duplicateCount += countSemanticDuplicates(candidates);
     }
@@ -481,6 +494,8 @@ async function runShadow({ body, config, adminClient }: { body: Record<string, u
           ? extractRikiskaupDetailMetadata
           : config.source_key === THREE_SOURCE_KEYS.GARDABAER
             ? extractGardabaerDetailMetadata
+          : config.source_key === THREE_SOURCE_KEYS.VEGAGERDIN
+            ? extractVegagerdinDetailMetadata
           : config.source_key === THREE_SOURCE_KEYS.ISAFJORDUR
             ? extractIsafjordurDetailMetadata
             : config.source_key === THREE_SOURCE_KEYS.REYKJAVIK
@@ -552,9 +567,11 @@ async function runShadow({ body, config, adminClient }: { body: Record<string, u
       same_run_deterministic_duplicates: sameRunDedupe.suppressed_count,
       same_run_unresolved_groups: sameRunDedupe.unresolved_group_count,
     };
-    if ([THREE_SOURCE_KEYS.BORGARBYGGD, THREE_SOURCE_KEYS.ISAFJORDUR].includes(config.source_key)) {
+    if ([THREE_SOURCE_KEYS.BORGARBYGGD, THREE_SOURCE_KEYS.ISAFJORDUR, THREE_SOURCE_KEYS.VEGAGERDIN].includes(config.source_key)) {
       const comparisonRpc = config.source_key === THREE_SOURCE_KEYS.ISAFJORDUR
         ? "compare_isafjordur_shadow_observation"
+        : config.source_key === THREE_SOURCE_KEYS.VEGAGERDIN
+          ? "compare_vegagerdin_shadow_observation"
         : "compare_borgarbyggd_shadow_observation";
       for (const observation of storedObservations) {
         const { data: comparison, error: comparisonError } = await adminClient.rpc(comparisonRpc, { target_observation_id: observation.id });
@@ -622,11 +639,26 @@ async function runShadow({ body, config, adminClient }: { body: Record<string, u
       if (comparisonMetrics.conflicts !== 0) qualityBlockers.push("deterministic_identity_conflict");
       if (sameRunDedupe.unresolved_group_count !== 0) qualityBlockers.push("same_run_duplicate_unresolved");
     }
+    if (config.source_key === THREE_SOURCE_KEYS.VEGAGERDIN) {
+      const currentCount = Number(indexDiagnostics?.current_tenders_found || 0);
+      const currentRows = candidates.filter((candidate: any) => candidate?.safe_source_payload?.listing_role === "current_tender");
+      const currentReferences = currentRows.filter((candidate: any) => Boolean(candidate.procurement_reference)).length;
+      const currentDeadlines = currentRows.filter((candidate: any) => Boolean(candidate.deadline)).length;
+      const currentBuyers = currentRows.filter((candidate: any) => Boolean(candidate.buyer)).length;
+      if (currentCount === 0 || currentRows.length !== currentCount || indexDiagnostics?.structure_matched !== true) qualityBlockers.push("current_listing_structure_mismatch");
+      if (currentReferences !== currentCount) qualityBlockers.push("current_reference_recovery_incomplete");
+      if (currentBuyers !== currentCount) qualityBlockers.push("current_buyer_recovery_incomplete");
+      if (currentCount > 0 && currentDeadlines === 0) qualityBlockers.push("current_deadline_recovery_suspicious_zero");
+      if (enrichmentMetrics.failed !== 0 || enrichmentMetrics.no_supported_fields !== 0 || enrichmentMetrics.succeeded !== currentCount) qualityBlockers.push("current_detail_enrichment_ineffective");
+      if (classificationMetrics.expired_or_completed_actionable !== 0) qualityBlockers.push("expired_or_completed_actionable");
+      if (comparisonMetrics.errors !== 0 || comparisonMetrics.baseline_unavailable !== 0 || comparisonMetrics.global_completed !== storedObservations.length) qualityBlockers.push("comparison_incomplete");
+      if (comparisonMetrics.conflicts !== 0 || comparisonMetrics.same_run_unresolved_groups !== 0) qualityBlockers.push("deterministic_identity_conflict");
+    }
     const quality = { healthy: qualityBlockers.length === 0, blockers: qualityBlockers };
     const qualityBlocked = qualityBlockers.length > 0;
     const runStatus = zeroItem.suspicious || qualityBlocked ? "quarantined" : invalidCount ? "partial" : "succeeded";
-    const qualitySourceName = config.source_key === THREE_SOURCE_KEYS.ISAFJORDUR ? "Ísafjarðarbær" : "Borgarbyggð";
-    const qualityErrorCode = config.source_key === THREE_SOURCE_KEYS.ISAFJORDUR ? "V2_ISAFJORDUR_QUALITY_GATE" : "V2_BORGARBYGGD_QUALITY_GATE";
+    const qualitySourceName = config.source_key === THREE_SOURCE_KEYS.ISAFJORDUR ? "Ísafjarðarbær" : config.source_key === THREE_SOURCE_KEYS.VEGAGERDIN ? "Vegagerðin" : "Borgarbyggð";
+    const qualityErrorCode = config.source_key === THREE_SOURCE_KEYS.ISAFJORDUR ? "V2_ISAFJORDUR_QUALITY_GATE" : config.source_key === THREE_SOURCE_KEYS.VEGAGERDIN ? "V2_VEGAGERDIN_QUALITY_GATE" : "V2_BORGARBYGGD_QUALITY_GATE";
     const runErrorCode = zeroItem.reason || (qualityBlocked ? qualityErrorCode : null);
     const runErrorMessage = zeroItem.suspicious ? "HTTP success but zero parsed items" : qualityBlocked ? `${qualitySourceName} quality gate blocked: ${qualityBlockers.join(", ")}` : null;
     const parserHealth = buildShadowParserHealth({ config, fetched: fetchedCount, parsed: candidates.length, valid: validCount, invalid: invalidCount, duplicates: duplicateCount, parserErrors, enrichment: enrichmentMetrics, suspiciousZero: zeroItem.suspicious, pagination, classification: classificationMetrics, comparison: comparisonMetrics, quality, indexDiagnostics, recovery: recoveryMetrics });

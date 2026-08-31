@@ -39,7 +39,7 @@ export function getSourceClassificationContext(config) {
     return { source_type: "national_procurement_portal", connector_type: "wordpress_rest", source_organisation: "Ríkiskaup / island.is procurement" };
   }
   if (sourceKey === THREE_SOURCE_KEYS.VEGAGERDIN) {
-    return { source_type: "road_authority_broad_feed", connector_type: "rss_feed", source_organisation: "Vegagerðin" };
+    return { source_type: "road_authority_procurement_portal", connector_type: "public_procurement_html_index", source_organisation: "Vegagerðin procurement" };
   }
   if (sourceKey === THREE_SOURCE_KEYS.ISAFJORDUR) {
     return { source_type: "municipal", connector_type: "rss_feed", source_organisation: "Ísafjarðarbær" };
@@ -192,6 +192,16 @@ export function isLikelyProcurementCandidate(candidate, sourceKey, now = new Dat
       return false;
     }
   }
+  if (sourceKey === THREE_SOURCE_KEYS.VEGAGERDIN) {
+    try {
+      const url = new URL(candidate?.canonical_url || candidate?.discovered_url || "");
+      return ["vegagerdin.is", "www.vegagerdin.is"].includes(url.hostname.toLowerCase()) &&
+        /^\/verkefnin\/utbod\/[^/]+\/?$/i.test(url.pathname) &&
+        candidate?.safe_source_payload?.listing_context === "current_procurement";
+    } catch {
+      return false;
+    }
+  }
   const text = normalize(`${candidate?.title || ""} ${candidate?.description || ""}`);
   const procurementSignal = /\b(utbod\w*|tilbod\w*|markadskonnun\w*|rammasamning\w*|verdkonnun\w*|bjod\w*|innkaup\w*|tender\w*|procurement|rfi)\b/.test(text);
   if (!procurementSignal) return false;
@@ -211,6 +221,8 @@ export function applySourcePredictionPolicy(prediction, observation, config, now
       ? applyReykjavikProcurementType(prediction, observation)
       : sourceKey === THREE_SOURCE_KEYS.GARDABAER
         ? applyGardabaerProcurementType(prediction, observation)
+        : sourceKey === THREE_SOURCE_KEYS.VEGAGERDIN
+          ? applyVegagerdinProcurementType(prediction, observation)
       : sourceKey === THREE_SOURCE_KEYS.BORGARBYGGD
         ? applyBorgarbyggdProcurementType(prediction, observation)
       : UTBODSVEFUR_SOURCE_BUYERS[sourceKey]
@@ -340,6 +352,31 @@ function applyGardabaerProcurementType(prediction, observation) {
   return { ...prediction, actionable_for_suppliers: false, requires_admin_review: true };
 }
 
+function applyVegagerdinProcurementType(prediction, observation) {
+  const payload = observation?.safe_source_payload || {};
+  const enrichment = payload.shadow_enrichment || {};
+  const listingRole = String(payload.listing_role || "");
+  const procurementType = String(enrichment.procurement_type || payload.procurement_type || "");
+  const sourceStatus = String(enrichment.source_status || payload.source_status || "unknown");
+  if (listingRole === "planned_tender") {
+    return mappedPrediction(prediction, "upcoming_procurement", false, false, "Vegagerðin planned-tender table is advance planning context, not an open invitation to bid.");
+  }
+  if (["opened", "completed", "cancelled"].includes(sourceStatus) || procurementType === "award_or_followup") {
+    return mappedPrediction(prediction, sourceStatus === "completed" ? "completed" : "award_or_contract_signed", false, false, "Vegagerðin lifecycle shows bid opening, cancellation, award, or completion follow-up.");
+  }
+  if (listingRole === "current_tender" && sourceStatus === "active" && procurementType === "open_tender" && observation?.deadline) {
+    return mappedPrediction(prediction, "open_competition", true, false, "Official Vegagerðin current-tender detail shows an active invitation and explicit submission deadline.");
+  }
+  return {
+    ...prediction,
+    procurement_stage: "uncertain",
+    actionable_for_suppliers: false,
+    requires_admin_review: true,
+    classification_confidence: Math.min(Number(prediction?.classification_confidence || 0.35), 0.7),
+    classification_reason: "Vegagerðin current-tender metadata is incomplete or its lifecycle is unresolved.",
+  };
+}
+
 function applyBorgarbyggdProcurementType(prediction, observation) {
   const enrichment = observation?.safe_source_payload?.shadow_enrichment || {};
   const procurementType = String(enrichment.procurement_type || "");
@@ -393,15 +430,12 @@ export function categorizeShadowObservation(observation, prediction, sourceKey, 
     if (prediction.actionable_for_suppliers) return "likely_current_procurement_candidate";
     return observation.deadline ? "non_actionable_with_deadline" : "conservative_missing_deadline";
   }
-  const text = normalize(`${observation.title || ""} ${observation.description || ""}`);
-  const published = Date.parse(`${String(observation.publication_date || "").slice(0, 10)}T00:00:00Z`);
-  const current = now instanceof Date ? now.getTime() : new Date(now || Date.now()).getTime();
-  const old = !Number.isFinite(published) || current - published > 550 * 86400000;
-  const procurementLike = /\b(utbod\w*|tilbod\w*|markadskonnun\w*|rammasamning\w*|bjod\w*|innkaup\w*|tender\w*|procurement|rfi)\b/.test(text);
-  const followUp = ["award_or_contract_signed", "work_underway", "completed"].includes(prediction.procurement_stage) || /\b(nidurstada\w*|samning\w*|samid|valinn|opnud|framkvaemdir\s+hafnar|lokid)\b/.test(text);
-  if (procurementLike && (old || followUp)) return "historical_procurement_or_followup";
-  if (procurementLike && isLikelyProcurementCandidate(observation, sourceKey, now)) return "likely_current_procurement_candidate";
-  return "general_news_or_project_item";
+  const listingRole = String(observation?.safe_source_payload?.listing_role || "");
+  const status = String(observation?.safe_source_payload?.shadow_enrichment?.source_status || observation?.safe_source_payload?.source_status || "unknown");
+  if (listingRole === "planned_tender") return "planned_procurement";
+  if (["opened", "completed", "cancelled"].includes(status) || ["award_or_contract_signed", "completed"].includes(prediction.procurement_stage)) return "historical_procurement_or_followup";
+  if (listingRole === "current_tender" && isLikelyProcurementCandidate(observation, sourceKey, now)) return "likely_current_procurement_candidate";
+  return "current_tender_incomplete";
 }
 
 /** @param {any} input */

@@ -3,6 +3,7 @@ import { borgarbyggdWordpressAdapter } from "./borgarbyggd-wordpress.js";
 import { gardabaerPageMonitorAdapter } from "./gardabaer-page-monitor.js";
 import { rikiskaupWordpressAdapter } from "./rikiskaup-wordpress.js";
 import { vegagerdinRssAdapter } from "./vegagerdin-rss.js";
+import { vegagerdinHtmlIndexAdapter } from "./vegagerdin-html-index.js";
 import { isafjordurRssAdapter } from "./isafjordur-rss.js";
 import { reykjavikHtmlIndexAdapter } from "./reykjavik-html-index.js";
 import { landsvirkjunHtmlIndexAdapter } from "./landsvirkjun-html-index.js";
@@ -14,6 +15,7 @@ const ADAPTERS = new Map([
   [gardabaerPageMonitorAdapter.parserName, gardabaerPageMonitorAdapter],
   [rikiskaupWordpressAdapter.parserName, rikiskaupWordpressAdapter],
   [vegagerdinRssAdapter.parserName, vegagerdinRssAdapter],
+  [vegagerdinHtmlIndexAdapter.parserName, vegagerdinHtmlIndexAdapter],
   [isafjordurRssAdapter.parserName, isafjordurRssAdapter],
   [reykjavikHtmlIndexAdapter.parserName, reykjavikHtmlIndexAdapter],
   [landsvirkjunHtmlIndexAdapter.parserName, landsvirkjunHtmlIndexAdapter],

@@ -195,7 +195,7 @@ test("Garðabær health reports current live recovery rather than fixture metada
   assert.deepEqual(health.recovery.source_status_distribution, { active: 4, completed: 14 });
 });
 
-for (const [name, parser, version, file] of [["Ríkiskaup", "rikiskaup-wordpress", "1.0.0", "rikiskaup-wordpress.json"], ["Vegagerðin", "vegagerdin-rss", "1.0.0", "vegagerdin-rss.xml"], ["Ísafjarðarbær", "isafjordur-rss", "1.1.0", "isafjordur-rss.xml"]]) {
+for (const [name, parser, version, file] of [["Ríkiskaup", "rikiskaup-wordpress", "1.0.0", "rikiskaup-wordpress.json"], ["Vegagerðin", "vegagerdin-html-index", "1.1.0", "vegagerdin-html-index.json"], ["Ísafjarðarbær", "isafjordur-rss", "1.1.0", "isafjordur-rss.xml"]]) {
   test(`parses ${name} V2 fixture conservatively`, async () => {
     const rows = parseWithV2Adapter(parser, version, await readFile(new URL(file, fixtureRoot), "utf8"));
     assert.ok(rows.length >= 1);
@@ -1055,9 +1055,9 @@ test("detail enrichment leaves metadata null when it is not explicit", () => {
   assert.equal(result.enrichment_status, "no_supported_fields");
 });
 
-test("Vegagerðin candidate prefilter and enrichment remain bounded on a broad feed", async () => {
-  const current = Array.from({ length: 20 }, (_, index) => ({ title: `Útboð nr. ${16000 + index}`, description: "Óskað eftir tilboðum", publication_date: "2026-08-20", canonical_url: `https://vegagerdin.is/${index}` }));
-  const historical = Array.from({ length: 80 }, (_, index) => ({ title: `Frétt af framkvæmd ${index}`, description: "Vinna er hafin", publication_date: "2022-01-01", canonical_url: `https://vegagerdin.is/old/${index}` }));
+test("Vegagerðin candidate prefilter enriches only bounded official current-tender details", async () => {
+  const current = Array.from({ length: 20 }, (_, index) => ({ title: `Útboð nr. ${16000 + index}`, description: "Óskað eftir tilboðum", publication_date: "2026-08-20", canonical_url: `https://www.vegagerdin.is/verkefnin/utbod/test-${index}`, safe_source_payload: { listing_context: "current_procurement" } }));
+  const historical = Array.from({ length: 80 }, (_, index) => ({ title: `Frétt af framkvæmd ${index}`, description: "Vinna er hafin", publication_date: "2022-01-01", canonical_url: `https://www.vegagerdin.is/vegagerdin/starfsemi/frettir/old-${index}`, safe_source_payload: { listing_context: "news_context" } }));
   const result = await enrichCandidatesBounded([...current, ...historical], { sourceKey: THREE_SOURCE_KEYS.VEGAGERDIN, limit: 12, now: new Date("2026-08-27T00:00:00Z"), fetchDetail: async () => "<p>Almenn útboðslýsing.</p>" });
   assert.equal(result.metrics.attempted, 12);
   assert.equal(result.metrics.skipped, 88);
@@ -1151,7 +1151,11 @@ test("Ísafjarðarbær semantic duplicate titles are counted without dropping ra
 
 test("classification context is source-accurate without changing other source defaults", () => {
   assert.deepEqual(getSourceClassificationContext({ source_key: THREE_SOURCE_KEYS.RIKISKAUP }).source_type, "national_procurement_portal");
-  assert.deepEqual(getSourceClassificationContext({ source_key: THREE_SOURCE_KEYS.VEGAGERDIN }).source_type, "road_authority_broad_feed");
+  assert.deepEqual(getSourceClassificationContext({ source_key: THREE_SOURCE_KEYS.VEGAGERDIN }), {
+    source_type: "road_authority_procurement_portal",
+    connector_type: "public_procurement_html_index",
+    source_organisation: "Vegagerðin procurement",
+  });
   assert.deepEqual(getSourceClassificationContext({ source_key: THREE_SOURCE_KEYS.ISAFJORDUR }).source_type, "municipal");
   assert.deepEqual(getSourceClassificationContext({ source_key: THREE_SOURCE_KEYS.REYKJAVIK }), {
     source_type: "municipal_procurement_portal",
