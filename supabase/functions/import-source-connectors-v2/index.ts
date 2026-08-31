@@ -19,6 +19,7 @@ import {
   applySourcePredictionPolicy,
   buildShadowParserHealth,
   countSemanticDuplicates,
+  dedupeIsafjordurObservations,
   derivePromotionEvidence,
   DETAIL_ENRICHMENT_LIMITS,
   enrichCandidatesBounded,
@@ -499,7 +500,13 @@ async function runShadow({ body, config, adminClient }: { body: Record<string, u
         return counts;
       }, {}),
     };
-    const observations = await Promise.all(candidates.map((candidate) => createObservation(candidate, { run_id: run.id, source_config_id: config.id, source_id: config.source_id, source_key: config.source_key, source_name: config.display_name, parser_name: config.parser_name, parser_version: config.parser_version, fetched_at: new Date().toISOString(), fetch_metadata: { live_request: true, http_status: fetched.response.status, content_type: fetched.response.headers.get("content-type"), attempts: fetched.attempts, latency_ms: fetched.latencyMs, mode: "shadow" } })));
+    let observations = await Promise.all(candidates.map((candidate) => createObservation(candidate, { run_id: run.id, source_config_id: config.id, source_id: config.source_id, source_key: config.source_key, source_name: config.display_name, parser_name: config.parser_name, parser_version: config.parser_version, fetched_at: new Date().toISOString(), fetch_metadata: { live_request: true, http_status: fetched.response.status, content_type: fetched.response.headers.get("content-type"), attempts: fetched.attempts, latency_ms: fetched.latencyMs, mode: "shadow" } })));
+    let sameRunDedupe: any = { input_count: observations.length, canonical_count: observations.length, suppressed_count: 0, unresolved_group_count: 0, suppressed: [], unresolved: [] };
+    if (config.source_key === THREE_SOURCE_KEYS.ISAFJORDUR) {
+      const deduped = dedupeIsafjordurObservations(observations);
+      observations = deduped.observations;
+      sameRunDedupe = deduped.diagnostics;
+    }
     const invalidCount = observations.filter((row) => row.validation_state !== "valid").length;
     const validCount = observations.length - invalidCount;
     const parserErrors: string[] = [...new Set<string>(observations.flatMap((row) => row.validation_errors || []))];
@@ -526,17 +533,40 @@ async function runShadow({ body, config, adminClient }: { body: Record<string, u
       const { error: predictionError } = await adminClient.from("v2_ingestion_observations").update({ predicted_procurement_stage: prediction.procurement_stage, predicted_actionable: prediction.actionable_for_suppliers, predicted_confidence: prediction.classification_confidence, predicted_reason: prediction.classification_reason, predicted_requires_admin_review: prediction.requires_admin_review, enrichment_status: enrichment.enrichment_status || null, shadow_quality_category: category, ...promotionEvidence }).eq("id", observation.id);
       if (predictionError) throw predictionError;
     }
-    const comparisonMetrics: { state_distribution: Record<string, number>; match_type_distribution: Record<string, number>; errors: number; baseline_unavailable: number; fuzzy_only: number } = { state_distribution: {}, match_type_distribution: {}, errors: 0, baseline_unavailable: 0, fuzzy_only: 0 };
-    if (config.source_key === THREE_SOURCE_KEYS.BORGARBYGGD) {
+    const comparisonMetrics: { state_distribution: Record<string, number>; match_type_distribution: Record<string, number>; errors: number; baseline_unavailable: number; fuzzy_only: number; global_completed: number; source_external_matches: number; reference_matches: number; canonical_url_matches: number; fingerprint_matches: number; v2_only: number; conflicts: number; same_run_deterministic_duplicates: number; same_run_unresolved_groups: number } = {
+      state_distribution: {}, match_type_distribution: {}, errors: 0, baseline_unavailable: 0, fuzzy_only: 0,
+      global_completed: 0, source_external_matches: 0, reference_matches: 0, canonical_url_matches: 0,
+      fingerprint_matches: 0, v2_only: 0, conflicts: 0,
+      same_run_deterministic_duplicates: sameRunDedupe.suppressed_count,
+      same_run_unresolved_groups: sameRunDedupe.unresolved_group_count,
+    };
+    if ([THREE_SOURCE_KEYS.BORGARBYGGD, THREE_SOURCE_KEYS.ISAFJORDUR].includes(config.source_key)) {
+      const comparisonRpc = config.source_key === THREE_SOURCE_KEYS.ISAFJORDUR
+        ? "compare_isafjordur_shadow_observation"
+        : "compare_borgarbyggd_shadow_observation";
       for (const observation of storedObservations) {
-        const { data: comparison, error: comparisonError } = await adminClient.rpc("compare_borgarbyggd_shadow_observation", { target_observation_id: observation.id });
-        if (comparisonError) { comparisonMetrics.errors += 1; parserErrors.push(String(comparisonError.code || comparisonError.message || "V2_COMPARISON_ERROR")); continue; }
+        const { data: comparison, error: comparisonError } = await adminClient.rpc(comparisonRpc, { target_observation_id: observation.id });
+        if (comparisonError) {
+          comparisonMetrics.errors += 1;
+          comparisonMetrics.baseline_unavailable += 1;
+          comparisonMetrics.state_distribution.baseline_unavailable = (comparisonMetrics.state_distribution.baseline_unavailable || 0) + 1;
+          parserErrors.push(String(comparisonError.code || comparisonError.message || "V2_COMPARISON_ERROR"));
+          continue;
+        }
         const state = String(comparison?.comparison_state || "baseline_unavailable");
         const matchType = String(comparison?.match_type || "none");
+        const evidence = comparison?.evidence || {};
+        comparisonMetrics.global_completed += 1;
         comparisonMetrics.state_distribution[state] = (comparisonMetrics.state_distribution[state] || 0) + 1;
         comparisonMetrics.match_type_distribution[matchType] = (comparisonMetrics.match_type_distribution[matchType] || 0) + 1;
         if (state === "baseline_unavailable") comparisonMetrics.baseline_unavailable += 1;
         if (matchType === "fuzzy_review_candidate") comparisonMetrics.fuzzy_only += 1;
+        if (state === "v2_only") comparisonMetrics.v2_only += 1;
+        if (state === "conflict") comparisonMetrics.conflicts += 1;
+        if (Array.isArray(evidence.source_external_candidates) && evidence.source_external_candidates.length) comparisonMetrics.source_external_matches += 1;
+        if (Array.isArray(evidence.reference_candidates) && evidence.reference_candidates.length) comparisonMetrics.reference_matches += 1;
+        if (Array.isArray(evidence.canonical_url_candidates) && evidence.canonical_url_candidates.length) comparisonMetrics.canonical_url_matches += 1;
+        if (Array.isArray(evidence.fingerprint_candidates) && evidence.fingerprint_candidates.length) comparisonMetrics.fingerprint_matches += 1;
       }
     } else {
       const { data: legacy, error: legacyError } = await adminClient.from(LEGACY_TABLE)
@@ -574,13 +604,21 @@ async function runShadow({ body, config, adminClient }: { body: Record<string, u
       if (classificationMetrics.actionable > recoveryMetrics.deadlines || classificationMetrics.actionable > classificationMetrics.strong_evidence) qualityBlockers.push("actionable_metadata_incomplete");
       if (comparisonMetrics.errors !== 0 || comparisonMetrics.baseline_unavailable !== 0) qualityBlockers.push("comparison_incomplete");
     }
+    if (config.source_key === THREE_SOURCE_KEYS.ISAFJORDUR) {
+      if (classificationMetrics.expired_or_completed_actionable !== 0) qualityBlockers.push("expired_or_completed_actionable");
+      if (comparisonMetrics.errors !== 0 || comparisonMetrics.baseline_unavailable !== 0 || comparisonMetrics.global_completed !== storedObservations.length) qualityBlockers.push("comparison_incomplete");
+      if (comparisonMetrics.conflicts !== 0) qualityBlockers.push("deterministic_identity_conflict");
+      if (sameRunDedupe.unresolved_group_count !== 0) qualityBlockers.push("same_run_duplicate_unresolved");
+    }
     const quality = { healthy: qualityBlockers.length === 0, blockers: qualityBlockers };
     const qualityBlocked = qualityBlockers.length > 0;
     const runStatus = zeroItem.suspicious || qualityBlocked ? "quarantined" : invalidCount ? "partial" : "succeeded";
-    const runErrorCode = zeroItem.reason || (qualityBlocked ? "V2_BORGARBYGGD_QUALITY_GATE" : null);
-    const runErrorMessage = zeroItem.suspicious ? "HTTP success but zero parsed items" : qualityBlocked ? `Borgarbyggð quality gate blocked: ${qualityBlockers.join(", ")}` : null;
+    const qualitySourceName = config.source_key === THREE_SOURCE_KEYS.ISAFJORDUR ? "Ísafjarðarbær" : "Borgarbyggð";
+    const qualityErrorCode = config.source_key === THREE_SOURCE_KEYS.ISAFJORDUR ? "V2_ISAFJORDUR_QUALITY_GATE" : "V2_BORGARBYGGD_QUALITY_GATE";
+    const runErrorCode = zeroItem.reason || (qualityBlocked ? qualityErrorCode : null);
+    const runErrorMessage = zeroItem.suspicious ? "HTTP success but zero parsed items" : qualityBlocked ? `${qualitySourceName} quality gate blocked: ${qualityBlockers.join(", ")}` : null;
     const parserHealth = buildShadowParserHealth({ config, fetched: fetchedCount, parsed: candidates.length, valid: validCount, invalid: invalidCount, duplicates: duplicateCount, parserErrors, enrichment: enrichmentMetrics, suspiciousZero: zeroItem.suspicious, pagination, classification: classificationMetrics, comparison: comparisonMetrics, quality, indexDiagnostics, recovery: recoveryMetrics });
-    const details = { phase: "B", live_requests_allowed: true, customer_visible_writes: 0, promotion_allowed: false, promote_count: 0, pagination, index_diagnostics: indexDiagnostics, enrichment: enrichmentMetrics, classification: classificationMetrics, comparison: comparisonMetrics, quality, recovery: recoveryMetrics };
+    const details = { phase: "B", live_requests_allowed: true, customer_visible_writes: 0, promotion_allowed: false, promote_count: 0, pagination, index_diagnostics: indexDiagnostics, enrichment: enrichmentMetrics, classification: classificationMetrics, comparison: comparisonMetrics, same_run_dedupe: sameRunDedupe, quality, recovery: recoveryMetrics };
     const { error: finalizeError } = await adminClient.from("v2_ingestion_runs").update({ status: runStatus, fetched_count: fetchedCount, parsed_count: candidates.length, observation_count: observations.length, invalid_count: invalidCount, duplicate_count: duplicateCount, suspicious_zero_items: zeroItem.suspicious, error_count: parserErrors.length + (zeroItem.suspicious || qualityBlocked ? 1 : 0), error_code: runErrorCode, error_message: runErrorMessage, details, finished_at: finished, lease_expires_at: finished, updated_at: finished }).eq("id", run.id);
     if (finalizeError) throw finalizeError;
     const { error: healthUpdateError } = await adminClient.from("v2_source_health").upsert({ source_config_id: config.id, status: runStatus === "succeeded" ? "healthy" : "degraded", circuit_state: zeroItem.circuit_should_open || qualityBlocked ? "open" : "closed", consecutive_zero_item_runs: zeroItem.consecutive_zero_item_runs, last_run_id: run.id, last_run_at: finished, last_success_at: runStatus === "succeeded" ? finished : health?.last_success_at || null, last_shadow_at: finished, last_http_status: fetched.response.status, last_latency_ms: fetched.latencyMs, last_observation_count: observations.length, last_error_code: runErrorCode, last_error_message: runErrorMessage, parser_health: parserHealth, updated_at: finished }, { onConflict: "source_config_id" });

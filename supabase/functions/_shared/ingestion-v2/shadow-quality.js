@@ -442,6 +442,97 @@ export function countSemanticDuplicates(candidates) {
   return duplicates;
 }
 
+export function dedupeIsafjordurObservations(observations) {
+  const rows = Array.isArray(observations) ? observations : [];
+  const groups = new Map();
+  for (const row of rows) {
+    const signature = [
+      String(row?.identity_fingerprint || ""),
+      normalize(row?.title),
+      normalize(row?.description),
+      String(row?.publication_date || "").slice(0, 10),
+    ].join("|");
+    const grouped = groups.get(signature) || [];
+    grouped.push(row);
+    groups.set(signature, grouped);
+  }
+
+  const kept = [];
+  const suppressed = [];
+  const unresolved = [];
+  for (const group of groups.values()) {
+    if (group.length === 1) {
+      kept.push(group[0]);
+      continue;
+    }
+    const families = group.map((row) => isafjordurUrlFamily(row?.canonical_url || row?.discovered_url));
+    const familyNames = new Set(families.map((entry) => entry.family).filter(Boolean));
+    const hasCanonical = families.some((entry) => entry.isCanonical);
+    const exactUrlFamily = familyNames.size === 1 && hasCanonical && families.every((entry) => entry.family);
+    if (!exactUrlFamily) {
+      kept.push(...group);
+      unresolved.push({
+        identity_fingerprint: group[0]?.identity_fingerprint || null,
+        observation_external_ids: group.map((row) => row?.external_id || null),
+        reason: "same_fingerprint_without_resolvable_canonical_url_family",
+      });
+      continue;
+    }
+    const ranked = [...group].sort(compareIsafjordurCanonicalObservation);
+    const canonical = ranked[0];
+    kept.push(canonical);
+    for (const duplicate of ranked.slice(1)) {
+      suppressed.push({
+        suppressed_external_id: duplicate?.external_id || null,
+        suppressed_canonical_url: duplicate?.canonical_url || duplicate?.discovered_url || null,
+        canonical_external_id: canonical?.external_id || null,
+        canonical_url: canonical?.canonical_url || canonical?.discovered_url || null,
+        identity_fingerprint: canonical?.identity_fingerprint || null,
+        reason: "same_fingerprint_exact_content_and_url_suffix_variant",
+      });
+    }
+  }
+  return {
+    observations: kept,
+    diagnostics: {
+      input_count: rows.length,
+      canonical_count: kept.length,
+      suppressed_count: suppressed.length,
+      unresolved_group_count: unresolved.length,
+      suppressed,
+      unresolved,
+    },
+  };
+}
+
+function compareIsafjordurCanonicalObservation(left, right) {
+  const leftFamily = isafjordurUrlFamily(left?.canonical_url || left?.discovered_url);
+  const rightFamily = isafjordurUrlFamily(right?.canonical_url || right?.discovered_url);
+  if (leftFamily.isCanonical !== rightFamily.isCanonical) return leftFamily.isCanonical ? -1 : 1;
+  const completeness = (row) => [row?.procurement_reference, row?.deadline, row?.buyer, row?.description, row?.canonical_url]
+    .filter((value) => String(value || "").trim()).length;
+  const completenessDifference = completeness(right) - completeness(left);
+  if (completenessDifference) return completenessDifference;
+  const leftUrl = String(left?.normalized_canonical_url || left?.canonical_url || left?.discovered_url || "");
+  const rightUrl = String(right?.normalized_canonical_url || right?.canonical_url || right?.discovered_url || "");
+  return leftUrl.localeCompare(rightUrl) || String(left?.external_id || "").localeCompare(String(right?.external_id || ""));
+}
+
+function isafjordurUrlFamily(value) {
+  try {
+    const url = new URL(String(value || ""));
+    const pathname = url.pathname.replace(/\/+$/, "");
+    const suffixed = pathname.match(/^(.*)-(\d+)$/);
+    const familyPath = suffixed ? suffixed[1] : pathname;
+    return {
+      family: `${url.hostname.toLowerCase()}${familyPath.toLowerCase()}`,
+      isCanonical: !suffixed,
+    };
+  } catch {
+    return { family: null, isCanonical: false };
+  }
+}
+
 function withEnrichment(candidate, metadata) {
   return {
     ...candidate,
