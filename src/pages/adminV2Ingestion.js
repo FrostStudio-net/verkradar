@@ -66,6 +66,7 @@ function renderRoutineProduction(rows, escapeHtml, formatDateTime, activeAction,
     { sourceKey: "reykjavik-utbod-v2", label: "Reykjavík", description: "Scheduled official-HTML ingestion with strict automatic admission." },
     { sourceKey: "gardabaer-utbod-v2", label: "Garðabær", description: "Scheduled card-local official-HTML ingestion with strict automatic admission." },
     { sourceKey: "borgarbyggd-utbod-v2", label: "Borgarbyggð", description: "Scheduled bounded WordPress procurement ingestion with strict automatic admission." },
+    { sourceKey: "isafjordur-utbod-v2", label: "Ísafjarðarbær", description: "Scheduled crawl-paced municipal RSS ingestion with deterministic same-run dedupe and strict automatic admission." },
   ].map((source) => {
     const row = rows.find((item) => item.source_key === source.sourceKey);
     if (!row || row.routine_admission_scan_limit == null) return "";
@@ -81,6 +82,8 @@ function renderRoutineSource(row, source, escapeHtml, formatDateTime, activeActi
   const parserHealth = health.parser_health || {};
   const pagination = parserHealth.pagination || latest.details?.pagination || {};
   const classification = parserHealth.classification || latest.details?.classification || {};
+  const comparison = parserHealth.comparison || latest.details?.comparison || {};
+  const isIsafjordur = source.sourceKey === "isafjordur-utbod-v2";
   const actionBusy = String(activeAction || "").startsWith(`${source.sourceKey}:`);
   return `<section class="phase-c-canary" aria-labelledby="${source.sourceKey}-routine-title">
     <div class="card-header"><div><h3 id="${source.sourceKey}-routine-title">${escapeHtml(source.label)} V2 — normal production</h3><p>${escapeHtml(source.description)} Legacy ingestion remains independent.</p></div><span class="status-pill ${enabled ? "is-running" : "is-error"}">${enabled ? "ENABLED" : "EMERGENCY STOPPED"}</span></div>
@@ -89,7 +92,11 @@ function renderRoutineSource(row, source, escapeHtml, formatDateTime, activeActi
       <dt>Source state</dt><dd>${escapeHtml(`${row.mode || "—"} / promotion approval ${row.promotion_approved ? "yes" : "no"}`)}</dd>
       <dt>Health / circuit</dt><dd>${escapeHtml(`${health.status || "—"} / ${health.circuit_state || "—"}`)}</dd>
       <dt>Last run</dt><dd>${escapeHtml(latest.id || "—")} — ${escapeHtml(latest.status || "—")} — ${escapeHtml(formatDateTime(latest.finished_at || latest.created_at || ""))}</dd>
-      <dt>Pages / parsed items</dt><dd>${Number(pagination.fetched_pages || latest.fetched_count || 0)} / ${Number(parserHealth.parsed_count || latest.parsed_count || row.observationCount || 0)}</dd>
+      <dt>${isIsafjordur ? "Index requests / parsed / canonical" : "Pages / parsed items"}</dt><dd>${isIsafjordur
+        ? `${Number(latest.fetched_count || parserHealth.fetched_count || 0)} / ${Number(parserHealth.parsed_count || latest.parsed_count || 0)} / ${Number(parserHealth.valid_count || latest.observation_count || row.observationCount || 0)}`
+        : `${Number(pagination.fetched_pages || latest.fetched_count || 0)} / ${Number(parserHealth.parsed_count || latest.parsed_count || row.observationCount || 0)}`}</dd>
+      ${isIsafjordur ? `<dt>Duplicates suppressed</dt><dd>${Number(comparison.same_run_deterministic_duplicates || 0)}</dd>
+      <dt>Comparison completed / baseline unavailable</dt><dd>${Number(comparison.global_completed || 0)} / ${Number(comparison.baseline_unavailable || 0)}</dd>` : ""}
       <dt>Actionable / non-actionable / uncertain</dt><dd>${Number(classification.actionable || 0)} / ${Number(classification.non_actionable || 0)} / ${Number(classification.uncertain || 0)}</dd>
       <dt>Admitted / review-required / blocked</dt><dd>${Number(metrics.admitted || 0)} / ${Number(metrics.review_required || 0)} / ${Number(metrics.blocked || 0)}</dd>
       <dt>Duplicates / reused / errors</dt><dd>${Number(metrics.duplicates || 0)} / ${Number(metrics.reused || 0)} / ${Number(metrics.errors || 0)}</dd>
