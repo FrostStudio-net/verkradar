@@ -3,9 +3,14 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createObservation } from "../_shared/ingestion-v2/contracts.js";
 import { dedupeIsafjordurObservations } from "../_shared/ingestion-v2/shadow-quality.js";
+import { isafjordurRssAdapter } from "../_shared/ingestion-v2/adapters/isafjordur-rss.js";
 
 const migrationUrl = new URL("../../migrations/20260831090000_isafjordur_phase_b_comparison_repair.sql", import.meta.url);
 const runtimeUrl = new URL("../import-source-connectors-v2/index.ts", import.meta.url);
+
+test("Ísafjarðarbær adapter version matches the repaired source configuration", () => {
+  assert.equal(isafjordurRssAdapter.parserVersion, "1.1.0");
+});
 
 async function observation(overrides = {}) {
   return createObservation({
