@@ -229,7 +229,7 @@ test("connector reports select the legacy grandfathering marker", async () => {
 });
 
 test("browser-side refresh gate excludes every non-actionable classified stage", () => {
-  const base = { status: "open", deadline: "2026-08-30", classificationGrandfathered: false };
+  const base = { status: "open", deadline: "2099-08-30", classificationGrandfathered: false };
   const candidates = [
     { ...base, id: "open", procurementStage: "open_competition", actionableForSuppliers: true, requiresAdminReview: false },
     { ...base, id: "award", procurementStage: "award_or_contract_signed", actionableForSuppliers: false, requiresAdminReview: false },

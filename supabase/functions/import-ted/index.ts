@@ -5,6 +5,7 @@ import {
   isProcurementOpportunityEligible,
   preserveAdminClassification,
 } from "../_shared/procurement-stage.js";
+import { calculateCompanyOpportunityMatch, COMPANY_MATCH_THRESHOLD } from "../_shared/company-matcher.js";
 
 type ImportSummary = {
   fetched: number;
@@ -54,7 +55,7 @@ const TED_SEARCH_URL = "https://api.ted.europa.eu/v3/notices/search";
 const TED_BASE_URL = "https://ted.europa.eu";
 const TED_SOURCE_NAME = "TED Iceland/Nordic";
 const DEFAULT_LIMIT = 50;
-const MIN_MATCH_SCORE = 50;
+const MIN_MATCH_SCORE = COMPANY_MATCH_THRESHOLD;
 const IMPORT_MODES = ["iceland", "nordic", "eu-broad"] as const;
 type ImportMode = typeof IMPORT_MODES[number];
 const ICELAND_COUNTRIES = new Set(["IS", "ISL"]);
@@ -951,6 +952,8 @@ function getCivilContractorFit(
 }
 
 function calculateMatch(profile: Record<string, unknown>, opportunity: Record<string, unknown>) {
+  return calculateCompanyOpportunityMatch(profile, opportunity);
+  /* c8 ignore start -- retained temporarily for review history; canonical scorer returns above. */
   const text = normalizeText([
     opportunity.title,
     opportunity.description,
@@ -1067,6 +1070,7 @@ function calculateMatch(profile: Record<string, unknown>, opportunity: Record<st
       "Prepare questions before the deadline",
     ],
   };
+  /* c8 ignore stop */
 }
 
 function classifyMatchSafety(profile: Record<string, unknown>, match: Record<string, unknown>, sourceName = "") {

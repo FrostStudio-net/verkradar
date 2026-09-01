@@ -7,6 +7,7 @@ import {
   preserveAdminClassification,
   processProcurementClassificationBatch,
 } from "../_shared/procurement-stage.js";
+import { calculateCompanyOpportunityMatch, COMPANY_MATCH_THRESHOLD } from "../_shared/company-matcher.js";
 
 type ConnectorType = "rss_feed" | "wordpress_rest" | "page_monitor_allowed";
 
@@ -241,7 +242,7 @@ const PROCUREMENT_AI_MAX_CLASSIFICATIONS = 2;
 const PROCUREMENT_PERSISTENCE_RESERVE_MS = 4000;
 const PROCUREMENT_PERSISTENCE_BATCH_SIZE = 10;
 const FUNCTION_TIME_BUDGET_MS = 18000;
-const MIN_MATCH_SCORE = 50;
+const MIN_MATCH_SCORE = COMPANY_MATCH_THRESHOLD;
 const MAX_MATCH_DEBUG_SAMPLES = 20;
 const MAX_IMPORT_SKIP_SAMPLES = 10;
 const MAX_KEYWORD_DECISION_SAMPLES = 20;
@@ -3967,6 +3968,8 @@ function getCivilContractorFit(
 }
 
 function calculateMatch(profile: Record<string, unknown>, opportunity: Record<string, unknown>) {
+  return calculateCompanyOpportunityMatch(profile, opportunity);
+  /* c8 ignore start -- retained temporarily for review history; canonical scorer returns above. */
   const text = normalize(`${opportunity.title || ""} ${opportunity.description || ""} ${opportunity.category || ""} ${opportunity.location || ""} ${asArray(opportunity.keywords).join(" ")}`);
   const reasons: string[] = [];
   const risks: string[] = [];
@@ -4108,6 +4111,7 @@ function calculateMatch(profile: Record<string, unknown>, opportunity: Record<st
     has_company_fit: hasCompanyFit,
     location_category: locationCategory,
   };
+  /* c8 ignore stop */
 }
 
 function classifyMatchSafety(

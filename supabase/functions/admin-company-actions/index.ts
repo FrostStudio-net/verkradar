@@ -1,8 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { isProcurementOpportunityEligible } from "../_shared/procurement-stage.js";
 import { isExplicitLocationAliasMatch } from "../_shared/location-aliases.js";
+import { calculateCompanyOpportunityMatch, COMPANY_MATCH_THRESHOLD } from "../_shared/company-matcher.js";
 
-const MIN_MATCH_SCORE = 50;
+const MIN_MATCH_SCORE = COMPANY_MATCH_THRESHOLD;
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -1606,6 +1607,8 @@ function getCivilContractorFit(
 }
 
 function calculateMatch(profile: CompanyProfile, opportunity: Record<string, unknown>) {
+  return calculateCompanyOpportunityMatch(profile, opportunity);
+  /* c8 ignore start -- retained temporarily for review history; canonical scorer returns above. */
   const text = opportunityText(opportunity);
   let score = 0;
   const reasons: string[] = [];
@@ -1730,6 +1733,7 @@ function calculateMatch(profile: CompanyProfile, opportunity: Record<string, unk
       "Prepare questions before the deadline",
     ],
   };
+  /* c8 ignore stop */
 }
 
 function classifyMatchSafety(profile: CompanyProfile, match: Record<string, unknown>) {

@@ -6,6 +6,8 @@ import {
   acceptCompanyInvite,
   capitalize,
   buildCompanyInviteLink,
+  calculateCompanyOpportunityMatch,
+  COMPANY_MATCH_THRESHOLD,
   buildAdminCompanyProfilePayload,
   buildEvaluationLabelPayload,
   buildMatchDecisionPayload,
@@ -5430,7 +5432,7 @@ async function runMatchingForCurrentCompany() {
       .filter(isCustomerMatchEligibleOpportunity)
       .filter(isDashboardVisibleOpportunity)
       .map((opportunity) => calculateMatch(profile, opportunity))
-      .filter((match) => match.matchScore >= 50);
+      .filter((match) => match.matchScore >= COMPANY_MATCH_THRESHOLD);
 
     const rows = matched.map((match) => ({
       company_id: company.id,
@@ -6656,6 +6658,8 @@ function categoryMatches(profile, opp) {
 }
 
 function calculateMatch(profile, opp) {
+  return calculateCompanyOpportunityMatch(profile, opp);
+  /* c8 ignore start -- retained temporarily for review history; canonical scorer returns above. */
   if (!profile) {
     return {
       ...opp,
@@ -6798,6 +6802,7 @@ function calculateMatch(profile, opp) {
       "Prepare questions before the deadline"
     ]
   };
+  /* c8 ignore stop */
 }
 
 function reconcileStoredMatchForCurrentProfile(opp) {
@@ -10912,7 +10917,7 @@ function getAdminDebugScoreContributions(company, opp, match) {
 
 function getAdminOpportunityExclusionReasons(opp, match) {
   const reasons = [];
-  if (Number(match.matchScore || 0) < 50) reasons.push(`score_below_50 (${Number(match.matchScore || 0)})`);
+  if (Number(match.matchScore || 0) < COMPANY_MATCH_THRESHOLD) reasons.push(`score_below_50 (${Number(match.matchScore || 0)})`);
   if (!isCustomerMatchEligibleOpportunity(opp)) reasons.push("customer_match_ineligible");
   if (!isDashboardVisibleOpportunity(opp)) reasons.push("dashboard_not_visible");
   if (getSafetyStatus(opp) === "hidden") reasons.push("safety_status_hidden");
@@ -11192,7 +11197,7 @@ function getReportMatches(mode = "all_current", previouslyReportedIds = new Set(
 
 function buildCurrentReportMatches({ mode = "all_current", previouslyReportedIds = new Set() } = {}) {
   const matches = getMatchedOpportunities()
-    .filter((opp) => opp.matchScore >= 50)
+    .filter((opp) => opp.matchScore >= COMPANY_MATCH_THRESHOLD)
     .filter((opp) => isCustomerReportModeEligible(opp, "all_current"));
   const modeMatches = mode === "new_only"
     ? matches.filter((opp) => !previouslyReportedIds.has(opp.id))

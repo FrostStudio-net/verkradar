@@ -50,6 +50,7 @@ export { getAiReportPlacement, hasFutureDeadline, mergeAiReviewsIntoReportMatche
 export { SUPABASE_URL, SUPABASE_ANON_KEY, supabaseClient } from "./supabaseClient.js";
 export { daysUntilDeadline, formatDateTime, formatShortDate } from "./utils/dates.js";
 export { deriveActionableForSuppliers, isProcurementOpportunityEligible } from "../supabase/functions/_shared/procurement-stage.js";
+export { calculateCompanyOpportunityMatch, COMPANY_MATCH_THRESHOLD } from "../supabase/functions/_shared/company-matcher.js";
 export {
   formatCurrencyAmount,
   formatCustomerLocation,
