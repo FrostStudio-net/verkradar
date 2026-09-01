@@ -1,3 +1,5 @@
+export const DEFAULT_DASHBOARD_QUALITY_FILTER = "all";
+
 export function renderDashboardEmptyStatePage({
   copy,
   suggestions,

@@ -1021,6 +1021,7 @@ h3 {
   align-items: end;
   justify-content: space-between;
   gap: 32px;
+  min-height: 228px;
   padding: 54px 0 20px;
 }
 
@@ -1034,30 +1035,36 @@ h3 {
   margin: 20px 0;
 }
 
-.skeleton-stat-card { min-height: 108px; padding: 20px; }
-.skeleton-stat-label { width: 72%; margin-bottom: 22px; }
+.skeleton-stat-card { min-height: 101px; padding: 20px; }
+.skeleton-stat-label { width: 72%; margin-bottom: 19px; }
 .skeleton-stat-value { width: 46%; height: 28px; }
 
 .skeleton-filter-row {
-  display: grid;
-  grid-template-columns: minmax(220px, 1.6fr) repeat(3, minmax(120px, 1fr));
-  gap: 10px;
-  margin: 18px 0 24px;
+  grid-template-columns: 2fr repeat(4, 1fr) auto;
+  margin: 24px 0;
 }
 
-.skeleton-filter-row .skeleton-input { width: 100%; height: 46px; }
+.skeleton-filter-row .skeleton-input { width: 100%; height: 47px; }
+.skeleton-filter-row .skeleton-saved-control { width: 112px; }
+
+.skeleton-dashboard-status {
+  min-height: 68px;
+}
+
+.skeleton-status-line {
+  width: min(680px, 76%);
+  height: 14px;
+}
 
 .skeleton-opportunity-list {
-  display: grid;
-  gap: 14px;
-  padding-bottom: 90px;
+  padding-bottom: 0;
 }
 
 .skeleton-opportunity-card {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 22px;
-  min-height: 238px;
+  min-height: 192px;
   padding: 22px;
 }
 
@@ -5701,8 +5708,6 @@ body.modal-open {
 }
 
 @media (max-width: 430px) {
-  .skeleton-stats-grid,
-  .skeleton-filter-row,
   .skeleton-form-grid {
     grid-template-columns: 1fr;
   }
@@ -5791,6 +5796,7 @@ body.modal-open {
 
   .skeleton-opportunity-card {
     grid-template-columns: 1fr;
+    min-height: 360px;
   }
 
   .skeleton-page-title,
@@ -5798,12 +5804,14 @@ body.modal-open {
     width: 88%;
   }
 
-  .skeleton-head-action,
+  .skeleton-page-title {
+    height: 40px;
+  }
+
   .skeleton-inline-actions .skeleton-button {
     width: 138px;
   }
 
-  .skeleton-stats-grid,
   .skeleton-filter-row,
   .skeleton-form-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5813,8 +5821,12 @@ body.modal-open {
     grid-column: 1 / -1;
   }
 
+  .skeleton-saved-control {
+    grid-column: 1 / -1;
+  }
+
   .skeleton-card-actions {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: 1fr;
   }
 
   .skeleton-card-actions .skeleton-button,
@@ -6444,6 +6456,24 @@ body.modal-open {
     gap: 10px;
   }
 
+  .skeleton-filter-row .skeleton-search,
+  .skeleton-filter-row .skeleton-saved-control {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .skeleton-filter-row .skeleton-saved-control {
+    height: 69px;
+  }
+
+  .skeleton-dashboard-actions .skeleton-head-action {
+    width: 100%;
+  }
+
+  .skeleton-dashboard-status {
+    min-height: 51px;
+  }
+
   .dashboard-empty-state {
     position: relative;
     grid-template-columns: 42px minmax(0, 1fr);
@@ -6500,9 +6530,13 @@ body.modal-open {
 
 }
 
+@media (max-width: 520px) {
+  .skeleton-opportunity-card {
+    min-height: 437px;
+  }
+}
+
 @media (max-width: 430px) {
-  .skeleton-stats-grid,
-  .skeleton-filter-row,
   .skeleton-form-grid,
   .skeleton-card-actions {
     grid-template-columns: 1fr;

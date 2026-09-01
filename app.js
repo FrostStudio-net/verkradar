@@ -18,6 +18,7 @@ import {
   cleanReportReasons,
   createEmptyProfile,
   daysUntilDeadline,
+  DEFAULT_DASHBOARD_QUALITY_FILTER,
   DEFAULT_PROFILE,
   escapeHtml,
   escapeJs,
@@ -225,7 +226,7 @@ let state = {
   ignored: loadArray(STORAGE_KEYS.ignored),
   filters: {
     search: "",
-    label: "recommended",
+    label: DEFAULT_DASHBOARD_QUALITY_FILTER,
     category: "all",
     location: "all",
     type: "all",

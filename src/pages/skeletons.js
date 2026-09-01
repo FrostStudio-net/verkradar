@@ -4,10 +4,11 @@ function block(className) {
 
 function opportunityCardSkeleton() {
   return `
-    <div class="skeleton-card skeleton-opportunity-card">
+    <article class="opportunity-card skeleton-card skeleton-opportunity-card">
       <div class="skeleton-card-main">
         <div class="skeleton-badge-row">
           ${block("skeleton-pill skeleton-pill-wide")}
+          ${block("skeleton-pill")}
           ${block("skeleton-pill")}
         </div>
         ${block("skeleton-line skeleton-title-line")}
@@ -24,36 +25,43 @@ function opportunityCardSkeleton() {
         ${block("skeleton-button")}
         ${block("skeleton-button skeleton-button-small")}
       </div>
-    </div>
+    </article>
   `;
 }
 
 function dashboardSkeleton() {
   return `
     <div class="loading-skeleton loading-skeleton-dashboard" aria-hidden="true">
-      <section class="skeleton-dashboard-head">
+      <section class="dashboard-head skeleton-dashboard-head">
         <div>
           ${block("skeleton-line skeleton-eyebrow")}
           ${block("skeleton-line skeleton-page-title")}
           ${block("skeleton-line skeleton-subtitle")}
         </div>
-        ${block("skeleton-button skeleton-head-action")}
+        <div class="dashboard-actions skeleton-dashboard-actions">
+          ${block("skeleton-button skeleton-head-action")}
+        </div>
       </section>
-      <section class="skeleton-stats-grid">
+      <section class="stats-grid skeleton-stats-grid">
         ${Array.from({ length: 4 }, () => `
-          <div class="skeleton-card skeleton-stat-card">
+          <div class="stat-card skeleton-card skeleton-stat-card">
             ${block("skeleton-line skeleton-stat-label")}
             ${block("skeleton-line skeleton-stat-value")}
           </div>
         `).join("")}
       </section>
-      <section class="skeleton-filter-row">
+      <section class="filters skeleton-filter-row">
         ${block("skeleton-input skeleton-search")}
         ${block("skeleton-input")}
         ${block("skeleton-input")}
         ${block("skeleton-input")}
+        ${block("skeleton-input")}
+        ${block("skeleton-input skeleton-saved-control")}
       </section>
-      <section class="skeleton-opportunity-list">
+      <div class="note-panel dashboard-filter-summary skeleton-dashboard-status">
+        ${block("skeleton-line skeleton-status-line")}
+      </div>
+      <section class="opportunity-list skeleton-opportunity-list">
         ${Array.from({ length: 3 }, opportunityCardSkeleton).join("")}
       </section>
     </div>

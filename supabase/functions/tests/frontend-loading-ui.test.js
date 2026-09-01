@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { renderLandingPage } from "../../../src/pages/public.js";
+import { DEFAULT_DASHBOARD_QUALITY_FILTER, renderDashboardPage } from "../../../src/pages/dashboard.js";
 import {
   renderPageLoadingSkeleton,
   renderReportArchiveSkeleton,
@@ -34,11 +35,72 @@ test("public homepage removes only the demo/trial hero CTA", () => {
 test("dashboard loading uses content-shaped cards, stats, filters, and no loading copy", () => {
   const html = renderPageLoadingSkeleton("/dashboard");
   assert.match(html, /loading-skeleton-dashboard/);
+  assert.match(html, /dashboard-head skeleton-dashboard-head/);
   assert.equal((html.match(/skeleton-stat-card/g) || []).length, 4);
   assert.equal((html.match(/skeleton-opportunity-card/g) || []).length, 3);
   assert.match(html, /skeleton-filter-row/);
+  assert.equal((html.match(/skeleton-input/g) || []).length, 6);
+  assert.match(html, /dashboard-filter-summary skeleton-dashboard-status/);
+  assert.match(html, /opportunity-list skeleton-opportunity-list/);
   assert.match(html, /aria-hidden="true"/);
   assert.doesNotMatch(html, />[^<]*(loading|hleð)[^<]*</i);
+});
+
+test("customer dashboard defaults to all eligible matches and preserves the narrower recommended filter", () => {
+  assert.equal(DEFAULT_DASHBOARD_QUALITY_FILTER, "all");
+  assert.match(app, /label:\s*DEFAULT_DASHBOARD_QUALITY_FILTER/);
+  assert.match(app, /if \(selected === "all"\) return true/);
+  assert.match(app, /value: "recommended"[\s\S]*Mælt með/);
+  assert.match(app, /value: "all"[\s\S]*Allar samsvaranir/);
+});
+
+test("Garðaþjónusta first-view fixture renders both eligible score-68 cards without a recommended empty state", () => {
+  const matches = [
+    {
+      id: "winter-roads",
+      title: "Vetrarþjónusta gatna í Garðabæ 2026–2029 (EES)",
+      matchScore: 68,
+    },
+    {
+      id: "winter-grounds",
+      title: "Vetrarþjónusta stofnanalóða og húsagatna í Garðabæ 2026–2029 (EES)",
+      matchScore: 68,
+    },
+  ];
+  const html = renderDashboardPage({
+    profile: { companyName: "Garðaþjónusta" },
+    matches,
+    stats: { strong: 0, closingSoon: 2, savedCount: 0, totalValue: "0 kr." },
+    filters: { search: "", label: "all", category: "all", location: "all", type: "all", savedOnly: false },
+    filterSummary: "2 tækifæri fundust sem gætu passað við Garðaþjónusta. Sýni 2.",
+    matchStatus: null,
+    opportunityLoadError: "",
+    isAdmin: false,
+    matchingLoading: false,
+    labels: {
+      dashboard: "Yfirlit",
+      welcomeCompany: "Velkomin, Garðaþjónusta",
+      dashboardIntro: "Nýjustu samsvaranir.",
+      viewWeeklyReport: "Skoða yfirlit",
+      strongMatches: "Sterkar samsvaranir",
+      closingSoon: "Rennur út fljótlega",
+      savedLabel: "Vistað",
+      totalPotentialValue: "Heildarvirði",
+      searchOpportunities: "Leita",
+      savedOnly: "Aðeins vistað",
+    },
+    renderFilterDropdown: (key) => `<button data-filter-key="${key}">${key}</button>`,
+    renderOpportunityCard: (match) => `<article data-opportunity-id="${match.id}"><h3>${match.title}</h3><span>Good match · ${match.matchScore}</span></article>`,
+    renderEmptyState: () => "<div>Engar ráðlagðar samsvaranir</div>",
+    escapeHtml: (value) => String(value),
+  });
+
+  assert.equal((html.match(/Good match · 68/g) || []).length, 2);
+  assert.match(html, /Vetrarþjónusta gatna/);
+  assert.match(html, /Vetrarþjónusta stofnanalóða/);
+  assert.match(html, /Sterkar samsvaranir<\/span><strong>0<\/strong>/);
+  assert.match(html, /Rennur út fljótlega<\/span><strong>2<\/strong>/);
+  assert.doesNotMatch(html, /Engar ráðlagðar samsvaranir/);
 });
 
 test("customer report and company settings loaders match their final sections", () => {
@@ -65,5 +127,6 @@ test("skeleton animation is subtle, responsive, and reduced-motion safe", () => 
   assert.match(css, /\.skeleton-block::after[\s\S]*animation: skeleton-shimmer 1\.8s ease-in-out infinite/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*animation: none/);
   assert.match(css, /@media \(max-width: 720px\)[\s\S]*\.skeleton-opportunity-card/);
-  assert.match(css, /@media \(max-width: 430px\)[\s\S]*\.skeleton-stats-grid/);
+  assert.match(css, /@media \(max-width: 768px\)[\s\S]*\.skeleton-filter-row \.skeleton-search/);
+  assert.match(css, /@media \(max-width: 340px\)[\s\S]*\.stats-grid/);
 });
