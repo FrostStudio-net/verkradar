@@ -170,13 +170,14 @@ function renderCompactMatchRow(match, { escapeHtml, company, renderMatchDecision
   const score = Number(match.match_score || 0);
   return `
     <li class="admin-ai-aware-match ${escapeHtml(display.tone || "muted")}">
-      <strong>${escapeHtml(opportunity.title || "Opportunity")}</strong>
-      <span>
-        <b>${escapeHtml(display.label)}</b>
-        ${display.confidence ? ` · ${Math.round(display.confidence * 100)}%` : ""}
-        · Rule score ${score}
-        ${display.bucket === "outside_service_area" ? " · Rule label suppressed" : ` · ${escapeHtml(match.match_label || "Match")}`}
-      </span>
+      <div class="admin-match-card-header">
+        <strong class="admin-match-card-title">${escapeHtml(opportunity.title || "Opportunity")}</strong>
+        <div class="admin-match-card-meta" aria-label="Match overview">
+          <span><b>${escapeHtml(display.label)}</b>${display.confidence ? ` · ${Math.round(display.confidence * 100)}%` : ""}</span>
+          <span>Rule score <b>${score}</b></span>
+          <span>${display.bucket === "outside_service_area" ? "Rule label suppressed" : escapeHtml(match.match_label || "Match")}</span>
+        </div>
+      </div>
       ${match.ai_review_skipped_reason ? `<small>Skipped: ${escapeHtml(formatSkippedReason(match.ai_review_skipped_reason))}</small>` : ""}
       ${match.ai_review_profile_stale ? `<small>AI review may be stale because the company profile changed.</small>` : ""}
       ${match.adminDecision ? `<small>Decision: ${escapeHtml(match.adminDecision.decision || "")}${match.adminDecision.reason ? ` · ${escapeHtml(match.adminDecision.reason)}` : ""}</small>` : ""}

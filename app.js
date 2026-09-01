@@ -10706,7 +10706,7 @@ function renderAdminCompanyDetails(company) {
               changes: company.profileChanges || []
             })}
 
-            <section class="side-panel">
+            <section class="side-panel admin-company-matches-panel">
               <h3>Latest matches</h3>
               ${renderAdminCompanyMatchList(company, { escapeHtml, renderMatchDecisionControls })}
               <h3>Latest reports</h3>

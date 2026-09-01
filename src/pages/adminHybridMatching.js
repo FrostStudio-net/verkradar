@@ -50,36 +50,42 @@ export function renderMatchDecisionControls(match, options) {
   const opportunityId = match.opportunity_id || match.opportunities?.id || "";
   return `
     <div class="admin-match-learning-controls">
-      <form data-admin-match-decision-form data-company-id="${escapeHtml(match.company_id || "")}">
-        <input type="hidden" name="opportunityId" value="${escapeHtml(opportunityId)}" />
-        <select name="decision">
-          ${[
-            ["", "Ákvörðun"],
-            ["send", "Senda"],
-            ["possible", "Mögulegt"],
-            ["reject", "Hafna"]
-          ].map(([value, label]) => `<option value="${value}" ${decision.decision === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
-        </select>
-        <select name="reason">
-          ${MATCH_DECISION_REASONS.map(([value, label]) => `<option value="${value}" ${decision.reason === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
-        </select>
-        <input name="comment" value="${escapeHtml(decision.comment || "")}" placeholder="Athugasemd" />
-        <button class="btn btn-ghost btn-small" type="submit">Vista ákvörðun</button>
-      </form>
-      <form data-admin-evaluation-label-form data-company-id="${escapeHtml(match.company_id || "")}">
-        <input type="hidden" name="opportunityId" value="${escapeHtml(opportunityId)}" />
-        <select name="label">
-          ${[
-            ["", "Mat"],
-            ["strong", "Sterkt"],
-            ["possible", "Mögulegt"],
-            ["no_fit", "Passar ekki"]
-          ].map(([value, label]) => `<option value="${value}" ${evaluation.label === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
-        </select>
-        <input name="reason" value="${escapeHtml(evaluation.reason || "")}" placeholder="Ástæða" />
-        <input name="notes" value="${escapeHtml(evaluation.notes || "")}" placeholder="Minnispunktar" />
-        <button class="btn btn-ghost btn-small" type="submit">Vista mat</button>
-      </form>
+      <div class="admin-match-control-group">
+        <h4>Admin decision</h4>
+        <form data-admin-match-decision-form data-company-id="${escapeHtml(match.company_id || "")}">
+          <input type="hidden" name="opportunityId" value="${escapeHtml(opportunityId)}" />
+          <label><span>Decision</span><select name="decision">
+            ${[
+              ["", "Ákvörðun"],
+              ["send", "Senda"],
+              ["possible", "Mögulegt"],
+              ["reject", "Hafna"]
+            ].map(([value, label]) => `<option value="${value}" ${decision.decision === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
+          </select></label>
+          <label><span>Reason</span><select name="reason">
+            ${MATCH_DECISION_REASONS.map(([value, label]) => `<option value="${value}" ${decision.reason === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
+          </select></label>
+          <label><span>Optional comment</span><input name="comment" value="${escapeHtml(decision.comment || "")}" placeholder="Athugasemd" /></label>
+          <button class="btn btn-ghost btn-small" type="submit">Vista ákvörðun</button>
+        </form>
+      </div>
+      <div class="admin-match-control-group">
+        <h4>Match assessment</h4>
+        <form data-admin-evaluation-label-form data-company-id="${escapeHtml(match.company_id || "")}">
+          <input type="hidden" name="opportunityId" value="${escapeHtml(opportunityId)}" />
+          <label><span>Assessment</span><select name="label">
+            ${[
+              ["", "Mat"],
+              ["strong", "Sterkt"],
+              ["possible", "Mögulegt"],
+              ["no_fit", "Passar ekki"]
+            ].map(([value, label]) => `<option value="${value}" ${evaluation.label === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
+          </select></label>
+          <label><span>Reason</span><input name="reason" value="${escapeHtml(evaluation.reason || "")}" placeholder="Ástæða" /></label>
+          <label><span>Notes</span><input name="notes" value="${escapeHtml(evaluation.notes || "")}" placeholder="Minnispunktar" /></label>
+          <button class="btn btn-ghost btn-small" type="submit">Vista mat</button>
+        </form>
+      </div>
     </div>
   `;
 }
