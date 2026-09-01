@@ -8,6 +8,10 @@ import {
   processProcurementClassificationBatch,
 } from "../_shared/procurement-stage.js";
 import { calculateCompanyOpportunityMatch, COMPANY_MATCH_THRESHOLD } from "../_shared/company-matcher.js";
+import {
+  filterLegacyAutomationConnectors,
+  resolveLegacyConnectorAutomationBatch,
+} from "../_shared/legacy-connector-automation.js";
 
 type ConnectorType = "rss_feed" | "wordpress_rest" | "page_monitor_allowed";
 
@@ -190,6 +194,11 @@ type ImportDebugDetails = {
     ai_budget_exhausted: number;
     ai_failed: number;
   };
+  automation_batch?: string;
+  expected_source_names?: string[];
+  matching_forced_off?: boolean;
+  reports_forced_off?: boolean;
+  ai_forced_off?: boolean;
 };
 
 type DeadlineDebugSample = {
@@ -417,14 +426,29 @@ Deno.serve(async (req) => {
     }
 
     const body = await safeJson(req);
+    const action = firstString(body.action);
+    let scheduledLegacyBatch: ReturnType<typeof resolveLegacyConnectorAutomationBatch> = null;
+    try {
+      scheduledLegacyBatch = resolveLegacyConnectorAutomationBatch({
+        action,
+        batchKey: firstString(body.batchKey, body.batch_key),
+        supabaseUrl,
+        isAutomation,
+      });
+    } catch (error) {
+      return json({ ...summary, errors: [errorMessage(error)] }, 403);
+    }
     const sourceId = firstString(body.sourceId, body.source_id, body.connectorId, body.connector_id);
+    if (scheduledLegacyBatch && sourceId) {
+      return json({ ...summary, errors: ["LEGACY_CONNECTOR_AUTOMATION_SOURCE_OVERRIDE_BLOCKED"] }, 400);
+    }
     const isSingleSourceRun = Boolean(sourceId);
-    const limit = clamp(Number(body.limit || (isSingleSourceRun ? DEFAULT_LIMIT : DEFAULT_BATCH_LIMIT)), 1, isSingleSourceRun ? 100 : DEFAULT_BATCH_LIMIT);
-    const maxSources = isSingleSourceRun ? 1 : clamp(Number(body.maxSources || body.max_sources || DEFAULT_MAX_SOURCES_PER_RUN), 1, 25);
-    const runMatching = body.refreshMatches === true || body.refresh_matches === true || body.runMatching === true || body.run_matching === true || isSingleSourceRun;
-    const runReports = body.generateReports === true || body.generate_reports === true;
-    const reenrichMissingDeadlines = body.reenrichMissingDeadlines === true || body.reenrich_missing_deadlines === true;
-    const fixMissingDeadlineSafety = body.fixMissingDeadlineSafety === true || body.fix_missing_deadline_safety === true;
+    const limit = scheduledLegacyBatch?.limit ?? clamp(Number(body.limit || (isSingleSourceRun ? DEFAULT_LIMIT : DEFAULT_BATCH_LIMIT)), 1, isSingleSourceRun ? 100 : DEFAULT_BATCH_LIMIT);
+    const maxSources = scheduledLegacyBatch?.maxSources ?? (isSingleSourceRun ? 1 : clamp(Number(body.maxSources || body.max_sources || DEFAULT_MAX_SOURCES_PER_RUN), 1, 25));
+    const runMatching = scheduledLegacyBatch?.runMatching ?? (body.refreshMatches === true || body.refresh_matches === true || body.runMatching === true || body.run_matching === true || isSingleSourceRun);
+    const runReports = scheduledLegacyBatch?.runReports ?? (body.generateReports === true || body.generate_reports === true);
+    const reenrichMissingDeadlines = !scheduledLegacyBatch && (body.reenrichMissingDeadlines === true || body.reenrich_missing_deadlines === true);
+    const fixMissingDeadlineSafety = !scheduledLegacyBatch && (body.fixMissingDeadlineSafety === true || body.fix_missing_deadline_safety === true);
     if (fixMissingDeadlineSafety) {
       const result = await fixMissingDeadlineSafetyFlags(adminClient);
       return json({
@@ -455,18 +479,24 @@ Deno.serve(async (req) => {
         errors: result.errors,
       });
     }
-    const allConnectors = await loadEnabledConnectors(adminClient, sourceId);
+    const allEnabledConnectors = await loadEnabledConnectors(adminClient, sourceId);
+    const allConnectors = scheduledLegacyBatch
+      ? filterLegacyAutomationConnectors(allEnabledConnectors, scheduledLegacyBatch.sourceNames) as ConnectorRow[]
+      : allEnabledConnectors;
     const connectors = allConnectors.slice(0, maxSources);
     const remainingConnectors = Math.max(0, allConnectors.length - connectors.length);
+    const missingScheduledSources = scheduledLegacyBatch
+      ? scheduledLegacyBatch.sourceNames.filter((name) => !allConnectors.some((connector) => connector.sources?.name === name))
+      : [];
 
-    if (!allConnectors.length) {
+    if (!allConnectors.length && !scheduledLegacyBatch) {
       return json({
         ...summary,
         ok: true,
         errors: sourceId ? ["No enabled safe connector found for this source."] : [],
       });
     }
-    if (!connectors.length) {
+    if (!connectors.length && !scheduledLegacyBatch) {
       return json({
         ...summary,
         ok: false,
@@ -483,12 +513,26 @@ Deno.serve(async (req) => {
     aggregateRunDetails.sources_checked = 0;
     aggregateRunDetails.connectors_checked = allConnectors.length;
     aggregateRunDetails.source_names_checked = [];
+    if (scheduledLegacyBatch) {
+      aggregateRunDetails.automation_batch = scheduledLegacyBatch.batchKey;
+      aggregateRunDetails.expected_source_names = [...scheduledLegacyBatch.sourceNames];
+      aggregateRunDetails.matching_forced_off = true;
+      aggregateRunDetails.reports_forced_off = true;
+      aggregateRunDetails.ai_forced_off = true;
+      summary.failedSources = missingScheduledSources.map((name) => ({
+        source: name,
+        status: "not_configured_or_disabled",
+        message: "Allowlisted connector is missing, disabled, or unsupported.",
+      }));
+    }
 
     const runId = await startImportRun(adminClient, {
       runType: isAutomation ? "source-connectors-automation" : "source-connectors-manual",
-      sourceName: sourceId ? connectors[0]?.sources?.name || "Source connector" : "All source connectors",
-      importMode: sourceId ? connectors[0]?.connector_type || "source_connector" : "source-connectors-batch",
-      query: sourceId ? connectors[0]?.endpoint_url || "" : `enabled connectors: ${allConnectors.length}; processing: ${connectors.length}; item limit: ${limit}; matching: ${runMatching}; reports: ${runReports}`,
+      sourceName: scheduledLegacyBatch ? `Legacy source connectors / ${scheduledLegacyBatch.batchKey}` : sourceId ? connectors[0]?.sources?.name || "Source connector" : "All source connectors",
+      importMode: scheduledLegacyBatch ? "legacy-connectors-ingestion-only" : sourceId ? connectors[0]?.connector_type || "source_connector" : "source-connectors-batch",
+      query: scheduledLegacyBatch
+        ? `batch: ${scheduledLegacyBatch.batchKey}; sources: ${scheduledLegacyBatch.sourceNames.join(", ")}; item limit: ${limit}; matching: false; reports: false; ai: false`
+        : sourceId ? connectors[0]?.endpoint_url || "" : `enabled connectors: ${allConnectors.length}; processing: ${connectors.length}; item limit: ${limit}; matching: ${runMatching}; reports: ${runReports}`,
     });
 
     let processedSources = 0;
@@ -622,7 +666,7 @@ Deno.serve(async (req) => {
             functionReserveMs: PROCUREMENT_PERSISTENCE_RESERVE_MS,
             aiBudgetMs: PROCUREMENT_AI_BUDGET_MS,
             perCallTimeoutMs: PROCUREMENT_CLASSIFIER_TIMEOUT_MS,
-            maxAiClassifications: Math.max(0, PROCUREMENT_AI_MAX_CLASSIFICATIONS - aiClassificationsUsed),
+            maxAiClassifications: scheduledLegacyBatch ? 0 : Math.max(0, PROCUREMENT_AI_MAX_CLASSIFICATIONS - aiClassificationsUsed),
             classifyDeterministic: (opportunity: NormalizedOpportunity) => classifyImportedOpportunityDeterministically(opportunity, connector, source),
             classifyAi: (opportunity: NormalizedOpportunity, timeoutMs: number) => classifyImportedOpportunityWithAi(opportunity, connector, source, {
               supabaseUrl,
@@ -765,7 +809,7 @@ Deno.serve(async (req) => {
     summary.reports = summary.reports_generated;
     summary.ok = !summary.errors.length;
     summary.sources_processed = processedSources;
-    summary.sources_remaining = remainingConnectors + Math.max(0, connectors.length - processedSources);
+    summary.sources_remaining = missingScheduledSources.length + remainingConnectors + Math.max(0, connectors.length - processedSources);
     summary.matching_skipped = !runMatching;
     summary.reports_skipped = !runReports;
     if (!processedSources) {
@@ -783,7 +827,9 @@ Deno.serve(async (req) => {
     await finalizeImportRun(adminClient, runId, {
       status: !processedSources ? "error" : (summary.failedSources?.length || summary.timedOutSources?.length || summary.sources_remaining ? "partial_success" : "success"),
       ...summary,
-      query: sourceId ? connectors[0]?.endpoint_url || "" : `enabled connectors: ${allConnectors.length}; processed: ${processedSources}; remaining: ${summary.sources_remaining}; item limit: ${limit}; matching: ${runMatching}; reports: ${runReports}`,
+      query: scheduledLegacyBatch
+        ? `batch: ${scheduledLegacyBatch.batchKey}; expected: ${scheduledLegacyBatch.sourceNames.length}; configured: ${allConnectors.length}; processed: ${processedSources}; remaining: ${summary.sources_remaining}; item limit: ${limit}; matching: false; reports: false; ai: false`
+        : sourceId ? connectors[0]?.endpoint_url || "" : `enabled connectors: ${allConnectors.length}; processed: ${processedSources}; remaining: ${summary.sources_remaining}; item limit: ${limit}; matching: ${runMatching}; reports: ${runReports}`,
       error: summary.failedSources?.length || summary.timedOutSources?.length
         ? [
             ...(summary.failedSources || []).map((failure) => `${failure.source}: ${failure.message}`),
