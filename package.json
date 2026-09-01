@@ -19,7 +19,9 @@
     "test:production-release-controls": "node --test supabase/functions/tests/production-release-controls.test.js",
     "test:production-release-controls-db": "bash scripts/test-production-release-controls-db.sh",
     "test:production-hold-clear": "node --test supabase/functions/tests/production-communication-hold-clear.test.js",
-    "test:production-hold-clear-db": "bash scripts/test-production-hold-clear-db.sh"
+    "test:production-hold-clear-db": "bash scripts/test-production-hold-clear-db.sh",
+    "test:internal-match-alerts": "node --test supabase/functions/tests/internal-match-alerts.test.js",
+    "test:internal-match-alerts-db": "bash scripts/test-internal-match-alerts-db.sh"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",
