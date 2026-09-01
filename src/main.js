@@ -20,6 +20,7 @@ export { renderAcceptInvitePage } from "./pages/acceptInvite.js";
 export { renderForgotPasswordPage, renderLoginPage, renderPublicSignupUnavailablePage, renderResetPasswordPage, renderSignupPage } from "./pages/auth.js";
 export { renderAdminAutomaticAiReviewPanel, renderAdminCompanyAiReviewPanel, renderAdminCompanyMatchList } from "./pages/adminAiReviews.js";
 export { renderDashboardEmptyStatePage, renderDashboardPage, renderOpportunityCardPage, renderOpportunityModalPage } from "./pages/dashboard.js";
+export { renderPageLoadingSkeleton, renderReportArchiveSkeleton, renderSettingsSkeleton } from "./pages/skeletons.js";
 export { renderLegalPageContent } from "./pages/legal.js";
 export { clearContactRequestFieldError, renderContactPage, validateContactRequestForm } from "./pages/contact.js";
 export { clearTrialRequestFieldError, renderLandingPage, renderPricingPage, renderTrialRequestPage, validateTrialRequestForm } from "./pages/public.js";

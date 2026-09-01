@@ -105,6 +105,7 @@ import {
   renderDashboardPage,
   renderOpportunityCardPage,
   renderOpportunityModalPage,
+  renderPageLoadingSkeleton,
   renderPricingPage,
   renderProfileFormPage,
   renderPublicSignupUnavailablePage,
@@ -114,8 +115,10 @@ import {
   renderReportPreviewPage,
   renderReportQualityBadgePage,
   renderReportSummaryCardPage,
+  renderReportArchiveSkeleton,
   renderResetPasswordPage,
   renderSettingsPage,
+  renderSettingsSkeleton,
   renderSignupPage,
   renderTrialRequestPage,
   previewCompanyInvite,
@@ -7355,20 +7358,15 @@ function cssEscape(value) {
 }
 
 function renderLoadingPage() {
-  return renderShell(`
-    <div class="app-loader">
-      <div class="loader-mark" aria-label="${escapeHtml(t("loadingLabel"))}">
-        <span></span>
-      </div>
-    </div>
-  `);
+  return renderShell(renderPageLoadingSkeleton(state.route));
 }
 
 function renderShell(content) {
   const isLoggedIn = Boolean(state.user);
   const hasProfile = Boolean(state.profile);
   const navItems = getHeaderNavItems(isLoggedIn, hasProfile);
-  const headerCta = getHeaderCta(isLoggedIn, hasProfile);
+  const isPublicHome = !isLoggedIn && getRoutePath(state.route) === "/";
+  const headerCta = isPublicHome ? null : getHeaderCta(isLoggedIn, hasProfile);
   const mainClasses = [
     "app-main",
     isLoggedIn ? "is-authenticated" : "is-public",
@@ -10945,10 +10943,10 @@ function renderReport() {
   const report = buildReportContent(profile, matches);
   const selectedReport = state.reports.find((item) => item.id === state.selectedReportId);
   const archiveStatus = state.reportArchiveLoading
-    ? t("loadingSavedReports")
-    : state.language === "is" ? `${state.reports.length} vistuð yfirlit.` : `${state.reports.length} saved report${state.reports.length === 1 ? "" : "s"}.`;
+    ? `<span class="skeleton-block skeleton-archive-status" aria-hidden="true"></span>`
+    : escapeHtml(state.language === "is" ? `${state.reports.length} vistuð yfirlit.` : `${state.reports.length} saved report${state.reports.length === 1 ? "" : "s"}.`);
   const archiveContent = state.reportArchiveLoading
-    ? `<div class="empty-card">${escapeHtml(t("loadingSavedReports"))}</div>`
+    ? renderReportArchiveSkeleton(3)
     : state.reportsLoadError
       ? `<div class="admin-message is-error">Failed to load reports. ${escapeHtml(state.reportsLoadError)}</div>`
       : state.reportsLoaded && state.reports.length === 0
@@ -12165,14 +12163,7 @@ function renderSettings() {
   if (!state.user) return requireAuthPage();
 
   if (state.profileLoading && !state.profile && !state.profileDraft) {
-    return renderShell(`
-      <section class="empty-state">
-        <div class="loader-mark" aria-label="${escapeHtml(state.language === "is" ? "Hleð fyrirtækjaprófíl" : "Loading company profile")}"></div>
-        <h1>${escapeHtml(state.language === "is" ? "Hleð fyrirtækjaprófíl..." : "Loading company profile...")}</h1>
-        <p>${escapeHtml(state.language === "is" ? "Sæki vistaðan fyrirtækjaprófíl." : "Checking your saved company profile.")}</p>
-        <button class="btn btn-secondary" type="button" data-action="retry-settings-profile">${escapeHtml(state.language === "is" ? "Reyna aftur" : "Retry")}</button>
-      </section>
-    `);
+    return renderShell(renderSettingsSkeleton());
   }
 
   if (state.profileLoadError && !state.profile && !state.profileDraft) {

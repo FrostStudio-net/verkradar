@@ -23,7 +23,8 @@
     "test:internal-match-alerts": "node --test supabase/functions/tests/internal-match-alerts.test.js",
     "test:internal-match-alerts-db": "bash scripts/test-internal-match-alerts-db.sh",
     "test:legacy-zero-click": "node --test supabase/functions/tests/legacy-zero-click-automation.test.js",
-    "test:legacy-zero-click-db": "bash scripts/test-legacy-zero-click-db.sh"
+    "test:legacy-zero-click-db": "bash scripts/test-legacy-zero-click-db.sh",
+    "test:frontend-cleanup": "node --test supabase/functions/tests/frontend-loading-ui.test.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",

@@ -36,8 +36,7 @@ export function renderLandingPage({ t, escapeHtml, language, trialHref }) {
         <p class="hero-text">
           ${escapeHtml(t("heroText"))}
         </p>
-        <div class="hero-actions">
-          <button class="btn btn-primary btn-large" data-action="go" data-href="${escapeHtml(trialHref)}">${escapeHtml(t("createFreeDemoProfile"))} <span aria-hidden="true">&rarr;</span></button>
+        <div class="hero-actions hero-actions-single">
           <button class="btn btn-secondary btn-large" data-action="scroll-to" data-target="sample-report">${escapeHtml(t("viewSampleReport"))}</button>
         </div>
         <div class="proof-lines" aria-label="Product proof">
