@@ -34,6 +34,7 @@ export {
   renderReportSummaryCardPage
 } from "./pages/reports.js";
 export { renderSettingsPage } from "./pages/settings.js";
+export { renderConfirmationModal } from "./pages/confirmationModal.js";
 export {
   buildCompanyDraftFromTrialRequest,
   createCompanyFromTrialRequest,

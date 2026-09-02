@@ -14,6 +14,9 @@ const LOCATION_OPTIONS = [
 function renderProfileBasicsSection(ctx) {
   const { t, escapeHtml, profileDraft: p, renderCustomDropdown, getFilterOptions } = ctx;
   const selectedIndustry = p.industry || "";
+  const selectedPlan = ["basic", "pro", "priority"].includes(String(p.selectedPlan || p.plan || "").toLowerCase())
+    ? String(p.selectedPlan || p.plan).toLowerCase()
+    : "basic";
   return `
     <div class="form-section">
       <h2>${escapeHtml(t("companyBasics"))}</h2>
@@ -26,15 +29,11 @@ function renderProfileBasicsSection(ctx) {
         <label>${escapeHtml(t("phone"))}<input name="phone" data-profile-field="phone" value="${escapeHtml(p.phone || "")}" required /></label>
         <label>${escapeHtml(t("address"))}<input name="address" data-profile-field="address" value="${escapeHtml(p.address || "")}" required /></label>
         <label>${escapeHtml(t("website"))}<input name="website" data-profile-field="website" value="${escapeHtml(p.website || "")}" /></label>
-        <label class="custom-select-field">${escapeHtml(t("selectedPlan"))}
-          <input type="hidden" name="selectedPlan" value="${escapeHtml(p.selectedPlan || "basic")}" data-profile-field="selectedPlan" />
-          ${renderCustomDropdown({
-            key: "selectedPlan",
-            value: p.selectedPlan || "basic",
-            options: getFilterOptions("selectedPlan"),
-            profileField: "selectedPlan"
-          })}
-        </label>
+        <div class="readonly-plan-field" data-customer-plan-readonly>
+          <span>${escapeHtml(t("selectedPlan"))}</span>
+          <strong>${escapeHtml(t(`plan_${selectedPlan}`))}</strong>
+          <small>${escapeHtml(t("planChangeContact"))}</small>
+        </div>
         <label class="custom-select-field">${escapeHtml(t("industry"))}
           <input id="industry-input" type="hidden" name="industry" value="${escapeHtml(selectedIndustry)}" required />
           ${renderCustomDropdown({

@@ -12,7 +12,6 @@ import {
   buildEvaluationLabelPayload,
   buildMatchDecisionPayload,
   buildReportEmail,
-  claimInvitedCompanyMemberships,
   clearStoredPendingInviteToken,
   cleanStringArray,
   cleanReportReasons,
@@ -120,6 +119,7 @@ import {
   renderResetPasswordPage,
   renderSettingsPage,
   renderSettingsSkeleton,
+  renderConfirmationModal,
   renderSignupPage,
   renderTrialRequestPage,
   previewCompanyInvite,
@@ -346,6 +346,7 @@ let state = {
   reportSaveLoading: false,
   reportMessage: null,
   selectedReportId: null,
+  confirmationDialog: null,
   selectedAdminReportId: null,
   adminTrialDeleteConfirmId: null,
   adminMessage: null,
@@ -736,6 +737,10 @@ document.addEventListener("click", async (event) => {
 
   if (event.target.classList?.contains("modal-backdrop")) {
     event.preventDefault();
+    if (event.target.hasAttribute("data-confirmation-backdrop")) {
+      closeConfirmationDialog();
+      return;
+    }
     if (event.target.classList.contains("admin-confirm-backdrop")) {
       state.adminTrialDeleteConfirmId = null;
       render();
@@ -1162,7 +1167,15 @@ document.addEventListener("click", async (event) => {
   }
   if (name === "save-report") saveCurrentReport();
   if (name === "archive-report") {
-    archiveReport(id);
+    requestArchiveReport(id, action);
+    return;
+  }
+  if (name === "cancel-confirmation") {
+    closeConfirmationDialog();
+    return;
+  }
+  if (name === "confirm-confirmation") {
+    confirmPendingAction();
     return;
   }
   if (name === "view-report") {
@@ -1368,6 +1381,17 @@ document.addEventListener("click", async (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
+  if (state.confirmationDialog) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeConfirmationDialog();
+      return;
+    }
+    if (event.key === "Tab") {
+      trapConfirmationFocus(event);
+      return;
+    }
+  }
   if (event.key === "Escape" && (state.isMobileMenuOpen || state.isMobileMenuClosing)) {
     event.preventDefault();
     closeMobileMenu();
@@ -4920,10 +4944,6 @@ async function loadCompanyProfile(options = {}) {
   }
 
   try {
-    await claimInvitedCompanyMemberships(supabaseClient, state.user, { allowEmailClaim: true }).catch((error) => {
-      console.warn("Failed to claim invited company memberships:", error);
-      return [];
-    });
     const { company, membership } = await loadAuthenticatedCompany();
     if (!company) {
       state.companyId = null;
@@ -5352,12 +5372,62 @@ async function saveCurrentReport() {
   }
 }
 
+function requestArchiveReport(reportId, trigger) {
+  if (!reportId || state.reportArchiveLoading) return;
+  state.confirmationDialog = {
+    kind: "archive-report",
+    targetId: reportId,
+    title: state.language === "is" ? "Fela yfirlit?" : "Hide report?",
+    message: state.language === "is"
+      ? "Yfirlitið verður falið úr Vistuðum yfirlitum. Gögnin eru varðveitt og aðgerðin hefur ekki áhrif á tækifæri eða samsvaranir."
+      : "The report will be hidden from Saved reports. Its audit data is preserved and opportunities and matches are unaffected.",
+    confirmLabel: state.language === "is" ? "Fela yfirlit" : "Hide report",
+    cancelLabel: state.language === "is" ? "Hætta við" : "Cancel",
+    returnAction: trigger?.dataset?.action || "archive-report",
+    returnId: reportId,
+  };
+  render();
+}
+
+function closeConfirmationDialog() {
+  const dialog = state.confirmationDialog;
+  state.confirmationDialog = null;
+  render();
+  if (!dialog) return;
+  requestAnimationFrame(() => {
+    const selector = `[data-action="${cssEscape(dialog.returnAction || "")}"][data-id="${cssEscape(dialog.returnId || "")}"]`;
+    document.querySelector(selector)?.focus?.({ preventScroll: true });
+  });
+}
+
+function focusConfirmationDialog() {
+  requestAnimationFrame(() => document.querySelector("[data-confirmation-primary]")?.focus?.({ preventScroll: true }));
+}
+
+function trapConfirmationFocus(event) {
+  const dialog = document.querySelector(".confirmation-modal");
+  if (!dialog) return;
+  const controls = Array.from(dialog.querySelectorAll("button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])"));
+  if (!controls.length) return;
+  const first = controls[0];
+  const last = controls[controls.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+async function confirmPendingAction() {
+  const dialog = state.confirmationDialog;
+  if (!dialog || state.reportArchiveLoading) return;
+  if (dialog.kind === "archive-report") await archiveReport(dialog.targetId);
+}
+
 async function archiveReport(reportId) {
   if (!reportId || !supabaseClient || !state.user) return;
-  const confirmed = window.confirm(state.language === "is"
-    ? "Ertu viss um að þú viljir fela þetta yfirlit? Þetta er ekki hægt að afturkalla í mælaborðinu."
-    : "Are you sure you want to hide this report? This cannot be undone from the dashboard.");
-  if (!confirmed) return;
 
   state.reportArchiveLoading = true;
   state.reportMessage = null;
@@ -5374,6 +5444,7 @@ async function archiveReport(reportId) {
       .eq("company_id", state.companyId);
 
     if (error) throw error;
+    state.confirmationDialog = null;
     if (state.selectedReportId === reportId) state.selectedReportId = null;
     state.reports = state.reports.filter((report) => report.id !== reportId);
     state.reportMessage = {
@@ -7304,6 +7375,14 @@ function render() {
     }
   } else {
     syncDetailsFromState();
+  }
+  if (state.confirmationDialog) {
+    app.insertAdjacentHTML("beforeend", renderConfirmationModal({
+      ...state.confirmationDialog,
+      busy: state.reportArchiveLoading,
+      escapeHtml,
+    }));
+    focusConfirmationDialog();
   }
   restoreAdminCompanyDetailScroll();
   syncBodyModalOpenState();

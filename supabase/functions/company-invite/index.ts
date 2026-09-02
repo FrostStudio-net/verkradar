@@ -235,12 +235,23 @@ Deno.serve(async (req) => {
           status: "active",
           accepted_at: now,
           revoked_at: null,
+          token_hash: null,
+          expires_at: null,
           updated_at: now,
         })
         .eq("id", invite.id)
+        .eq("status", "invited")
+        .eq("token_hash", await sha256Hex(token))
         .select("id, company_id, email, role, status, accepted_at")
-        .single();
+        .maybeSingle();
       if (error) throw error;
+      if (!data) {
+        return json({
+          error: "This invite has already been accepted.",
+          code: "invite_already_accepted",
+          status: "active",
+        }, 409);
+      }
       const diagnostics = await buildAcceptDiagnostics(token, invite, {
         lookupDiagnostics: lookup.diagnostics,
         userData: userData.user,

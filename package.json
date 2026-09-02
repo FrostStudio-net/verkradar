@@ -25,7 +25,9 @@
     "test:legacy-zero-click": "node --test supabase/functions/tests/legacy-zero-click-automation.test.js",
     "test:legacy-zero-click-db": "bash scripts/test-legacy-zero-click-db.sh",
     "test:frontend-cleanup": "node --test supabase/functions/tests/frontend-loading-ui.test.js",
-    "test:admin-company-match-layout": "node --test supabase/functions/tests/admin-company-match-layout.test.js"
+    "test:admin-company-match-layout": "node --test supabase/functions/tests/admin-company-match-layout.test.js",
+    "test:client-handoff": "node --test supabase/functions/tests/client-handoff.test.js",
+    "test:client-handoff-db": "bash scripts/test-client-handoff-db.sh"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",
