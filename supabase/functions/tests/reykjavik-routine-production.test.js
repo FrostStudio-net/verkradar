@@ -54,7 +54,7 @@ test("production admin shows routine operations and retires canary controls", ()
     phaseC3Production: { enabled: false, release_enabled: false, candidates: [] },
   };
   const html = renderAdminV2IngestionPanel({ rows: [row], escapeHtml: String, formatDateTime: String, routineProductionControlsEnabled: true, phaseC3ProductionControlsEnabled: true, productionShadowControlsEnabled: true });
-  assert.match(html, /Reykjavík V2 — normal production/);
+  assert.match(html, /Reykjavík V2 - normal production/);
   assert.match(html, /Emergency disable Reykjavík V2 admissions/);
   assert.doesNotMatch(html, /Enable Reykjavík production canary|Run shadow once|Promote once/);
 });

@@ -165,16 +165,16 @@ export function formatReportReason(reason, { language = "en", translate } = {}) 
 export function formatReportRisk(risk, language = "en") {
   if (language !== "is") return risk || "";
   const map = {
-    "Deadline not available in feed — verify on source page.": "Skilafrestur fannst ekki í innfluttum gögnum — staðfestið á upprunasíðu.",
-    "Deadline not available in imported data — verify on source page.": "Skilafrestur fannst ekki í innfluttum gögnum — staðfestið á upprunasíðu.",
-    "Deadline not available in source — verify page.": "Skilafrestur fannst ekki í heimild - staðfestið á upprunalegri síðu.",
-    "No formal tender deadline extracted — verify source article.": "Formlegur skilafrestur fannst ekki - staðfestið í heimildargrein.",
-    "Formal tender deadline not found yet — monitor source article.": "Formlegur skilafrestur fannst ekki enn - fylgist með heimildargrein.",
-    "Tender appears already announced/awarded — verify source article.": "Útboð virðist þegar auglýst eða afgreitt - staðfestið í heimildargrein.",
+    "Deadline not available in feed - verify on source page.": "Skilafrestur fannst ekki í innfluttum gögnum - staðfestið á upprunasíðu.",
+    "Deadline not available in imported data - verify on source page.": "Skilafrestur fannst ekki í innfluttum gögnum - staðfestið á upprunasíðu.",
+    "Deadline not available in source - verify page.": "Skilafrestur fannst ekki í heimild - staðfestið á upprunalegri síðu.",
+    "No formal tender deadline extracted - verify source article.": "Formlegur skilafrestur fannst ekki - staðfestið í heimildargrein.",
+    "Formal tender deadline not found yet - monitor source article.": "Formlegur skilafrestur fannst ekki enn - fylgist með heimildargrein.",
+    "Tender appears already announced/awarded - verify source article.": "Útboð virðist þegar auglýst eða afgreitt - staðfestið í heimildargrein.",
     "Estimated value is not listed in the imported data.": "Áætlað verðmæti er ekki gefið upp í innfluttum gögnum.",
     "Open the source page and confirm mandatory requirements.": "Opnið upprunalega heimild og staðfestið skyldukröfur.",
-    "Extracted project signal — verify tender timing in the source article.": "Útdregin verkefnavísbending - staðfestið útboðstímasetningu í heimildargrein.",
-    "Imported from broad feed — verify that this is a real tender or business opportunity.": "Innflutt úr breiðum fréttastraumi - staðfestið að þetta sé raunverulegt útboð eða viðskiptatækifæri."
+    "Extracted project signal - verify tender timing in the source article.": "Útdregin verkefnavísbending - staðfestið útboðstímasetningu í heimildargrein.",
+    "Imported from broad feed - verify that this is a real tender or business opportunity.": "Innflutt úr breiðum fréttastraumi - staðfestið að þetta sé raunverulegt útboð eða viðskiptatækifæri."
   };
   return map[risk] || risk || "";
 }

@@ -61,7 +61,7 @@ export function buildInternalMatchAlertEmail({ alert, match, opportunity, source
     : "";
   const source = sourceName || opportunity.source_name || "Óþekkt heimild";
   const deadline = displayDate(opportunity.deadline);
-  const subject = `Ný VerkRadar samsvörun — ${TARGET_COMPANY_NAME}: ${opportunity.title}`;
+  const subject = `Ný VerkRadar samsvörun - ${TARGET_COMPANY_NAME}: ${opportunity.title}`;
   const fields = [
     ["Fyrirtæki", TARGET_COMPANY_NAME],
     ["Tækifæri", opportunity.title],

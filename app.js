@@ -145,8 +145,8 @@ import {
 
 /* VerkRadar single-page app. Production data comes from Supabase; demo data must be explicitly isolated. */
 
-const MISSING_DEADLINE_RISK = "Deadline not available in imported data — verify on source page.";
-const EXTRACTED_PROJECT_DEADLINE_RISK = "No formal tender deadline extracted — verify source article.";
+const MISSING_DEADLINE_RISK = "Deadline not available in imported data - verify on source page.";
+const EXTRACTED_PROJECT_DEADLINE_RISK = "No formal tender deadline extracted - verify source article.";
 
 const COMPANY_PROFILE_SELECT = "id, owner_id, company_name, kennitala, contact_email, billing_email, contact_name, phone, address, website, industry, plan, selected_plan, billing_status, trial_started_at, trial_ends_at, base_location, service_areas, willing_to_travel, national_projects, remote_projects, minimum_project_value_for_travel, min_project_value, max_project_value, allow_unknown_value, report_frequency, report_day, deadline_reminders, include_low_confidence, auto_alert_mode";
 
@@ -861,7 +861,7 @@ document.addEventListener("click", async (event) => {
     if (observationId && !selectedCase) return;
     if (sourceKey && !PHASE_C2_CASES.some((item) => item.source_key === sourceKey)) return;
     action.disabled = true;
-    state.v2C2Action = `${name}${selectedCase ? ` — Case ${selectedCase.case_key}` : ""}`;
+    state.v2C2Action = `${name}${selectedCase ? ` - Case ${selectedCase.case_key}` : ""}`;
     state.v2IngestionError = null;
     render();
     try {
@@ -927,7 +927,7 @@ document.addEventListener("click", async (event) => {
         state.v2C3Result = await invokeAdminV2Action(supabaseClient, "rollback_canary", null, null, { observation_id: observationId, reason });
       } else if (name === "v2-c3-enable-release" || name === "v2-c3-disable-release") {
         const enableRelease = name === "v2-c3-enable-release";
-        const confirmation = "Enable release controls only — no release will occur";
+        const confirmation = "Enable release controls only - no release will occur";
         if (enableRelease && !window.confirm(confirmation)) return;
         if (!enableRelease && !window.confirm("Disable release controls and clear release approval?")) return;
         state.v2C3Result = await invokeAdminV2Action(supabaseClient, "set_reykjavik_release_enabled", "reykjavik-utbod-v2", null, {
@@ -941,7 +941,7 @@ document.addEventListener("click", async (event) => {
       } else if (name === "v2-c3-release") {
         state.v2C3Result = await invokeAdminV2Action(supabaseClient, "release_canary", null, null, { observation_id: observationId, reason });
       } else if (name === "v2-c3-clear-hold") {
-        const confirmation = "Clear communication hold only — no matching or communication will run";
+        const confirmation = "Clear communication hold only - no matching or communication will run";
         if (!window.confirm(confirmation)) return;
         state.v2C3Result = await invokeAdminV2Action(supabaseClient, "clear_communication_hold", "reykjavik-utbod-v2", null, {
           observation_id: observationId,
@@ -970,7 +970,7 @@ document.addEventListener("click", async (event) => {
     const allowed = state.isAdmin && isPhaseC3ProductionRuntime(SUPABASE_URL) && productionRow;
     if (!supabaseClient || !allowed) return;
     const enable = name === "v2-c3-enable-controls";
-    const confirmation = "Enable canary controls only — no promotion will occur";
+    const confirmation = "Enable canary controls only - no promotion will occur";
     if (enable && !window.confirm(confirmation)) return;
     if (!enable && !window.confirm("Disable production canary controls?")) return;
     action.disabled = true;
@@ -1830,8 +1830,8 @@ document.addEventListener("submit", async (event) => {
       } else {
         const plural = matchedCount === 1 ? "opportunity" : "opportunities";
         state.profileSaveMessage = shouldRedirect
-          ? `Profile saved — ${matchedCount} relevant ${plural} found. Redirecting...`
-          : `Profile saved — ${matchedCount} relevant ${plural} found.`;
+          ? `Profile saved - ${matchedCount} relevant ${plural} found. Redirecting...`
+          : `Profile saved - ${matchedCount} relevant ${plural} found.`;
       }
       state.profileSaved = true;
       render();
@@ -5539,7 +5539,7 @@ async function runMatchingForCurrentCompany() {
       replaceProfileDraftFromProfile(profile);
     }
     const plural = rows.length === 1 ? "match" : "matches";
-    state.matchStatus = { type: "success", text: `Matching complete — ${rows.length} stored ${plural} found.` };
+    state.matchStatus = { type: "success", text: `Matching complete - ${rows.length} stored ${plural} found.` };
     await loadOpportunities();
     await loadOpportunityActionsForCurrentCompany();
     await loadStoredMatchesForCurrentCompany();
@@ -7277,10 +7277,10 @@ function getOpportunityMissingDeadlineRisk(opp) {
   if (isVegagerdinExtractedProject(opp)) {
     const tenderState = getVegagerdinExtractedTenderState(opp);
     if (["tender_awarded", "awarded", "already_tendered", "announced"].includes(tenderState)) {
-      return "Tender appears already announced/awarded — verify source article.";
+      return "Tender appears already announced/awarded - verify source article.";
     }
     if (tenderState === "upcoming_tender") {
-      return "Formal tender deadline not found yet — monitor source article.";
+      return "Formal tender deadline not found yet - monitor source article.";
     }
     return EXTRACTED_PROJECT_DEADLINE_RISK;
   }
@@ -9829,9 +9829,9 @@ function renderQualityWarning(opp) {
   }
   if (normalizeOpportunityQualityStatus(opp.qualityStatus, opp) !== "needs_review") return "";
   if (isVegagerdinExtractedProject(opp)) {
-    return `<div class="note-panel quality-warning">${escapeHtml(state.language === "is" ? "Útdregin verkefnavísbending — staðfestið útboðstímasetningu í heimildargrein." : "Extracted project signal — verify tender timing in the source article.")}</div>`;
+    return `<div class="note-panel quality-warning">${escapeHtml(state.language === "is" ? "Útdregin verkefnavísbending - staðfestið útboðstímasetningu í heimildargrein." : "Extracted project signal - verify tender timing in the source article.")}</div>`;
   }
-  return `<div class="note-panel quality-warning">${escapeHtml(state.language === "is" ? "Innflutt úr breiðum straumi — staðfestið á upprunasíðu." : "Imported from broad feed — verify source page.")}</div>`;
+  return `<div class="note-panel quality-warning">${escapeHtml(state.language === "is" ? "Innflutt úr breiðum straumi - staðfestið á upprunasíðu." : "Imported from broad feed - verify source page.")}</div>`;
 }
 
 function renderOpportunityModal(opp) {
@@ -10115,14 +10115,14 @@ function renderAdminContactRequestsSection() {
 function renderAdminContactRequestRow(row) {
   return `
     <tr>
-      <td><strong>${escapeHtml(row.name || "—")}</strong></td>
-      <td>${escapeHtml(row.company_name || "—")}</td>
-      <td>${escapeHtml(row.email || "—")}</td>
-      <td>${escapeHtml(row.phone || "—")}</td>
-      <td>${escapeHtml(row.subject || "—")}</td>
-      <td>${escapeHtml(row.message || "—")}</td>
+      <td><strong>${escapeHtml(row.name || "-")}</strong></td>
+      <td>${escapeHtml(row.company_name || "-")}</td>
+      <td>${escapeHtml(row.email || "-")}</td>
+      <td>${escapeHtml(row.phone || "-")}</td>
+      <td>${escapeHtml(row.subject || "-")}</td>
+      <td>${escapeHtml(row.message || "-")}</td>
       <td>${renderContactRequestStatus(row.status)}</td>
-      <td>${escapeHtml(row.created_at ? formatDateTime(row.created_at) : "—")}</td>
+      <td>${escapeHtml(row.created_at ? formatDateTime(row.created_at) : "-")}</td>
     </tr>
   `;
 }
@@ -10221,14 +10221,14 @@ function renderAdminTrialRequestRow(row) {
   const deleteCopy = getAdminTrialDeleteCopy(row);
   return `
     <tr class="${isSelected ? "is-selected" : ""}">
-      <td><strong>${escapeHtml(row.company_name || "—")}</strong></td>
-      <td>${escapeHtml(row.contact_name || "—")}</td>
-      <td>${escapeHtml(row.email || "—")}</td>
-      <td>${escapeHtml(row.phone || "—")}</td>
-      <td>${escapeHtml(row.services || "—")}</td>
-      <td>${escapeHtml(row.locations || "—")}</td>
+      <td><strong>${escapeHtml(row.company_name || "-")}</strong></td>
+      <td>${escapeHtml(row.contact_name || "-")}</td>
+      <td>${escapeHtml(row.email || "-")}</td>
+      <td>${escapeHtml(row.phone || "-")}</td>
+      <td>${escapeHtml(row.services || "-")}</td>
+      <td>${escapeHtml(row.locations || "-")}</td>
       <td>${renderTrialRequestStatus(row.status)}</td>
-      <td>${escapeHtml(row.created_at ? formatDateTime(row.created_at) : "—")}</td>
+      <td>${escapeHtml(row.created_at ? formatDateTime(row.created_at) : "-")}</td>
       <td>
         <div class="admin-row-actions">
           <button class="btn btn-secondary btn-small" type="button" data-action="view-admin-trial-request" data-id="${escapeHtml(row.id)}" ${busy === "delete" ? "disabled" : ""}>Opna</button>
@@ -10247,7 +10247,7 @@ function renderAdminTrialRequestDetail(row) {
       <div class="card-header">
         <div>
           <h2>${escapeHtml(row.company_name || "Trial request")}</h2>
-          <p>${renderTrialRequestStatus(row.status)} · ${escapeHtml(row.created_at ? formatDateTime(row.created_at) : "—")}</p>
+          <p>${renderTrialRequestStatus(row.status)} · ${escapeHtml(row.created_at ? formatDateTime(row.created_at) : "-")}</p>
         </div>
         <button class="btn btn-ghost btn-small" type="button" data-action="close-admin-trial-request">Close</button>
       </div>
@@ -10311,7 +10311,7 @@ function renderAdminTrialDetailField(label, value, wide = false) {
   return `
     <div class="admin-trial-detail-field ${wide ? "is-wide" : ""}">
       <span>${escapeHtml(label)}</span>
-      <strong>${escapeHtml(value || "—")}</strong>
+      <strong>${escapeHtml(value || "-")}</strong>
     </div>
   `;
 }
@@ -10388,7 +10388,7 @@ function formatAdminDeadline(opp) {
   const parsedDeadlineAt = deadlineAt.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{2}):(\d{2})/);
   if (parsedDeadlineAt) return `${parsedDeadlineAt[1]} ${parsedDeadlineAt[2]}:${parsedDeadlineAt[3]}`;
   if (opp?.deadline) return formatShortDate(opp.deadline);
-  return "Deadline not available in imported data — verify on source page.";
+  return "Deadline not available in imported data - verify on source page.";
 }
 
 function formatAdminSafetyStatus(status) {
@@ -10534,7 +10534,7 @@ function renderAdminReviewMeta(label, value) {
   return `
     <div class="admin-review-meta-item">
       <span>${escapeHtml(label)}</span>
-      <strong>${escapeHtml(value || "—")}</strong>
+      <strong>${escapeHtml(value || "-")}</strong>
     </div>
   `;
 }
@@ -11895,8 +11895,8 @@ function getReportRisks(opp) {
   if (!opp.estimatedValue) risks.push("Estimated value is not listed in the imported data.");
   if (normalizeOpportunityQualityStatus(opp.qualityStatus, opp) === "needs_review") {
     risks.push(isVegagerdinExtractedProject(opp)
-      ? "Extracted project signal — verify tender timing in the source article."
-      : "Imported from broad feed — verify that this is a real tender or business opportunity.");
+      ? "Extracted project signal - verify tender timing in the source article."
+      : "Imported from broad feed - verify that this is a real tender or business opportunity.");
   }
   return [...new Set(risks.map((risk) => String(risk || "").trim()).filter(Boolean))];
 }

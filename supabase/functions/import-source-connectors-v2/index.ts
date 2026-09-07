@@ -43,9 +43,9 @@ const BORGARBYGGD_SOURCE_KEY = "borgarbyggd-utbod-v2";
 const ISAFJORDUR_SOURCE_KEY = "isafjordur-utbod-v2";
 const REYKJAVIK_HOLD_CLEAR_OBSERVATION_ID = "32713ed0-089d-45a0-97f9-24fabdbf08dd";
 const REYKJAVIK_HOLD_CLEAR_OPPORTUNITY_ID = "1c4b107b-999c-47df-82a7-d87b43b20185";
-const PRODUCTION_CANARY_CONFIRMATION = "Enable canary controls only — no promotion will occur";
-const PRODUCTION_RELEASE_CONFIRMATION = "Enable release controls only — no release will occur";
-const COMMUNICATION_HOLD_CLEAR_CONFIRMATION = "Clear communication hold only — no matching or communication will run";
+const PRODUCTION_CANARY_CONFIRMATION = "Enable canary controls only - no promotion will occur";
+const PRODUCTION_RELEASE_CONFIRMATION = "Enable release controls only - no release will occur";
+const COMMUNICATION_HOLD_CLEAR_CONFIRMATION = "Clear communication hold only - no matching or communication will run";
 const STAGING_PHASE_C_SOURCES: ReadonlySet<string> = new Set([THREE_SOURCE_KEYS.REYKJAVIK, THREE_SOURCE_KEYS.RIKISKAUP]);
 const ALLOWED_SOURCES = new Set(["akranes-utbod-v2", "borgarbyggd-utbod-v2", "gardabaer-utbod-v2", "rikiskaup-utbod-v2", "vegagerdin-utbod-v2", "isafjordur-utbod-v2", "reykjavik-utbod-v2"]);
 

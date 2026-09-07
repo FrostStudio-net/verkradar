@@ -67,8 +67,8 @@ test("production admin renders independent Reykjavík and Garðabær routine con
     rows: [{ ...base, source_key: "reykjavik-utbod-v2", display_name: "Reykjavík" }, { ...base, source_key: "gardabaer-utbod-v2", display_name: "Garðabær" }],
     escapeHtml: String, formatDateTime: String, routineProductionControlsEnabled: true,
   });
-  assert.match(html, /Reykjavík V2 — normal production/);
-  assert.match(html, /Garðabær V2 — normal production/);
+  assert.match(html, /Reykjavík V2 - normal production/);
+  assert.match(html, /Garðabær V2 - normal production/);
   assert.match(html, /data-source-key="reykjavik-utbod-v2"/);
   assert.match(html, /data-source-key="gardabaer-utbod-v2"/);
   assert.match(html, /Emergency disable Garðabær V2 admissions/);

@@ -109,5 +109,5 @@ test("page load only reads the prepared observation and never invokes the toggle
   const loader = app.slice(app.indexOf("async function loadV2IngestionForAdmin"), app.indexOf("async function loadAdminCompanies"));
   assert.doesNotMatch(loader, /invokeAdminV2Action|set_reykjavik_production_canary_enabled/);
   assert.match(app, /window\.confirm\(confirmation\)/);
-  assert.match(app, /Enable canary controls only — no promotion will occur/);
+  assert.match(app, /Enable canary controls only - no promotion will occur/);
 });

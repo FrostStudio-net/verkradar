@@ -227,7 +227,7 @@ export function renderOpportunityModalPage({
               <p><strong>${escapeHtml(labels.type)}:</strong> ${escapeHtml(type)}</p>
               <p><strong>${escapeHtml(labels.deadline)}:</strong> <span class="${deadline.className}">${escapeHtml(labels.deadlineLabel)}</span></p>
               <p><strong>${escapeHtml(labels.published)}:</strong> ${escapeHtml(publishedDate)}</p>
-              <p><strong>${escapeHtml(labels.cpv)}:</strong> ${escapeHtml(cpvCode || "—")}</p>
+              <p><strong>${escapeHtml(labels.cpv)}:</strong> ${escapeHtml(cpvCode || "-")}</p>
 
               <h3>${escapeHtml(labels.risksToCheck)}</h3>
               <ul class="risk-list">

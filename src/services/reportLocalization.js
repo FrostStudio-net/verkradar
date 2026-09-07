@@ -72,12 +72,12 @@ export function getReportEmailStatus(match, language = "is") {
   const isRecommended = fit === "strong" || Number(match?.matchScore || match?.match_score || 0) >= 85;
   if (language !== "en") {
     return isRecommended
-      ? "Mælt með — staðfesta þarf útboðsgögn"
-      : "Mögulegt tækifæri — staðfesta þarf útboðsgögn";
+      ? "Mælt með - staðfesta þarf útboðsgögn"
+      : "Mögulegt tækifæri - staðfesta þarf útboðsgögn";
   }
   return isRecommended
-    ? "Recommended — tender documents should be verified"
-    : "Possible opportunity — tender documents should be verified";
+    ? "Recommended - tender documents should be verified"
+    : "Possible opportunity - tender documents should be verified";
 }
 
 export function getReportStatusBadge(match, language = "is") {
@@ -136,7 +136,7 @@ export function normalizeReportRisk(risk, language = "is") {
   if (!value) return "";
   const lower = value.toLowerCase();
   if (language !== "en") {
-    if (lower.includes("deadline not available")) return "Skilafrestur fannst ekki í innfluttum gögnum — staðfestið á upprunasíðu.";
+    if (lower.includes("deadline not available")) return "Skilafrestur fannst ekki í innfluttum gögnum - staðfestið á upprunasíðu.";
     if (lower.includes("open the source documents")) return "Opna útboðsgögn.";
     if (lower.includes("confirm mandatory requirements")) return "Staðfesta kröfur og hæfisskilyrði.";
     if (lower.includes("check capacity and profitability")) return "Meta getu og arðsemi.";

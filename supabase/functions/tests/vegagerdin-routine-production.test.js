@@ -70,7 +70,7 @@ test("Vegagerðin emergency disable and admin status are source-specific", async
 test("production admin shows current/planned, RSS, comparison and limits", () => {
   const row={source_key:"vegagerdin-utbod-v2",display_name:"Vegagerðin",mode:"shadow",promotion_approved:false,routine_production_enabled:true,routine_admission_max_new_per_run:2,routine_admission_max_new_per_day:2,routine_admission_scan_limit:30,routineMetrics:{admitted:0,reused:0,review_required:0,blocked:24,duplicates:0,errors:0},health:{status:"healthy",circuit_state:"closed",parser_health:{parsed_count:24,index_diagnostics:{current_tenders_found:4,planned_observations_stored:20,broad_rss_rows:0},comparison:{global_completed:24,baseline_unavailable:0},classification:{actionable:4,non_actionable:20,uncertain:0}}},latestRun:{id:"run",status:"succeeded",fetched_count:2,parsed_count:24,finished_at:"2026-09-01T01:10:00Z"}};
   const html=renderAdminV2IngestionPanel({rows:[row],escapeHtml:String,formatDateTime:String,routineProductionControlsEnabled:true});
-  assert.match(html,/Vegagerðin V2 — normal production/);
+  assert.match(html,/Vegagerðin V2 - normal production/);
   assert.match(html,/Current \/ planned observations<\/dt><dd>4 \/ 20/);
   assert.match(html,/Broad RSS rows<\/dt><dd>0/);
   assert.match(html,/2 new\/run, 2 new\/day, scan 30/);

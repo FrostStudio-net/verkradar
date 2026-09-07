@@ -79,7 +79,7 @@ test("production admin shows Ísafjarðarbær canonical, dedupe, and comparison 
     latestRun: { id: "run", status: "succeeded", fetched_count: 1, parsed_count: 20, observation_count: 19, finished_at: "2026-08-31T01:30:00Z" },
   };
   const html = renderAdminV2IngestionPanel({ rows: [row], escapeHtml: String, formatDateTime: String, routineProductionControlsEnabled: true });
-  assert.match(html, /Ísafjarðarbær V2 — normal production/);
+  assert.match(html, /Ísafjarðarbær V2 - normal production/);
   assert.match(html, /Index requests \/ parsed \/ canonical<\/dt><dd>1 \/ 20 \/ 19/);
   assert.match(html, /Duplicates suppressed<\/dt><dd>1/);
   assert.match(html, /Comparison completed \/ baseline unavailable<\/dt><dd>19 \/ 0/);

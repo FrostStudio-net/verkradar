@@ -48,14 +48,14 @@ test("Phase C runtime gate accepts only staging and rejects production", () => {
 
 test("production/non-admin render has no Phase C2 controls", () => {
   const html = render(false);
-  assert.doesNotMatch(html, /Phase C2 — staging only/);
+  assert.doesNotMatch(html, /Phase C2 - staging only/);
   assert.doesNotMatch(html, /v2-c2-promote/);
   assert.doesNotMatch(html, /v2-c2-rollback|v2-c2-clear-approval/);
 });
 
 test("staging admin sees exactly the three prepared C2 observations", () => {
   const html = render(true);
-  assert.match(html, /Phase C2 — staging only/);
+  assert.match(html, /Phase C2 - staging only/);
   assert.equal((html.match(/data-case-card=/g) || []).length, 3);
   for (const definition of PHASE_C2_CASES) assert.match(html, new RegExp(definition.observation_id));
   assert.match(html, /16322 Mötuneytisþjónusta/);

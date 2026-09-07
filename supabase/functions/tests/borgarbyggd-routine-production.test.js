@@ -69,7 +69,7 @@ test("production admin shows Borgarbyggð routine health and bounded controls", 
     latestRun: { id: "run", status: "succeeded", parsed_count: 11, finished_at: "2026-08-30T20:00:00Z" },
   };
   const html = renderAdminV2IngestionPanel({ rows: [row], escapeHtml: String, formatDateTime: String, routineProductionControlsEnabled: true });
-  assert.match(html, /Borgarbyggð V2 — normal production/);
+  assert.match(html, /Borgarbyggð V2 - normal production/);
   assert.match(html, /Pages \/ parsed items<\/dt><dd>2 \/ 11/);
   assert.match(html, /Actionable \/ non-actionable \/ uncertain<\/dt><dd>0 \/ 11 \/ 5/);
   assert.match(html, /Emergency disable Borgarbyggð V2 admissions/);

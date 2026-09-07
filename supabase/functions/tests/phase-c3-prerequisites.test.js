@@ -67,7 +67,7 @@ test("production UI exposes only the enable control until both feature gates all
   assert.doesNotMatch(renderAdminV2IngestionPanel(base), /Phase C3 production canary/);
   const row = { source_key: "reykjavik-utbod-v2", display_name: "Reykjavík", mode: "shadow", promotion_approved: false, production_canary_enabled: false, phaseC3Production: { enabled: true, release_enabled: false, candidates: [] } };
   const partial = renderAdminV2IngestionPanel({ ...base, rows: [row], phaseC3ProductionControlsEnabled: true });
-  assert.match(partial, /Phase C3 — Reykjavík production canary/);
+  assert.match(partial, /Phase C3 - Reykjavík production canary/);
   assert.doesNotMatch(partial, /Approve Reykjavík source|Promote once/);
   assert.match(renderAdminV2IngestionPanel({ ...base, rows: [{ ...row, production_canary_enabled: true }], phaseC3ProductionControlsEnabled: true }), /Phase C3 production canary/);
 });

@@ -217,7 +217,7 @@ function isLocalDevelopmentUrl(value: string) {
 }
 
 function value(input: unknown) {
-  return String(input || "").trim() || "—";
+  return String(input || "").trim() || "-";
 }
 
 function escapeHtml(input: unknown) {

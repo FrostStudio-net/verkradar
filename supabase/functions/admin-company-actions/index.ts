@@ -2504,7 +2504,7 @@ function isDemoTestOpportunity(opportunity: Record<string, unknown>) {
 
 function getOpportunityMissingDeadlineRisk(opportunity: Record<string, unknown>) {
   const payload = opportunity.rawPayload && typeof opportunity.rawPayload === "object" ? opportunity.rawPayload as Record<string, unknown> : {};
-  return String(payload.deadline_warning || "Deadline not available in imported data — verify on source page.");
+  return String(payload.deadline_warning || "Deadline not available in imported data - verify on source page.");
 }
 
 function getMatchLabel(score: number) {

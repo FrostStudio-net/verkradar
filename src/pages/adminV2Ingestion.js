@@ -5,7 +5,7 @@ export function renderAdminV2IngestionPanel({ rows = [], loading = false, error 
     <section class="ops-card v2-ingestion-panel">
       <div class="card-header">
         <div>
-          <h2>V2 shadow — not customer visible</h2>
+          <h2>V2 shadow - not customer visible</h2>
           <p>Fixture/shadow health with isolated staging-only canary controls.</p>
         </div>
         <span class="status-pill is-running">Isolated</span>
@@ -46,7 +46,7 @@ function renderProductionShadowControl(rows, escapeHtml, activeAction, result) {
   return `
     <section class="phase-c-canary" aria-labelledby="production-shadow-title">
       <div class="card-header">
-        <div><h3 id="production-shadow-title">Production V2 shadow — Reykjavík only</h3><p>Runs one manual shadow ingestion. It cannot promote, match, report, or send.</p></div>
+        <div><h3 id="production-shadow-title">Production V2 shadow - Reykjavík only</h3><p>Runs one manual shadow ingestion. It cannot promote, match, report, or send.</p></div>
         <span class="status-pill is-running">PRODUCTION SHADOW</span>
       </div>
       <dl>
@@ -89,12 +89,12 @@ function renderRoutineSource(row, source, escapeHtml, formatDateTime, activeActi
   const indexDiagnostics = parserHealth.index_diagnostics || latest.details?.index_diagnostics || {};
   const actionBusy = String(activeAction || "").startsWith(`${source.sourceKey}:`);
   return `<section class="phase-c-canary" aria-labelledby="${source.sourceKey}-routine-title">
-    <div class="card-header"><div><h3 id="${source.sourceKey}-routine-title">${escapeHtml(source.label)} V2 — normal production</h3><p>${escapeHtml(source.description)} Legacy ingestion remains independent.</p></div><span class="status-pill ${enabled ? "is-running" : "is-error"}">${enabled ? "ENABLED" : "EMERGENCY STOPPED"}</span></div>
+    <div class="card-header"><div><h3 id="${source.sourceKey}-routine-title">${escapeHtml(source.label)} V2 - normal production</h3><p>${escapeHtml(source.description)} Legacy ingestion remains independent.</p></div><span class="status-pill ${enabled ? "is-running" : "is-error"}">${enabled ? "ENABLED" : "EMERGENCY STOPPED"}</span></div>
     <dl>
       <dt>Production ingestion</dt><dd>${enabled ? "enabled" : "disabled"}</dd>
-      <dt>Source state</dt><dd>${escapeHtml(`${row.mode || "—"} / promotion approval ${row.promotion_approved ? "yes" : "no"}`)}</dd>
-      <dt>Health / circuit</dt><dd>${escapeHtml(`${health.status || "—"} / ${health.circuit_state || "—"}`)}</dd>
-      <dt>Last run</dt><dd>${escapeHtml(latest.id || "—")} — ${escapeHtml(latest.status || "—")} — ${escapeHtml(formatDateTime(latest.finished_at || latest.created_at || ""))}</dd>
+      <dt>Source state</dt><dd>${escapeHtml(`${row.mode || "-"} / promotion approval ${row.promotion_approved ? "yes" : "no"}`)}</dd>
+      <dt>Health / circuit</dt><dd>${escapeHtml(`${health.status || "-"} / ${health.circuit_state || "-"}`)}</dd>
+      <dt>Last run</dt><dd>${escapeHtml(latest.id || "-")} - ${escapeHtml(latest.status || "-")} - ${escapeHtml(formatDateTime(latest.finished_at || latest.created_at || ""))}</dd>
       <dt>${isIsafjordur ? "Index requests / parsed / canonical" : "Pages / parsed items"}</dt><dd>${isIsafjordur
         ? `${Number(latest.fetched_count || parserHealth.fetched_count || 0)} / ${Number(parserHealth.parsed_count || latest.parsed_count || 0)} / ${Number(parserHealth.valid_count || latest.observation_count || row.observationCount || 0)}`
         : `${Number(pagination.fetched_pages || latest.fetched_count || 0)} / ${Number(parserHealth.parsed_count || latest.parsed_count || row.observationCount || 0)}`}</dd>
@@ -130,12 +130,12 @@ function renderPhaseC3Production(rows, escapeHtml, formatDateTime, selectedId, a
   const busy = Boolean(activeAction);
   const setup = `
     <section class="phase-c-canary" aria-labelledby="phase-c3-enable-title">
-      <div class="card-header"><div><h3 id="phase-c3-enable-title">Phase C3 — Reykjavík production canary</h3><p>Enable canary controls only. This action cannot approve or promote anything.</p></div><span class="status-pill is-error">PRODUCTION — MANUAL</span></div>
+      <div class="card-header"><div><h3 id="phase-c3-enable-title">Phase C3 - Reykjavík production canary</h3><p>Enable canary controls only. This action cannot approve or promote anything.</p></div><span class="status-pill is-error">PRODUCTION - MANUAL</span></div>
       <dl>
         <dt>phase_c_production_enabled</dt><dd>${control.enabled ? "true" : "false"}</dd>
         <dt>Reykjavík production_canary_enabled</dt><dd>${row.production_canary_enabled ? "true" : "false"}</dd>
-        <dt>Release</dt><dd>${control.release_enabled && row.release_feature_enabled ? "enabled" : control.release_enabled || row.release_feature_enabled || row.release_approved ? "inconsistent — blocked" : "disabled"}</dd>
-        <dt>Reykjavík mode</dt><dd>${escapeHtml(row.mode || "—")}</dd>
+        <dt>Release</dt><dd>${control.release_enabled && row.release_feature_enabled ? "enabled" : control.release_enabled || row.release_feature_enabled || row.release_approved ? "inconsistent - blocked" : "disabled"}</dd>
+        <dt>Reykjavík mode</dt><dd>${escapeHtml(row.mode || "-")}</dd>
         <dt>Promotion approved</dt><dd>${row.promotion_approved ? "yes" : "no"}</dd>
       </dl>
       <div class="admin-inline-actions">
@@ -169,26 +169,26 @@ function renderPhaseC3Production(rows, escapeHtml, formatDateTime, selectedId, a
   const holdCleared = exactHoldClearTarget && released && !held && !quarantined;
   return `${setup}
     <section class="phase-c-canary" aria-labelledby="phase-c3-production-title">
-      <div class="card-header"><div><h3 id="phase-c3-production-title">Phase C3 production canary</h3><p>One source and one observation only. Promotion, release, and communication are separate.</p></div><span class="status-pill ${released ? "is-running" : "is-error"}">${holdCleared ? "RELEASED — COMMUNICATION HOLD CLEARED" : released && held ? "RELEASED — COMMUNICATION HOLD ACTIVE" : "PRODUCTION — MANUAL"}</span></div>
+      <div class="card-header"><div><h3 id="phase-c3-production-title">Phase C3 production canary</h3><p>One source and one observation only. Promotion, release, and communication are separate.</p></div><span class="status-pill ${released ? "is-running" : "is-error"}">${holdCleared ? "RELEASED - COMMUNICATION HOLD CLEARED" : released && held ? "RELEASED - COMMUNICATION HOLD ACTIVE" : "PRODUCTION - MANUAL"}</span></div>
       <label>Eligible Reykjavík observation
         <select data-action="v2-c3-select-observation" ${busy ? "disabled" : ""}>
           <option value="">Select exactly one observation</option>
-          ${candidates.map((item) => `<option value="${escapeHtml(item.observation.id)}" ${item.observation.id === selectedId ? "selected" : ""}>${escapeHtml(`${item.observation.procurement_reference || "no reference"} — ${item.observation.title}`)}</option>`).join("")}
+          ${candidates.map((item) => `<option value="${escapeHtml(item.observation.id)}" ${item.observation.id === selectedId ? "selected" : ""}>${escapeHtml(`${item.observation.procurement_reference || "no reference"} - ${item.observation.title}`)}</option>`).join("")}
         </select>
       </label>
       <dl>
         <dt>Source mode / approval</dt><dd>${escapeHtml(row.mode)} / ${row.promotion_approved ? "approved" : "not approved"}</dd>
-        <dt>Observation</dt><dd>${observation ? `<code>${escapeHtml(observation.id)}</code>` : "—"}</dd>
-        <dt>Reference</dt><dd>${escapeHtml(observation?.procurement_reference || "—")}</dd>
-        <dt>Title</dt><dd>${escapeHtml(observation?.title || "—")}</dd>
-        <dt>Deadline / stage / confidence</dt><dd>${escapeHtml(observation ? `${observation.deadline || "—"} / ${observation.predicted_procurement_stage || "—"} / ${Number(observation.predicted_confidence || 0).toFixed(2)}` : "—")}</dd>
-        <dt>Comparison / promotion</dt><dd>${escapeHtml(observation ? `${observation.comparison_state} / ${observation.promotion_state}` : "—")}</dd>
-        <dt>Opportunity</dt><dd>${opportunity ? `<code>${escapeHtml(opportunity.id)}</code> — ${escapeHtml(opportunity.status || "—")}` : "—"}</dd>
-        <dt>Provenance</dt><dd>${escapeHtml(provenance?.provenance_type || "—")}</dd>
+        <dt>Observation</dt><dd>${observation ? `<code>${escapeHtml(observation.id)}</code>` : "-"}</dd>
+        <dt>Reference</dt><dd>${escapeHtml(observation?.procurement_reference || "-")}</dd>
+        <dt>Title</dt><dd>${escapeHtml(observation?.title || "-")}</dd>
+        <dt>Deadline / stage / confidence</dt><dd>${escapeHtml(observation ? `${observation.deadline || "-"} / ${observation.predicted_procurement_stage || "-"} / ${Number(observation.predicted_confidence || 0).toFixed(2)}` : "-")}</dd>
+        <dt>Comparison / promotion</dt><dd>${escapeHtml(observation ? `${observation.comparison_state} / ${observation.promotion_state}` : "-")}</dd>
+        <dt>Opportunity</dt><dd>${opportunity ? `<code>${escapeHtml(opportunity.id)}</code> - ${escapeHtml(opportunity.status || "-")}` : "-"}</dd>
+        <dt>Provenance</dt><dd>${escapeHtml(provenance?.provenance_type || "-")}</dd>
         <dt>Quarantine / communication hold</dt><dd>${quarantined ? "QUARANTINED" : "no"} / ${held ? "HELD" : "no"}</dd>
         <dt>Release enabled / approved</dt><dd>${releaseEnabled ? "yes" : "no"} / ${releaseApproved ? "yes" : "no"}</dd>
-        <dt>Source health</dt><dd>${escapeHtml(`${row.health?.status || "—"} / ${row.health?.circuit_state || "—"}`)}</dd>
-        <dt>Duplicate / fuzzy revalidation</dt><dd>${releasePreflight ? escapeHtml(`${releasePreflight.deterministic_candidate_count ?? "—"} deterministic / ${releasePreflight.fuzzy_candidate_count ?? "—"} fuzzy`) : "Run safety assertions to revalidate"}</dd>
+        <dt>Source health</dt><dd>${escapeHtml(`${row.health?.status || "-"} / ${row.health?.circuit_state || "-"}`)}</dd>
+        <dt>Duplicate / fuzzy revalidation</dt><dd>${releasePreflight ? escapeHtml(`${releasePreflight.deterministic_candidate_count ?? "-"} deterministic / ${releasePreflight.fuzzy_candidate_count ?? "-"} fuzzy`) : "Run safety assertions to revalidate"}</dd>
         <dt>Downstream</dt><dd>${assertions ? escapeHtml(JSON.stringify(assertions)) : "Run safety assertions to verify"}</dd>
         ${released ? `<dt>Match count</dt><dd>${escapeHtml(String(assertions?.opportunity_matches ?? "Run safety assertions"))}</dd>
         <dt>AI reviews/usages</dt><dd>${escapeHtml(assertions ? `${assertions.ai_reviews ?? 0} / ${assertions.ai_usages ?? 0}` : "Run safety assertions")}</dd>
@@ -221,7 +221,7 @@ function renderPhaseC2(cases, escapeHtml, formatDateTime, activeAction, results,
     <section class="phase-c-canary" aria-labelledby="phase-c2-title">
       <div class="card-header">
         <div>
-          <h3 id="phase-c2-title">Phase C2 — staging only</h3>
+          <h3 id="phase-c2-title">Phase C2 - staging only</h3>
           <p>Exactly three prepared manual cases. No bulk, release, matching, AI, report, or send controls.</p>
         </div>
         <span class="status-pill is-running">STAGING ONLY</span>
@@ -266,15 +266,15 @@ function renderPhaseC2Case(item, escapeHtml, formatDateTime, activeAction, resul
       <dl>
         <dt>Source</dt><dd>${escapeHtml(row.display_name || row.source_key)}</dd>
         <dt>Observation ID</dt><dd><code>${escapeHtml(item.observation_id)}</code></dd>
-        <dt>Reference</dt><dd>${escapeHtml(observation?.procurement_reference || "—")}</dd>
-        <dt>Title</dt><dd>${escapeHtml(observation?.title || "—")}</dd>
-        <dt>Deadline</dt><dd>${escapeHtml(observation?.deadline || "—")}</dd>
-        <dt>Predicted stage</dt><dd>${escapeHtml(observation?.predicted_procurement_stage || "—")}</dd>
+        <dt>Reference</dt><dd>${escapeHtml(observation?.procurement_reference || "-")}</dd>
+        <dt>Title</dt><dd>${escapeHtml(observation?.title || "-")}</dd>
+        <dt>Deadline</dt><dd>${escapeHtml(observation?.deadline || "-")}</dd>
+        <dt>Predicted stage</dt><dd>${escapeHtml(observation?.predicted_procurement_stage || "-")}</dd>
         <dt>Confidence</dt><dd>${escapeHtml(formatConfidence(observation?.predicted_confidence))}</dd>
-        <dt>Comparison state</dt><dd>${escapeHtml(observation?.comparison_state || "—")}</dd>
-        <dt>Promotion state</dt><dd>${escapeHtml(observation?.promotion_state || "—")}</dd>
-        <dt>Approved</dt><dd>${observation?.approved_for_promotion ? `yes — ${escapeHtml(formatDateTime(observation.approved_at || ""))}` : "no"}</dd>
-        <dt>Promoted opportunity</dt><dd>${observation?.promoted_opportunity_id ? `<code>${escapeHtml(observation.promoted_opportunity_id)}</code>` : "—"}</dd>
+        <dt>Comparison state</dt><dd>${escapeHtml(observation?.comparison_state || "-")}</dd>
+        <dt>Promotion state</dt><dd>${escapeHtml(observation?.promotion_state || "-")}</dd>
+        <dt>Approved</dt><dd>${observation?.approved_for_promotion ? `yes - ${escapeHtml(formatDateTime(observation.approved_at || ""))}` : "no"}</dd>
+        <dt>Promoted opportunity</dt><dd>${observation?.promoted_opportunity_id ? `<code>${escapeHtml(observation.promoted_opportunity_id)}</code>` : "-"}</dd>
         <dt>Source promotion approved</dt><dd>${row.promotion_approved === true ? "yes" : "no"}</dd>
       </dl>
       <div class="admin-inline-actions">
@@ -291,11 +291,11 @@ function renderPhaseC2Case(item, escapeHtml, formatDateTime, activeAction, resul
         <div class="admin-message ${result.ok === false ? "is-error" : ""}" role="status">
           <strong>${result.ok === false ? "PROMOTION BLOCKED" : result.action === "rollback_canary" ? "ROLLBACK SUCCEEDED" : result.action === "clear_c2_review_approval" ? "APPROVAL CLEARED" : "PROMOTION RESULT"}</strong>
           <dl>
-            <dt>Returned opportunity ID</dt><dd>${result.opportunity_id ? `<code>${escapeHtml(result.opportunity_id)}</code>` : "—"}</dd>
-            <dt>Provenance type</dt><dd>${escapeHtml(provenance?.provenance_type || "—")}</dd>
+            <dt>Returned opportunity ID</dt><dd>${result.opportunity_id ? `<code>${escapeHtml(result.opportunity_id)}</code>` : "-"}</dd>
+            <dt>Provenance type</dt><dd>${escapeHtml(provenance?.provenance_type || "-")}</dd>
             ${item.case_key === "B" ? `<dt>Existing opportunity unchanged</dt><dd>${unchanged ? "yes" : "not yet verified"}</dd>` : ""}
-            ${item.case_key === "C" ? `<dt>Blocked reason</dt><dd>${escapeHtml(blockedReason || "—")}</dd><dt>Opportunity created</dt><dd>${result.created === true || result.opportunity_created === true ? "yes" : "no"}</dd><dt>Provenance created</dt><dd>${result.provenance_attached === true || result.provenance_created === true ? "yes" : "no"}</dd>` : ""}
-            ${result.action === "rollback_canary" ? `<dt>Rollback state</dt><dd>${escapeHtml(result.rollback?.rollback_status || "—")}</dd><dt>Opportunity deleted</dt><dd>${result.rollback?.opportunity_deleted === true ? "yes" : "no"}</dd>` : ""}
+            ${item.case_key === "C" ? `<dt>Blocked reason</dt><dd>${escapeHtml(blockedReason || "-")}</dd><dt>Opportunity created</dt><dd>${result.created === true || result.opportunity_created === true ? "yes" : "no"}</dd><dt>Provenance created</dt><dd>${result.provenance_attached === true || result.provenance_created === true ? "yes" : "no"}</dd>` : ""}
+            ${result.action === "rollback_canary" ? `<dt>Rollback state</dt><dd>${escapeHtml(result.rollback?.rollback_status || "-")}</dd><dt>Opportunity deleted</dt><dd>${result.rollback?.opportunity_deleted === true ? "yes" : "no"}</dd>` : ""}
             ${result.action === "clear_c2_review_approval" ? `<dt>Review evidence preserved</dt><dd>${result.review_evidence_preserved === true ? "yes" : "no"}</dd><dt>Opportunity/provenance changed</dt><dd>${result.opportunity_mutated === false && result.provenance_mutated === false ? "no" : "unexpected"}</dd>` : ""}
           </dl>
           ${result.ok === false ? `<pre class="phase-c-canary-assertions">${escapeHtml(JSON.stringify(result, null, 2))}</pre>` : ""}
@@ -336,7 +336,7 @@ function renderPhaseCCanary(row, escapeHtml, formatDateTime, canaryAction, asser
     <section class="phase-c-canary" aria-labelledby="phase-c-canary-title">
       <div class="card-header">
         <div>
-          <h3 id="phase-c-canary-title">Phase C canary — staging only</h3>
+          <h3 id="phase-c-canary-title">Phase C canary - staging only</h3>
           <p>One Reykjavík observation. Manual approval and promotion only; no release or downstream actions.</p>
         </div>
         <span class="status-pill ${quarantine ? "is-error" : "is-running"}">${quarantine ? "QUARANTINED CANARY" : "STAGING ONLY"}</span>
@@ -359,14 +359,14 @@ function renderPhaseCCanary(row, escapeHtml, formatDateTime, canaryAction, asser
           ${observation ? `
             <dl>
               <dt>Observation ID</dt><dd><code>${escapeHtml(observation.id)}</code></dd>
-              <dt>Reference</dt><dd>${escapeHtml(observation.procurement_reference || "—")}</dd>
-              <dt>Title</dt><dd>${escapeHtml(observation.title || "—")}</dd>
-              <dt>Deadline</dt><dd>${escapeHtml(observation.deadline || "—")}</dd>
-              <dt>Predicted stage</dt><dd>${escapeHtml(observation.predicted_procurement_stage || "—")}</dd>
+              <dt>Reference</dt><dd>${escapeHtml(observation.procurement_reference || "-")}</dd>
+              <dt>Title</dt><dd>${escapeHtml(observation.title || "-")}</dd>
+              <dt>Deadline</dt><dd>${escapeHtml(observation.deadline || "-")}</dd>
+              <dt>Predicted stage</dt><dd>${escapeHtml(observation.predicted_procurement_stage || "-")}</dd>
               <dt>Confidence</dt><dd>${escapeHtml(formatConfidence(observation.predicted_confidence))}</dd>
-              <dt>Promotion state</dt><dd>${escapeHtml(observation.promotion_state || "—")}</dd>
-              <dt>Approved</dt><dd>${observation.approved_for_promotion ? `yes — ${escapeHtml(formatDateTime(observation.approved_at || ""))}` : "no"}</dd>
-              <dt>Promoted opportunity</dt><dd>${observation.promoted_opportunity_id ? `<code>${escapeHtml(observation.promoted_opportunity_id)}</code>` : "—"}</dd>
+              <dt>Promotion state</dt><dd>${escapeHtml(observation.promotion_state || "-")}</dd>
+              <dt>Approved</dt><dd>${observation.approved_for_promotion ? `yes - ${escapeHtml(formatDateTime(observation.approved_at || ""))}` : "no"}</dd>
+              <dt>Promoted opportunity</dt><dd>${observation.promoted_opportunity_id ? `<code>${escapeHtml(observation.promoted_opportunity_id)}</code>` : "-"}</dd>
             </dl>
             ${!eligibility.ready ? `<p class="admin-message is-error">Promotion unavailable: ${escapeHtml(eligibility.reasons.join("; "))}</p>` : ""}
             <div class="admin-inline-actions">
@@ -381,11 +381,11 @@ function renderPhaseCCanary(row, escapeHtml, formatDateTime, canaryAction, asser
           <h4>Quarantined opportunity</h4>
           <dl>
             <dt>Opportunity ID</dt><dd><code>${escapeHtml(opportunity.id)}</code></dd>
-            <dt>Status</dt><dd>${escapeHtml(opportunity.status || "—")}</dd>
-            <dt>Quarantine</dt><dd>${escapeHtml(payload.promotion_quarantine || "—")}</dd>
+            <dt>Status</dt><dd>${escapeHtml(opportunity.status || "-")}</dd>
+            <dt>Quarantine</dt><dd>${escapeHtml(payload.promotion_quarantine || "-")}</dd>
             <dt>Hidden from reports</dt><dd>${payload.hidden_from_reports === true ? "yes" : "no"}</dd>
-            <dt>Admin report status</dt><dd>${escapeHtml(payload.admin_report_status || "—")}</dd>
-            <dt>Provenance type</dt><dd>${escapeHtml(provenance?.provenance_type || "—")}</dd>
+            <dt>Admin report status</dt><dd>${escapeHtml(payload.admin_report_status || "-")}</dd>
+            <dt>Provenance type</dt><dd>${escapeHtml(provenance?.provenance_type || "-")}</dd>
           </dl>
           <div class="admin-inline-actions">
             ${alreadyPromotedCanary ? `<button type="button" data-action="v2-c1-test-idempotency" data-opportunity-id="${escapeHtml(opportunity.id)}" ${busy ? "disabled" : ""}>Test promotion idempotency</button>` : ""}
@@ -407,7 +407,7 @@ function renderIdempotencyResult(result, escapeHtml) {
     <div class="admin-message ${result.pass === true ? "" : "is-error"}" role="status">
       <strong>${status}</strong>
       <dl>
-        <dt>Returned opportunity ID</dt><dd><code>${escapeHtml(result.returned_opportunity_id || "—")}</code></dd>
+        <dt>Returned opportunity ID</dt><dd><code>${escapeHtml(result.returned_opportunity_id || "-")}</code></dd>
         <dt>Opportunity count for deterministic identity</dt><dd>${Number(result.opportunity_count ?? 0)}</dd>
         <dt>Provenance count</dt><dd>${Number(result.provenance_count ?? 0)}</dd>
         <dt>Observation points to same opportunity</dt><dd>${result.observation_points_to_same_opportunity === true ? "yes" : "no"}</dd>
@@ -449,7 +449,7 @@ export function getKnownCanaryEligibility(row, observation, today = new Date()) 
 
 function formatConfidence(value) {
   const number = Number(value);
-  return Number.isFinite(number) ? number.toFixed(2) : "—";
+  return Number.isFinite(number) ? number.toFixed(2) : "-";
 }
 
 function renderRow(row, escapeHtml, formatDateTime, canMutate = false) {

@@ -254,7 +254,7 @@ function getMatchLabel(score) {
 }
 
 function getMissingDeadlineRisk(opportunity) {
-  return String(rawPayload(opportunity).deadline_warning || "Deadline not available in imported data — verify on source page.");
+  return String(rawPayload(opportunity).deadline_warning || "Deadline not available in imported data - verify on source page.");
 }
 
 export function calculateCompanyOpportunityMatch(profile, opportunity, options = {}) {

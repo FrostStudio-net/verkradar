@@ -190,7 +190,7 @@ function renderDebugField(label, value, escapeHtml) {
   return `
     <div class="admin-invite-debug-row">
       <span>${escapeHtml(label)}</span>
-      <code>${escapeHtml(formatted || "—")}</code>
+      <code>${escapeHtml(formatted || "-")}</code>
     </div>
   `;
 }

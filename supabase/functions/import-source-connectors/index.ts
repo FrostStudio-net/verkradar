@@ -261,7 +261,7 @@ const VEGAGERDIN_SOURCE_NAME = "Vegagerðin";
 const VEGAGERDIN_PROJECT_EXTRACTION_METHOD = "vegagerdin_article_project_parser";
 const GARDABAER_SOURCE_NAME = "Garðabær Municipality";
 const FAXAFLOAHAFNIR_SOURCE_NAME = "Faxaflóahafnir útboð";
-const MISSING_DEADLINE_RISK = "Deadline not available in imported data — verify on source page.";
+const MISSING_DEADLINE_RISK = "Deadline not available in imported data - verify on source page.";
 const STRONG_OPPORTUNITY_KEYWORDS = [
   "útboð",
   "utbod",
@@ -2071,12 +2071,12 @@ function classifyVegagerdinProject(text: string) {
 function getVegagerdinProjectDeadlineWarning(tenderState: string, deadline: string | null) {
   if (deadline) return null;
   if (tenderState === "already_tendered" || tenderState === "tender_awarded" || tenderState === "awarded" || tenderState === "announced") {
-    return "Tender appears already announced/awarded — verify source article.";
+    return "Tender appears already announced/awarded - verify source article.";
   }
   if (tenderState === "upcoming_tender") {
-    return "Formal tender deadline not found yet — monitor source article.";
+    return "Formal tender deadline not found yet - monitor source article.";
   }
-  return "No formal tender deadline extracted — verify source article.";
+  return "No formal tender deadline extracted - verify source article.";
 }
 
 function extractStrictTenderDeadline(text: string) {
@@ -4345,12 +4345,12 @@ function getOpportunityMissingDeadlineRisk(opportunity: Record<string, unknown>)
   if (rawPayload.extraction_method === VEGAGERDIN_PROJECT_EXTRACTION_METHOD) {
     const tenderState = String(rawPayload.tender_state || "").trim();
     if (["tender_awarded", "awarded", "already_tendered", "announced"].includes(tenderState)) {
-      return "Tender appears already announced/awarded — verify source article.";
+      return "Tender appears already announced/awarded - verify source article.";
     }
     if (tenderState === "upcoming_tender") {
-      return "Formal tender deadline not found yet — monitor source article.";
+      return "Formal tender deadline not found yet - monitor source article.";
     }
-    return "No formal tender deadline extracted — verify source article.";
+    return "No formal tender deadline extracted - verify source article.";
   }
   return MISSING_DEADLINE_RISK;
 }

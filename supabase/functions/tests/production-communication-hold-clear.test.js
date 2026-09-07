@@ -64,7 +64,7 @@ function render(sourceRow, result = null) {
 test("hold-clear UI appears only for the exact released held canary after zero-downstream assertions", () => {
   assert.doesNotMatch(render(row()), /data-action="v2-c3-clear-hold"/);
   const ready = render(row(), { assertions: { zero_downstream: true, opportunity_matches: 0, ai_reviews: 0, ai_usages: 0, reports: 0, report_items: 0, actions: 0, sends: 0, customer_visible_linkages: 0 } });
-  assert.match(ready, /RELEASED — COMMUNICATION HOLD ACTIVE/);
+  assert.match(ready, /RELEASED - COMMUNICATION HOLD ACTIVE/);
   assert.match(ready, /data-action="v2-c3-clear-hold"/);
   assert.match(ready, /Clear communication hold/);
   assert.match(ready, /Post-release disable/);
@@ -75,7 +75,7 @@ test("hold-clear UI appears only for the exact released held canary after zero-d
 test("cleared UI reports the final state and retains the fail-safe", () => {
   const cleared = opportunity({ phase_c_communication_hold: false, raw_payload: { admin_report_status: "released", phase_c_communication_hold: false } });
   const html = render(row(cleared), { assertions: { zero_downstream: true, opportunity_matches: 0, customer_visible_linkages: 0 } });
-  assert.match(html, /RELEASED — COMMUNICATION HOLD CLEARED/);
+  assert.match(html, /RELEASED - COMMUNICATION HOLD CLEARED/);
   assert.match(html, /Post-release disable/);
   assert.doesNotMatch(html, /data-action="v2-c3-clear-hold"/);
 });
@@ -121,7 +121,7 @@ test("Edge route is authenticated, production-only, exact-target, confirmed, and
 test("browser requires reason and confirmation and page load remains read-only", async () => {
   const app = await readFile(appUrl, "utf8");
   assert.match(app, /v2-c3-clear-hold/);
-  assert.match(app, /Clear communication hold only — no matching or communication will run/);
+  assert.match(app, /Clear communication hold only - no matching or communication will run/);
   assert.match(app, /window\.prompt\("Required audit reason"\)/);
   assert.match(app, /window\.confirm\(confirmation\)/);
   const loader = app.slice(app.indexOf("async function loadV2IngestionForAdmin"), app.indexOf("async function loadAdminCompanies"));

@@ -55,7 +55,7 @@ test("enabled and approved states reveal one-step controls; released state expos
   const releasedOpportunity = { ...opportunity, status: "open", raw_payload: { admin_report_status: "released_held" }, phase_c_communication_hold: true, phase_c_released_at: "2026-08-28T20:00:00Z" };
   const released = { ...approved, release_approved: false, phaseC3Production: { ...approved.phaseC3Production, candidates: [{ observation: approvedObservation, opportunity: releasedOpportunity, provenance: { provenance_type: "v2_created" } }] } };
   const releasedHtml = render(released, { assertions: { zero_downstream: true, opportunity_matches: 0 } });
-  assert.match(releasedHtml, /RELEASED — COMMUNICATION HOLD ACTIVE/);
+  assert.match(releasedHtml, /RELEASED - COMMUNICATION HOLD ACTIVE/);
   assert.match(releasedHtml, /Post-release disable/);
   assert.doesNotMatch(releasedHtml, /Approve canary release|Release with communication hold|Rollback before release/);
 });
@@ -87,6 +87,6 @@ test("page load remains read-only and release mutations require explicit clicks"
   const app = await readFile(appUrl, "utf8");
   const loader = app.slice(app.indexOf("async function loadV2IngestionForAdmin"), app.indexOf("async function loadAdminCompanies"));
   assert.doesNotMatch(loader, /invokeAdminV2Action|set_reykjavik_release_enabled|approve_release|release_canary/);
-  assert.match(app, /Enable release controls only — no release will occur/);
+  assert.match(app, /Enable release controls only - no release will occur/);
   assert.match(app, /window\.confirm\(confirmation\)/);
 });
