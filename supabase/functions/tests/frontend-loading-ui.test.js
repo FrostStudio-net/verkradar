@@ -12,6 +12,7 @@ import { getAuthStateChangePlan, registerBrowserResumeTracker } from "../../../s
 
 const app = readFileSync(new URL("../../../app.js", import.meta.url), "utf8");
 const css = readFileSync(new URL("../../../styles.css", import.meta.url), "utf8");
+const index = readFileSync(new URL("../../../index.html", import.meta.url), "utf8");
 const identity = (value) => String(value);
 
 test("public homepage has one primary profile CTA and no sample section", () => {
@@ -35,6 +36,21 @@ test("public homepage has one primary profile CTA and no sample section", () => 
   assert.match(app, /const headerCta = isPublicHome \? null : getHeaderCta/);
   assert.doesNotMatch(app, /navSampleReport|#sample-report/);
   assert.doesNotMatch(css, /sample-report-section|public-sample-report-page|public-report-preview/);
+});
+
+test("mobile authenticated pages preserve viewport scale and contain wide content", () => {
+  assert.match(index, /<meta name="viewport" content="width=device-width, initial-scale=1\.0"\s*\/>/);
+  assert.match(css, /@media \(max-width: 720px\)[\s\S]*?body \{\s*font-size: 14px;\s*\}[\s\S]*?input,\s*select,\s*textarea \{\s*font-size: 16px;\s*\}/);
+  assert.match(css, /@media \(max-width: 768px\)[\s\S]*?main\.app-main\.is-authenticated \{\s*width: min\(100% - 40px, 1180px\);\s*\}/);
+  assert.match(css, /@media \(max-width: 360px\)[\s\S]*?main\.app-main\.is-authenticated \{\s*width: min\(100% - 32px, 1180px\);\s*\}/);
+  assert.match(css, /\.ops-table-wrap \{[\s\S]*?overflow-x: auto;/);
+  assert.match(css, /@media \(max-width: 760px\)[\s\S]*?\.opportunity-card \{[\s\S]*?grid-template-columns: 1fr;/);
+  assert.doesNotMatch(css, /main\.app-main\.is-authenticated \{[^}]*(?:zoom|transform):/);
+
+  for (const viewportWidth of [320, 375, 390, 430]) {
+    const gutter = viewportWidth <= 360 ? 32 : 40;
+    assert.ok(viewportWidth - gutter > 0 && viewportWidth - gutter < viewportWidth);
+  }
 });
 
 test("dashboard loading uses content-shaped cards, stats, filters, and no loading copy", () => {
