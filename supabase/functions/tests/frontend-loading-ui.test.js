@@ -8,7 +8,7 @@ import {
   renderReportArchiveSkeleton,
   renderSettingsSkeleton,
 } from "../../../src/pages/skeletons.js";
-import { getAuthStateChangePlan } from "../../../src/services/authLifecycle.js";
+import { getAuthStateChangePlan, registerBrowserResumeTracker } from "../../../src/services/authLifecycle.js";
 
 const app = readFileSync(new URL("../../../app.js", import.meta.url), "utf8");
 const css = readFileSync(new URL("../../../styles.css", import.meta.url), "utf8");
@@ -138,6 +138,7 @@ function hydratedAuthPlan(event, overrides = {}) {
     previousUserId: "user-1",
     nextUserId: "user-1",
     hydratedUserId: "user-1",
+    resumeContextMatches: false,
     profileLoaded: true,
     adminLoaded: true,
     profile: { id: "company-1" },
@@ -177,6 +178,107 @@ test("same-user events cannot preserve a context hydrated for a different user",
 
   assert.equal(plan.preserveHydratedContext, false);
   assert.equal(plan.shouldReloadContext, true);
+});
+
+test("browser tab and window return preserve the exact hydrated dashboard context", () => {
+  const windowTarget = new EventTarget();
+  const documentTarget = new EventTarget();
+  documentTarget.visibilityState = "visible";
+  let returnCount = 0;
+  const context = {
+    route: "/dashboard",
+    userId: "user-1",
+    companyId: "company-1",
+    profile: { id: "company-1" },
+    profileLoaded: true,
+    adminLoaded: true,
+  };
+  const tracker = registerBrowserResumeTracker({
+    windowTarget,
+    documentTarget,
+    getContext: () => context,
+    onReturn: () => { returnCount += 1; },
+  });
+
+  const previousPlan = hydratedAuthPlan("SIGNED_IN", {
+    hydratedUserId: "",
+    resumeContextMatches: false,
+  });
+  assert.equal(previousPlan.shouldReloadContext, true);
+
+  documentTarget.visibilityState = "hidden";
+  documentTarget.dispatchEvent(new Event("visibilitychange"));
+  documentTarget.visibilityState = "visible";
+  documentTarget.dispatchEvent(new Event("visibilitychange"));
+  windowTarget.dispatchEvent(new Event("focus"));
+
+  const plan = hydratedAuthPlan("SIGNED_IN", {
+    hydratedUserId: "",
+    resumeContextMatches: tracker.matches(context),
+  });
+
+  assert.equal(returnCount, 2);
+  assert.equal(plan.preserveHydratedContext, true);
+  assert.equal(plan.shouldReloadContext, false);
+  assert.equal(plan.shouldRender, false);
+});
+
+test("window blur and focus capture the hydrated context before Supabase session recovery", () => {
+  const windowTarget = new EventTarget();
+  const documentTarget = new EventTarget();
+  documentTarget.visibilityState = "visible";
+  const context = {
+    route: "/dashboard",
+    userId: "user-1",
+    companyId: "company-1",
+    profile: { id: "company-1" },
+    profileLoaded: true,
+    adminLoaded: true,
+  };
+  const tracker = registerBrowserResumeTracker({
+    windowTarget,
+    documentTarget,
+    getContext: () => context,
+    onReturn: () => {},
+  });
+
+  windowTarget.dispatchEvent(new Event("blur"));
+  windowTarget.dispatchEvent(new Event("focus"));
+
+  const plan = hydratedAuthPlan("TOKEN_REFRESHED", {
+    hydratedUserId: "",
+    resumeContextMatches: tracker.matches(context),
+  });
+  assert.equal(plan.preserveHydratedContext, true);
+  assert.equal(plan.shouldReloadContext, false);
+  assert.equal(plan.shouldRender, false);
+});
+
+test("pageshow restoration does not preserve a changed user or company context", () => {
+  const windowTarget = new EventTarget();
+  const documentTarget = new EventTarget();
+  documentTarget.visibilityState = "visible";
+  const context = {
+    route: "/dashboard",
+    userId: "user-1",
+    companyId: "company-1",
+    profile: { id: "company-1" },
+    profileLoaded: true,
+    adminLoaded: true,
+  };
+  const tracker = registerBrowserResumeTracker({
+    windowTarget,
+    documentTarget,
+    getContext: () => context,
+    onReturn: () => {},
+  });
+
+  windowTarget.dispatchEvent(new Event("pagehide"));
+  windowTarget.dispatchEvent(new Event("pageshow"));
+
+  assert.equal(tracker.matches(context), true);
+  assert.equal(tracker.matches({ ...context, userId: "user-2" }), false);
+  assert.equal(tracker.matches({ ...context, companyId: "company-2" }), false);
 });
 
 test("sign-out still clears and renders the signed-out state", () => {

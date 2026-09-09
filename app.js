@@ -121,6 +121,7 @@ import {
   renderSettingsPage,
   renderSettingsSkeleton,
   renderConfirmationModal,
+  registerBrowserResumeTracker,
   renderSignupPage,
   renderTrialRequestPage,
   previewCompanyInvite,
@@ -1856,9 +1857,18 @@ document.addEventListener("submit", async (event) => {
   }
 });
 
-window.addEventListener("focus", handleAppFocusReturn);
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") handleAppFocusReturn();
+const browserResumeTracker = registerBrowserResumeTracker({
+  windowTarget: window,
+  documentTarget: document,
+  getContext: () => ({
+    route: getRoutePath(state.route),
+    userId: state.currentUser?.id || state.user?.id || "",
+    companyId: state.companyId || "",
+    profile: state.profile,
+    profileLoaded: state.profileLoaded,
+    adminLoaded: state.adminLoaded,
+  }),
+  onReturn: handleAppFocusReturn,
 });
 
 function handleAppFocusReturn() {
@@ -4798,6 +4808,11 @@ function registerAuthListener() {
       previousUserId,
       nextUserId,
       hydratedUserId: hydratedAuthUserId,
+      resumeContextMatches: browserResumeTracker.matches({
+        userId: nextUserId,
+        companyId: state.companyId,
+        route: getRoutePath(state.route),
+      }),
       profileLoaded: state.profileLoaded,
       adminLoaded: state.adminLoaded,
       profile: state.profile,
@@ -4843,6 +4858,7 @@ function registerAuthListener() {
 
     state.isAdmin = false;
     hydratedAuthUserId = "";
+    browserResumeTracker.clear();
     state.opportunities = [];
     state.opportunitiesLoaded = false;
     state.profile = null;
