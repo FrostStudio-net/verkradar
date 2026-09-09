@@ -14,7 +14,7 @@ const app = readFileSync(new URL("../../../app.js", import.meta.url), "utf8");
 const css = readFileSync(new URL("../../../styles.css", import.meta.url), "utf8");
 const identity = (value) => String(value);
 
-test("public homepage removes only the demo/trial hero CTA", () => {
+test("public homepage removes the sample CTA, section, and navigation target", () => {
   const landing = renderLandingPage({
     t: (key) => key,
     escapeHtml: identity,
@@ -23,14 +23,16 @@ test("public homepage removes only the demo/trial hero CTA", () => {
   });
 
   assert.doesNotMatch(landing, /createFreeDemoProfile|data-href="\/trial"/);
-  assert.match(landing, /data-target="sample-report"/);
-  assert.match(landing, /hero-actions-single/);
+  assert.doesNotMatch(landing, /sample-report|viewSampleReport|sampleReportTitle|public-report-preview|hero-actions/);
+  assert.match(landing, /how-it-works-section/);
 
   const publicPage = readFileSync(new URL("../../../src/pages/public.js", import.meta.url), "utf8");
   assert.match(publicPage, /renderPricingPage[\s\S]*pricingTrialPlan/);
   assert.match(publicPage, /pricingCard[\s\S]*trialHref/);
   assert.match(app, /const isPublicHome = !isLoggedIn && getRoutePath\(state\.route\) === "\/"/);
   assert.match(app, /const headerCta = isPublicHome \? null : getHeaderCta/);
+  assert.doesNotMatch(app, /navSampleReport|#sample-report/);
+  assert.doesNotMatch(css, /sample-report-section|public-sample-report-page|public-report-preview/);
 });
 
 test("dashboard loading uses content-shaped cards, stats, filters, and no loading copy", () => {

@@ -36,9 +36,6 @@ export function renderLandingPage({ t, escapeHtml, language, trialHref }) {
         <p class="hero-text">
           ${escapeHtml(t("heroText"))}
         </p>
-        <div class="hero-actions hero-actions-single">
-          <button class="btn btn-secondary btn-large" data-action="scroll-to" data-target="sample-report">${escapeHtml(t("viewSampleReport"))}</button>
-        </div>
         <div class="proof-lines" aria-label="Product proof">
           <strong>${escapeHtml(t("proofStrong"))}</strong>
           <span>${escapeHtml(t("proofText"))}</span>
@@ -127,49 +124,6 @@ export function renderLandingPage({ t, escapeHtml, language, trialHref }) {
       </div>
     </section>
 
-    <section id="sample-report" class="section sample-report-section public-sample-report-page">
-      <div class="section-copy">
-        <p class="eyebrow">${escapeHtml(t("sampleReportEyebrow"))}</p>
-        <h2>${escapeHtml(t("sampleReportTitle"))}</h2>
-        <p>${escapeHtml(t("sampleReportText"))}</p>
-      </div>
-      <div class="public-report-preview">
-        <div class="report-topbar">
-          <span>${escapeHtml(t("reportTitle"))}</span>
-          <span>Jarðtækni ehf.</span>
-        </div>
-        <article class="report-item">
-          <h3>${escapeHtml(isIcelandic ? "Gatnagerð og lagnir á Akranesi" : "Roadworks and utilities in Akranes")}</h3>
-          <p><strong>${escapeHtml(t("buyer"))}:</strong> ${escapeHtml(isIcelandic ? "Akraneskaupstaður" : "Akranes Municipality")}</p>
-          <p><strong>${escapeHtml(t("deadline"))}:</strong> ${escapeHtml(t("daysLeft", { count: 18 }))} · <strong>${escapeHtml(isIcelandic ? "Mögulegt tækifæri" : t("possibleMatch"))}:</strong> 92/100</p>
-          <ul>
-            <li>${escapeHtml(isIcelandic ? "Nefnir gatnagerð og lagnir sem passa við verkflokka fyrirtækisins." : "Mentions roadworks and utilities that match the company profile.")}</li>
-            <li>${escapeHtml(isIcelandic ? "Svæðið er innan valins þjónustusvæðis." : "The area is inside the selected service region.")}</li>
-            <li>${escapeHtml(isIcelandic ? "Verkefnið er þess virði að staðfesta í upprunalegum útboðsgögnum." : "The project is worth verifying in the original tender documents.")}</li>
-          </ul>
-          <p><strong>${escapeHtml(t("openSource"))}:</strong> ${isIcelandic ? "Opnið heimild og staðfestið skilafrest, kröfur og gögn." : "Open the source and confirm deadline, requirements and documents."}</p>
-        </article>
-        <article class="report-item">
-          <h3>${escapeHtml(isIcelandic ? "Lóðarframkvæmdir við Myllubakkaskóla" : "Site works at Myllubakkaskóli")}</h3>
-          <p><strong>${escapeHtml(t("buyer"))}:</strong> ${escapeHtml(isIcelandic ? "Reykjanesbær" : "Reykjanesbær Municipality")}</p>
-          <p><strong>${escapeHtml(t("deadline"))}:</strong> ${escapeHtml(t("daysLeft", { count: 24 }))} · <strong>${escapeHtml(isIcelandic ? "Mögulegt tækifæri" : t("possibleMatch"))}:</strong> 86/100</p>
-          <ul>
-            <li>${escapeHtml(isIcelandic ? "Inniheldur leitarorð: lóðarframkvæmdir, yfirborðsfrágangur." : "Contains keywords: site works, surface finishing.")}</li>
-            <li>${escapeHtml(isIcelandic ? "Passar við jarðvinnu, frágang og verk á lóðum." : "Fits earthworks, finishing and site work services.")}</li>
-          </ul>
-        </article>
-        <article class="report-item">
-          <h3>${escapeHtml(isIcelandic ? "Verðfyrirspurn - Sandbakki - gatnagerð" : "Quote request - Sandbakki roadworks")}</h3>
-          <p><strong>${escapeHtml(t("buyer"))}:</strong> ${escapeHtml(isIcelandic ? "Opinber verkkaupi" : "Public buyer")}</p>
-          <p><strong>${escapeHtml(t("deadline"))}:</strong> ${escapeHtml(t("daysLeft", { count: 11 }))} · <strong>${escapeHtml(isIcelandic ? "Mögulegt tækifæri" : t("possibleMatch"))}:</strong> 83/100</p>
-          <ul>
-            <li>${escapeHtml(isIcelandic ? "Skýr verðfyrirspurn með gatnagerð í titli." : "Clear quote request with roadworks in the title.")}</li>
-            <li>${escapeHtml(isIcelandic ? "Stuttur frestur, því þarf að bregðast hratt við." : "Short deadline, so it needs quick review.")}</li>
-          </ul>
-        </article>
-        <p class="source-disclaimer">${escapeHtml(t("sourceDisclaimer"))}</p>
-      </div>
-    </section>
   `;
 }
 

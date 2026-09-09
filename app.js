@@ -7553,7 +7553,6 @@ function getHeaderNavItems(isLoggedIn = Boolean(state.user), hasProfile = Boolea
   const items = !isLoggedIn
     ? [
         [t("navHowItWorks"), "#how-it-works"],
-        [t("navSampleReport"), "#sample-report"],
         [t("navPricing"), "/pricing"]
       ]
     : hasProfile
