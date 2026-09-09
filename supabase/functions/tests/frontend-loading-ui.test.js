@@ -14,7 +14,7 @@ const app = readFileSync(new URL("../../../app.js", import.meta.url), "utf8");
 const css = readFileSync(new URL("../../../styles.css", import.meta.url), "utf8");
 const identity = (value) => String(value);
 
-test("public homepage removes the sample CTA, section, and navigation target", () => {
+test("public homepage has one primary profile CTA and no sample section", () => {
   const landing = renderLandingPage({
     t: (key) => key,
     escapeHtml: identity,
@@ -22,8 +22,10 @@ test("public homepage removes the sample CTA, section, and navigation target", (
     trialHref: "/trial",
   });
 
-  assert.doesNotMatch(landing, /createFreeDemoProfile|data-href="\/trial"/);
-  assert.doesNotMatch(landing, /sample-report|viewSampleReport|sampleReportTitle|public-report-preview|hero-actions/);
+  assert.match(landing, /hero-text[\s\S]*?<div class="hero-actions">[\s\S]*?<button class="btn btn-primary btn-large" data-action="go" data-href="\/trial">createProfile<\/button>/);
+  assert.equal((landing.match(/data-href="\/trial"/g) || []).length, 1);
+  assert.doesNotMatch(landing, /hero-actions[\s\S]*?btn-secondary/);
+  assert.doesNotMatch(landing, /createFreeDemoProfile|sample-report|viewSampleReport|sampleReportTitle|public-report-preview/);
   assert.match(landing, /how-it-works-section/);
 
   const publicPage = readFileSync(new URL("../../../src/pages/public.js", import.meta.url), "utf8");
