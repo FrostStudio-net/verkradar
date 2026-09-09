@@ -33,6 +33,7 @@ import {
   formatReportRisk as formatReportRiskBase,
   getAuthCallbackInfo,
   getAuthCallbackRedirectUrl,
+  getAuthStateChangePlan,
   getAppHashUrl,
   formatShortDate,
   buildCompanyDraftFromTrialRequest,
@@ -4706,6 +4707,7 @@ function requireAdminPage() {
 let hasBooted = false;
 let authListenerRegistered = false;
 let authRefreshSequence = 0;
+let hydratedAuthUserId = "";
 
 async function loadCurrentSession() {
   if (!supabaseClient) {
@@ -4785,10 +4787,26 @@ function registerAuthListener() {
   supabaseClient.auth.onAuthStateChange((event, session) => {
     if (!hasBooted) return;
 
+    const previousUserId = state.currentUser?.id || state.user?.id || "";
+    const nextUserId = session?.user?.id || "";
     const refreshSequence = ++authRefreshSequence;
     state.inviteAuthEvent = event || "";
     state.user = session?.user || null;
     state.currentUser = state.user;
+    const authStateChangePlan = getAuthStateChangePlan({
+      event,
+      previousUserId,
+      nextUserId,
+      hydratedUserId: hydratedAuthUserId,
+      profileLoaded: state.profileLoaded,
+      adminLoaded: state.adminLoaded,
+      profile: state.profile,
+      companyId: state.companyId,
+      hasPendingInvite: Boolean(getPendingInviteToken()),
+      passwordRecoveryActive: isPasswordRecoveryRoute(),
+    });
+
+    if (authStateChangePlan.preserveHydratedContext) return;
 
     if (state.user) {
       if (event === "PASSWORD_RECOVERY") {
@@ -4824,6 +4842,7 @@ function registerAuthListener() {
     }
 
     state.isAdmin = false;
+    hydratedAuthUserId = "";
     state.opportunities = [];
     state.opportunitiesLoaded = false;
     state.profile = null;
@@ -4936,6 +4955,7 @@ async function loadAuthenticatedCompany() {
 async function loadCompanyProfile(options = {}) {
   const { overwriteDraft = false } = options;
   if (!supabaseClient || !state.user) {
+    hydratedAuthUserId = "";
     state.profile = null;
     state.companyMembership = null;
     if (overwriteDraft || !state.profileDraftDirty) state.profileDraft = null;
@@ -4943,9 +4963,11 @@ async function loadCompanyProfile(options = {}) {
     return;
   }
 
+  const profileUserId = state.user.id;
   try {
     const { company, membership } = await loadAuthenticatedCompany();
     if (!company) {
+      hydratedAuthUserId = "";
       state.companyId = null;
       state.companyMembership = null;
       state.storedMatches = [];
@@ -5006,12 +5028,14 @@ async function loadCompanyProfile(options = {}) {
     saveProfile(state.profile);
     await loadOpportunityActionsForCurrentCompany();
     await loadStoredMatchesForCurrentCompany();
+    hydratedAuthUserId = profileUserId;
     render();
     afterRouteRender();
   } catch (error) {
     console.error("Failed to load Supabase company profile:", error);
     state.profileLoadError = formatSupabaseError(error);
     if (!state.profileDraftDirty) {
+      hydratedAuthUserId = "";
       state.companyId = null;
       state.companyMembership = null;
       state.storedMatches = [];

@@ -8,6 +8,7 @@ import {
   renderReportArchiveSkeleton,
   renderSettingsSkeleton,
 } from "../../../src/pages/skeletons.js";
+import { getAuthStateChangePlan } from "../../../src/services/authLifecycle.js";
 
 const app = readFileSync(new URL("../../../app.js", import.meta.url), "utf8");
 const css = readFileSync(new URL("../../../styles.css", import.meta.url), "utf8");
@@ -129,4 +130,84 @@ test("skeleton animation is subtle, responsive, and reduced-motion safe", () => 
   assert.match(css, /@media \(max-width: 720px\)[\s\S]*\.skeleton-opportunity-card/);
   assert.match(css, /@media \(max-width: 768px\)[\s\S]*\.skeleton-filter-row \.skeleton-search/);
   assert.match(css, /@media \(max-width: 340px\)[\s\S]*\.stats-grid/);
+});
+
+function hydratedAuthPlan(event, overrides = {}) {
+  return getAuthStateChangePlan({
+    event,
+    previousUserId: "user-1",
+    nextUserId: "user-1",
+    hydratedUserId: "user-1",
+    profileLoaded: true,
+    adminLoaded: true,
+    profile: { id: "company-1" },
+    companyId: "company-1",
+    hasPendingInvite: false,
+    passwordRecoveryActive: false,
+    ...overrides,
+  });
+}
+
+test("same-user SIGNED_IN after tab resume preserves the hydrated dashboard", () => {
+  const plan = hydratedAuthPlan("SIGNED_IN");
+
+  assert.equal(plan.preserveHydratedContext, true);
+  assert.equal(plan.shouldReloadContext, false);
+  assert.equal(plan.shouldRender, false);
+});
+
+test("same-user TOKEN_REFRESHED preserves the hydrated dashboard", () => {
+  const plan = hydratedAuthPlan("TOKEN_REFRESHED");
+
+  assert.equal(plan.preserveHydratedContext, true);
+  assert.equal(plan.shouldReloadContext, false);
+  assert.equal(plan.shouldRender, false);
+});
+
+test("different-user sign-in still performs full context initialization", () => {
+  const plan = hydratedAuthPlan("SIGNED_IN", { nextUserId: "user-2" });
+
+  assert.equal(plan.preserveHydratedContext, false);
+  assert.equal(plan.shouldReloadContext, true);
+  assert.equal(plan.shouldRender, true);
+});
+
+test("same-user events cannot preserve a context hydrated for a different user", () => {
+  const plan = hydratedAuthPlan("TOKEN_REFRESHED", { hydratedUserId: "user-2" });
+
+  assert.equal(plan.preserveHydratedContext, false);
+  assert.equal(plan.shouldReloadContext, true);
+});
+
+test("sign-out still clears and renders the signed-out state", () => {
+  const plan = hydratedAuthPlan("SIGNED_OUT", { nextUserId: "" });
+
+  assert.equal(plan.preserveHydratedContext, false);
+  assert.equal(plan.shouldClearContext, true);
+  assert.equal(plan.shouldRender, true);
+});
+
+test("same-user lifecycle events reload when company state is not hydrated or an invite is pending", () => {
+  const missingCompany = hydratedAuthPlan("SIGNED_IN", { companyId: "" });
+  const pendingInvite = hydratedAuthPlan("TOKEN_REFRESHED", { hasPendingInvite: true });
+  const passwordRecovery = hydratedAuthPlan("TOKEN_REFRESHED", { passwordRecoveryActive: true });
+
+  assert.equal(missingCompany.shouldReloadContext, true);
+  assert.equal(pendingInvite.shouldReloadContext, true);
+  assert.equal(passwordRecovery.preserveHydratedContext, false);
+});
+
+test("auth listener exits before global loading and profile reload for preserved lifecycle events", () => {
+  const listenerStart = app.indexOf("supabaseClient.auth.onAuthStateChange");
+  const listenerEnd = app.indexOf("async function bootApp", listenerStart);
+  const listener = app.slice(listenerStart, listenerEnd);
+  const earlyReturn = listener.indexOf("if (authStateChangePlan.preserveHydratedContext) return;");
+  const adminReload = listener.indexOf("await checkAdminStatus();");
+  const profileReload = listener.indexOf("await loadProfileFromSupabase();");
+
+  assert.ok(listenerStart >= 0);
+  assert.ok(earlyReturn >= 0);
+  assert.ok(earlyReturn < adminReload);
+  assert.ok(earlyReturn < profileReload);
+  assert.match(app, /if \(state\.isBooting \|\| !state\.authLoaded \|\| !state\.profileLoaded \|\| !state\.adminLoaded\) html = renderLoadingPage\(\);/);
 });
