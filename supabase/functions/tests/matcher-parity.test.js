@@ -120,7 +120,6 @@ test("unrelated profiles do not gain the winter bonus or reach threshold", () =>
 
 test("all production match writers delegate to the canonical scorer", async () => {
   const files = [
-    "supabase/functions/import-ted/index.ts",
     "supabase/functions/import-source-connectors/index.ts",
     "supabase/functions/admin-company-actions/index.ts",
     "app.js",

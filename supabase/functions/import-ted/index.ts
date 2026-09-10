@@ -204,7 +204,6 @@ Deno.serve(async (req) => {
           else summary.inserted += 1;
         }
 
-        summary.matched = await refreshMatchesForAllCompanies(adminClient);
         summary.reports_generated = await generateWeeklyReports(adminClient);
       }
 

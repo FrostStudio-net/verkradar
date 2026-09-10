@@ -43,34 +43,49 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const automationSecret = Deno.env.get("AUTOMATION_SECRET") || "";
     if (!supabaseUrl || !anonKey || !serviceRoleKey) {
       return json({ error: "Missing Supabase Edge Function environment variables." }, 500);
     }
 
     const authHeader = req.headers.get("authorization") || "";
-    const userClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-      auth: { persistSession: false },
-    });
+    const automationHeader = req.headers.get("x-automation-secret") || "";
+    const isAutomation = automationSecret.length > 0 && automationHeader === automationSecret;
     const adminClient = createClient(supabaseUrl, serviceRoleKey, {
       auth: { persistSession: false },
     });
+    let authenticatedUser: { id: string; email?: string } | null = null;
+    if (!isAutomation) {
+      const userClient = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: authHeader } },
+        auth: { persistSession: false },
+      });
+      const { data: userData, error: userError } = await userClient.auth.getUser();
+      if (userError || !userData.user) return jsonError("Unauthorized", "UNAUTHORIZED", 401);
 
-    const { data: userData, error: userError } = await userClient.auth.getUser();
-    if (userError || !userData.user) return jsonError("Unauthorized", "UNAUTHORIZED", 401);
-
-    const { data: adminRow, error: adminError } = await adminClient
-      .from("admin_users")
-      .select("user_id")
-      .eq("user_id", userData.user.id)
-      .maybeSingle();
-    if (adminError) throw adminError;
-    if (!adminRow) return jsonError("Admin access required", "ADMIN_REQUIRED", 403);
+      const { data: adminRow, error: adminError } = await adminClient
+        .from("admin_users")
+        .select("user_id")
+        .eq("user_id", userData.user.id)
+        .maybeSingle();
+      if (adminError) throw adminError;
+      if (!adminRow) return jsonError("Admin access required", "ADMIN_REQUIRED", 403);
+      authenticatedUser = { id: userData.user.id, email: userData.user.email || "" };
+    }
 
     const body = await safeJson(req);
     const companyId = String(body.companyId || "").trim();
     const action = String(body.action || "refresh_matches").trim();
     const reportMode: ReportMode = body.reportMode === "all_current" ? "all_current" : "new_only";
+    if (isAutomation && action !== "refresh_all_matches") {
+      return jsonError("Automation may only run the global canonical matcher.", "AUTOMATION_ACTION_NOT_ALLOWED", 403);
+    }
+    if (action === "refresh_all_matches") {
+      if (!isAutomation) return jsonError("Automation authentication required", "AUTOMATION_REQUIRED", 403);
+      const result = await refreshAllCompanyMatches(adminClient);
+      return json({ ok: true, action, automation: true, ...result });
+    }
+    if (!authenticatedUser) return jsonError("Unauthorized", "UNAUTHORIZED", 401);
     if (action === "create_company_from_trial_request") {
       const trialRequestId = String(body.trialRequestId || "").trim();
       const result = await createCompanyFromTrialRequest(adminClient, {
@@ -93,8 +108,8 @@ Deno.serve(async (req) => {
       const result = await updateAdminCompanyProfile(adminClient, {
         companyId,
         profile: body.companyProfile || {},
-        changedBy: userData.user.id,
-        changedByEmail: userData.user.email || "",
+        changedBy: authenticatedUser.id,
+        changedByEmail: authenticatedUser.email || "",
         refreshMatches: Boolean(body.refreshMatches),
       });
       return json({ success: true, ok: true, message: "Company profile updated", action, companyId: result.company_id, ...result });
@@ -115,7 +130,7 @@ Deno.serve(async (req) => {
         decision: String(body.decision || "").trim(),
         reason: String(body.reason || "").trim(),
         comment: String(body.comment || "").trim(),
-        userId: userData.user.id,
+        userId: authenticatedUser.id,
       });
       return json({ ok: true, action, ...result });
     }
@@ -127,7 +142,7 @@ Deno.serve(async (req) => {
         label: String(body.label || "").trim(),
         reason: String(body.reason || "").trim(),
         notes: String(body.notes || "").trim(),
-        userId: userData.user.id,
+        userId: authenticatedUser.id,
       });
       return json({ ok: true, action, ...result });
     }
@@ -137,7 +152,7 @@ Deno.serve(async (req) => {
       const result = await inviteCompanyCustomer(adminClient, {
         companyId,
         email,
-        invitedBy: userData.user.id,
+        invitedBy: authenticatedUser.id,
       });
       return json({ ok: true, action, ...result });
     }
@@ -161,7 +176,7 @@ Deno.serve(async (req) => {
         matchId,
         companyId,
         reviewAction,
-        reviewedBy: userData.user.id,
+        reviewedBy: authenticatedUser.id,
       });
       return json({ ok: true, action, ...reviewResult });
     }
@@ -172,7 +187,7 @@ Deno.serve(async (req) => {
       const result = await markReportSent(adminClient, {
         reportId,
         companyId,
-        sentBy: userData.user.id,
+        sentBy: authenticatedUser.id,
       });
       return json({ ok: true, action, ...result });
     }
@@ -897,8 +912,7 @@ async function refreshCompanyMatches(supabase: ReturnType<typeof createClient>, 
     .from("opportunities")
     .select("*, sources(name, source_type)")
     .eq("status", "open")
-    .order("created_at", { ascending: false })
-    .limit(1000);
+    .order("created_at", { ascending: false });
 
   if (opportunitiesError) throw opportunitiesError;
 
@@ -913,10 +927,11 @@ async function refreshCompanyMatches(supabase: ReturnType<typeof createClient>, 
     .filter((row) => row.reviewed_at)
     .map((row) => [String(row.opportunity_id), row]));
 
-  const matches = (opportunities || [])
+  const eligibleOpportunities = (opportunities || [])
     .map(mapOpportunity)
     .filter(isCustomerMatchEligibleOpportunity)
-    .filter(isDashboardVisibleOpportunity)
+    .filter(isDashboardVisibleOpportunity);
+  const matches = eligibleOpportunities
     .map((opportunity) => calculateMatch(company, opportunity))
     .filter((match) => match.matchScore >= MIN_MATCH_SCORE)
     .map((match) => ({
@@ -924,12 +939,6 @@ async function refreshCompanyMatches(supabase: ReturnType<typeof createClient>, 
       ...applyReviewedSafetyOverride(classifyMatchSafety(company, match), existingSafety.get(String(match.id || ""))),
     }))
     .sort((a, b) => b.matchScore - a.matchScore || daysUntilDeadline(a.deadline) - daysUntilDeadline(b.deadline));
-
-  const { error: deleteError } = await supabase
-    .from("opportunity_matches")
-    .delete()
-    .eq("company_id", companyId);
-  if (deleteError) throw deleteError;
 
   const rows = matches.map((match) => ({
     company_id: companyId,
@@ -950,8 +959,10 @@ async function refreshCompanyMatches(supabase: ReturnType<typeof createClient>, 
   }));
 
   if (rows.length) {
-    const { error: insertError } = await supabase.from("opportunity_matches").insert(rows);
-    if (insertError) throw insertError;
+    const { error: upsertError } = await supabase
+      .from("opportunity_matches")
+      .upsert(rows, { onConflict: "company_id,opportunity_id" });
+    if (upsertError) throw upsertError;
   }
 
   const nextOpportunityIds = new Set(rows.map((row) => String(row.opportunity_id)));
@@ -964,7 +975,19 @@ async function refreshCompanyMatches(supabase: ReturnType<typeof createClient>, 
       String(previous.safety_status || "") !== String(row.safety_status || "")
     );
   }).length;
-  const matches_removed = existingRows.filter((row) => !nextOpportunityIds.has(String(row.opportunity_id))).length;
+  const staleOpportunityIds = existingRows
+    .filter((row) => !nextOpportunityIds.has(String(row.opportunity_id)))
+    .map((row) => String(row.opportunity_id));
+  if (staleOpportunityIds.length) {
+    const { error: deleteError } = await supabase
+      .from("opportunity_matches")
+      .delete()
+      .eq("company_id", companyId)
+      .in("opportunity_id", staleOpportunityIds);
+    if (deleteError) throw deleteError;
+  }
+  const matches_removed = staleOpportunityIds.length;
+  const sourceNames = uniqueStrings(eligibleOpportunities.map((opportunity) => String(opportunity.source || ""))).filter(Boolean);
 
   return {
     company,
@@ -973,7 +996,87 @@ async function refreshCompanyMatches(supabase: ReturnType<typeof createClient>, 
     matches_created,
     matches_updated,
     matches_removed,
+    eligible_opportunities: eligibleOpportunities.length,
+    source_names_evaluated: sourceNames,
   };
+}
+
+async function refreshAllCompanyMatches(supabase: ReturnType<typeof createClient>) {
+  const runId = crypto.randomUUID();
+  const startedAt = new Date().toISOString();
+  const { error: startError } = await supabase.from("canonical_match_runs").insert({
+    id: runId,
+    status: "running",
+    started_at: startedAt,
+  });
+  if (startError) throw startError;
+
+  try {
+    const { data: companies, error: companiesError } = await supabase
+      .from("companies")
+      .select("id, company_name")
+      .order("created_at", { ascending: true });
+    if (companiesError) throw companiesError;
+
+    let matchesRefreshed = 0;
+    let matchesCreated = 0;
+    let matchesUpdated = 0;
+    let matchesRemoved = 0;
+    let eligibleOpportunities = 0;
+    const sourceNames = new Set<string>();
+    const companyResults: Array<Record<string, unknown>> = [];
+
+    for (const company of companies || []) {
+      const result = await refreshCompanyMatches(supabase, String(company.id));
+      matchesRefreshed += result.matches_refreshed;
+      matchesCreated += result.matches_created;
+      matchesUpdated += result.matches_updated;
+      matchesRemoved += result.matches_removed;
+      eligibleOpportunities = Math.max(eligibleOpportunities, result.eligible_opportunities);
+      for (const sourceName of result.source_names_evaluated) sourceNames.add(sourceName);
+      companyResults.push({
+        company_id: company.id,
+        company_name: company.company_name,
+        matches_refreshed: result.matches_refreshed,
+        matches_created: result.matches_created,
+        matches_updated: result.matches_updated,
+        matches_removed: result.matches_removed,
+      });
+    }
+
+    const completedAt = new Date().toISOString();
+    const summary = {
+      companies_checked: companies?.length || 0,
+      eligible_opportunities: eligibleOpportunities,
+      source_names_evaluated: [...sourceNames].sort(),
+      matches_refreshed: matchesRefreshed,
+      matches_created: matchesCreated,
+      matches_updated: matchesUpdated,
+      matches_removed: matchesRemoved,
+      company_results: companyResults,
+    };
+    const { error: completeError } = await supabase.from("canonical_match_runs").update({
+      status: "success",
+      completed_at: completedAt,
+      companies_checked: summary.companies_checked,
+      eligible_opportunities: summary.eligible_opportunities,
+      matches_refreshed: summary.matches_refreshed,
+      matches_created: summary.matches_created,
+      matches_updated: summary.matches_updated,
+      matches_removed: summary.matches_removed,
+      source_names_evaluated: summary.source_names_evaluated,
+      details: { company_results: companyResults },
+    }).eq("id", runId);
+    if (completeError) throw completeError;
+    return { run_id: runId, started_at: startedAt, completed_at: completedAt, ...summary };
+  } catch (error) {
+    await supabase.from("canonical_match_runs").update({
+      status: "error",
+      completed_at: new Date().toISOString(),
+      error: errorMessage(error),
+    }).eq("id", runId);
+    throw error;
+  }
 }
 
 async function loadCompanyProfile(supabase: ReturnType<typeof createClient>, companyId: string): Promise<CompanyProfile> {
