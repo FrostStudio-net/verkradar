@@ -25,6 +25,7 @@
     "test:legacy-zero-click": "node --test supabase/functions/tests/legacy-zero-click-automation.test.js",
     "test:legacy-zero-click-db": "bash scripts/test-legacy-zero-click-db.sh",
     "test:independent-matcher": "node --test supabase/functions/tests/independent-matcher-automation.test.js",
+    "test:automatic-ai-review": "node --test supabase/functions/tests/automatic-ai-review-automation.test.js",
     "test:frontend-cleanup": "node --test supabase/functions/tests/frontend-loading-ui.test.js",
     "test:admin-company-match-layout": "node --test supabase/functions/tests/admin-company-match-layout.test.js",
     "test:client-handoff": "node --test supabase/functions/tests/client-handoff.test.js",

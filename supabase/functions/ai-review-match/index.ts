@@ -23,29 +23,41 @@ Deno.serve(async (req) => {
     const supabaseUrl = requiredEnv("SUPABASE_URL");
     const anonKey = requiredEnv("SUPABASE_ANON_KEY");
     const serviceRoleKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
+    const automationSecret = Deno.env.get("AUTOMATION_SECRET") || "";
 
     const authHeader = req.headers.get("authorization") || "";
-    const userClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-      auth: { persistSession: false },
-    });
+    const automationHeader = req.headers.get("x-automation-secret") || "";
+    const isAutomation = automationSecret.length > 0 && automationHeader === automationSecret;
     const adminClient = createClient(supabaseUrl, serviceRoleKey, {
       auth: { persistSession: false },
     });
+    let authenticatedUserId: string | null = null;
+    if (!isAutomation) {
+      const userClient = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: authHeader } },
+        auth: { persistSession: false },
+      });
+      const { data: userData, error: userError } = await userClient.auth.getUser();
+      if (userError || !userData.user) return json({ error: "Unauthorized" }, 401);
 
-    const { data: userData, error: userError } = await userClient.auth.getUser();
-    if (userError || !userData.user) return json({ error: "Unauthorized" }, 401);
-
-    const { data: adminRow, error: adminError } = await adminClient
-      .from("admin_users")
-      .select("user_id")
-      .eq("user_id", userData.user.id)
-      .maybeSingle();
-    if (adminError) throw adminError;
-    if (!adminRow) return json({ error: "Admin access required" }, 403);
+      const { data: adminRow, error: adminError } = await adminClient
+        .from("admin_users")
+        .select("user_id")
+        .eq("user_id", userData.user.id)
+        .maybeSingle();
+      if (adminError) throw adminError;
+      if (!adminRow) return json({ error: "Admin access required" }, 403);
+      authenticatedUserId = userData.user.id;
+    }
 
     const body = await safeJson(req);
     const companyId = String(body.companyId || body.company_id || "").trim();
+    const auto = body.auto === true || body.mode === "auto";
+    const batch = body.batch === true || body.mode === "batch";
+    const force = body.force === true || body.revalidate === true;
+    if (isAutomation && (!auto || batch || force || companyId || body.setCompanyAutoAiReviewEnabled === true)) {
+      return json({ error: "Automation may only run standard automatic AI review." }, 403);
+    }
     if (body.setCompanyAutoAiReviewEnabled === true) {
       const enabled = body.enabled === true;
       if (!isUuid(companyId)) return json({ error: "A valid company_id is required." }, 400);
@@ -54,25 +66,25 @@ Deno.serve(async (req) => {
     }
     const openAiKey = requiredEnv("OPENAI_API_KEY");
     const model = Deno.env.get("OPENAI_MODEL") || "gpt-4.1-mini";
-    const auto = body.auto === true || body.mode === "auto";
-    const batch = body.batch === true || body.mode === "batch";
     const limit = Math.max(1, Math.min(MAX_BATCH_MATCHES, Number(body.limit || MAX_BATCH_MATCHES)));
-    const force = body.force === true || body.revalidate === true;
     if (auto) {
-      const result = await runAutomaticAiReview(adminClient, openAiKey, model, userData.user.id, limit);
+      const result = isAutomation
+        ? await runScheduledAutomaticAiReview(adminClient, openAiKey, model, limit)
+        : await runAutomaticAiReview(adminClient, openAiKey, model, authenticatedUserId, limit);
       return json({ ok: true, ...result });
     }
+    if (!authenticatedUserId) return json({ error: "Unauthorized" }, 401);
     if (batch) {
       if (!isUuid(companyId)) return json({ error: "A valid companyId is required for batch review." }, 400);
       await assertAiUsageAllowed(adminClient, {
-        userId: userData.user.id,
+        userId: authenticatedUserId,
         companyId,
         action: force ? "rerun" : "batch_review",
         requestedReviews: limit,
         force,
         isBatch: true,
       });
-      const result = await runBatchReview(adminClient, openAiKey, model, companyId, limit, force, userData.user.id);
+      const result = await runBatchReview(adminClient, openAiKey, model, companyId, limit, force, authenticatedUserId);
       return json({ ok: true, ...result });
     }
 
@@ -93,14 +105,14 @@ Deno.serve(async (req) => {
 
     validateContextBeforeAi(context, { force, allowOutsideServiceArea: body.allowOutsideServiceArea === true });
     await assertAiUsageAllowed(adminClient, {
-      userId: userData.user.id,
+      userId: authenticatedUserId,
       companyId: String(context.company.id || ""),
       action: force ? "rerun" : "single_review",
       requestedReviews: 1,
       force,
       isBatch: false,
     });
-    const saved = await createAndSaveReview(adminClient, openAiKey, model, context, userData.user.id, force ? "rerun" : "single_review");
+    const saved = await createAndSaveReview(adminClient, openAiKey, model, context, authenticatedUserId, force ? "rerun" : "single_review");
     return json({ ok: true, cached: false, review: saved });
   } catch (error) {
     console.error("AI match review failed:", error);
@@ -299,7 +311,7 @@ async function runAutomaticAiReview(
   supabase: ReturnType<typeof createClient>,
   openAiKey: string,
   model: string,
-  userId: string,
+  userId: string | null,
   limit: number,
 ) {
   const today = startOfUtcDayIso();
@@ -344,6 +356,7 @@ async function runAutomaticAiReview(
     company_diagnostics: [] as Record<string, unknown>[],
     daily_usage_remaining: remainingTotal,
     reviews: [] as Record<string, unknown>[],
+    failures: [] as Record<string, unknown>[],
   };
 
   for (const company of companies || []) {
@@ -416,14 +429,93 @@ async function runAutomaticAiReview(
         else if (saved.fit === "possible") summary.possible += 1;
         else summary.weak_or_no_fit += 1;
         summary.reviews.push(saved);
-      } catch {
+      } catch (error) {
         summary.skipped_other += 1;
+        const failure = {
+          company_id: companyId,
+          match_id: String(candidate.id || ""),
+          error: errorMessage(error),
+        };
+        console.error("Automatic AI review candidate failed:", failure);
+        if (summary.failures.length < 10) summary.failures.push(failure);
       }
     }
     summary.company_diagnostics.push(diagnostic);
   }
 
   return summary;
+}
+
+async function runScheduledAutomaticAiReview(
+  supabase: ReturnType<typeof createClient>,
+  openAiKey: string,
+  model: string,
+  limit: number,
+) {
+  const staleBefore = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+  const { error: staleError } = await supabase
+    .from("ai_review_automation_runs")
+    .update({
+      status: "error",
+      completed_at: new Date().toISOString(),
+      error: "Stale running automation was closed before retry.",
+    })
+    .eq("status", "running")
+    .lt("started_at", staleBefore);
+  if (staleError) throw staleError;
+
+  const runId = crypto.randomUUID();
+  const startedAt = new Date().toISOString();
+  const { error: startError } = await supabase.from("ai_review_automation_runs").insert({
+    id: runId,
+    status: "running",
+    started_at: startedAt,
+    requested_limit: limit,
+  });
+  if (startError?.code === "23505") {
+    return {
+      mode: "auto",
+      automation_run_status: "skipped_active_run",
+      ai_reviews_created: 0,
+      failures: [],
+    };
+  }
+  if (startError) throw startError;
+
+  try {
+    const result = await runAutomaticAiReview(supabase, openAiKey, model, null, limit);
+    const completedAt = new Date().toISOString();
+    const { error: completeError } = await supabase.from("ai_review_automation_runs").update({
+      status: "success",
+      completed_at: completedAt,
+      companies_checked: result.companies_checked,
+      matches_checked: result.matches_checked,
+      reviews_created: result.ai_reviews_created,
+      skipped_count: result.skipped_expired
+        + result.skipped_missing_deadline
+        + result.skipped_outside_service_area
+        + result.skipped_already_reviewed
+        + result.skipped_usage_limit
+        + result.skipped_no_candidate_matches
+        + result.skipped_other,
+      details: result,
+    }).eq("id", runId);
+    if (completeError) throw completeError;
+    return {
+      ...result,
+      automation_run_id: runId,
+      automation_run_status: "success",
+      started_at: startedAt,
+      completed_at: completedAt,
+    };
+  } catch (error) {
+    await supabase.from("ai_review_automation_runs").update({
+      status: "error",
+      completed_at: new Date().toISOString(),
+      error: errorMessage(error),
+    }).eq("id", runId);
+    throw error;
+  }
 }
 
 function createCompanyDiagnostic(companyId: string, companyName: string, reason: string, extra: Record<string, unknown> = {}) {
@@ -825,7 +917,7 @@ async function countAiUsage(
 async function logAiUsage(
   supabase: ReturnType<typeof createClient>,
   entry: {
-    userId: string;
+    userId: string | null;
     companyId: string;
     opportunityId: string | null;
     action: "single_review" | "batch_review" | "rerun";
@@ -861,7 +953,7 @@ async function createAndSaveReview(
   openAiKey: string,
   model: string,
   context: Record<string, unknown>,
-  userId: string,
+  userId: string | null,
   action: "single_review" | "batch_review" | "rerun",
 ) {
   const aiResult = await callOpenAiForReview(openAiKey, model, context);
