@@ -16,6 +16,7 @@ import { extractVegagerdinDetailMetadata } from "../_shared/ingestion-v2/adapter
 import { getVegagerdinIndexDiagnostics } from "../_shared/ingestion-v2/adapters/vegagerdin-html-index.js";
 import { extractLandsnetDetailMetadata, extractLandsvirkjunDetailMetadata, extractOrkuveitanDetailMetadata, extractVeiturDetailMetadata } from "../_shared/ingestion-v2/adapters/utbodsvefur-enrichment.js";
 import { getUtbodsvefurParserDiagnostics } from "../_shared/ingestion-v2/adapters/utbodsvefur-buyers.js";
+import { applyConsensaObservationStatus, getConsensaIndexDiagnostics } from "../_shared/ingestion-v2/adapters/consensa-html-index.js";
 import {
   applyBorgarbyggdSourceStatus,
   applySourcePredictionPolicy,
@@ -41,13 +42,14 @@ const REYKJAVIK_SOURCE_KEY = "reykjavik-utbod-v2";
 const GARDABAER_SOURCE_KEY = "gardabaer-utbod-v2";
 const BORGARBYGGD_SOURCE_KEY = "borgarbyggd-utbod-v2";
 const ISAFJORDUR_SOURCE_KEY = "isafjordur-utbod-v2";
+const CONSENSA_SOURCE_KEY = "consensa-utbod-v2";
 const REYKJAVIK_HOLD_CLEAR_OBSERVATION_ID = "32713ed0-089d-45a0-97f9-24fabdbf08dd";
 const REYKJAVIK_HOLD_CLEAR_OPPORTUNITY_ID = "1c4b107b-999c-47df-82a7-d87b43b20185";
 const PRODUCTION_CANARY_CONFIRMATION = "Enable canary controls only - no promotion will occur";
 const PRODUCTION_RELEASE_CONFIRMATION = "Enable release controls only - no release will occur";
 const COMMUNICATION_HOLD_CLEAR_CONFIRMATION = "Clear communication hold only - no matching or communication will run";
 const STAGING_PHASE_C_SOURCES: ReadonlySet<string> = new Set([THREE_SOURCE_KEYS.REYKJAVIK, THREE_SOURCE_KEYS.RIKISKAUP]);
-const ALLOWED_SOURCES = new Set(["akranes-utbod-v2", "borgarbyggd-utbod-v2", "gardabaer-utbod-v2", "rikiskaup-utbod-v2", "vegagerdin-utbod-v2", "isafjordur-utbod-v2", "reykjavik-utbod-v2"]);
+const ALLOWED_SOURCES = new Set(["akranes-utbod-v2", "borgarbyggd-utbod-v2", "consensa-utbod-v2", "gardabaer-utbod-v2", "rikiskaup-utbod-v2", "vegagerdin-utbod-v2", "isafjordur-utbod-v2", "reykjavik-utbod-v2"]);
 
 const PHASE_A_FIXTURES: Record<string, { sourceKey: string; file: URL; contentType: string }> = {
   "akranes-rss": {
@@ -70,6 +72,7 @@ const PHASE_A_FIXTURES: Record<string, { sourceKey: string; file: URL; contentTy
   "vegagerdin-html-index": { sourceKey: "vegagerdin-utbod-v2", file: new URL("./_fixtures/vegagerdin-html-index.json", import.meta.url), contentType: "application/json" },
   "isafjordur-rss": { sourceKey: "isafjordur-utbod-v2", file: new URL("./_fixtures/isafjordur-rss.xml", import.meta.url), contentType: "application/rss+xml" },
   "reykjavik-html-index": { sourceKey: "reykjavik-utbod-v2", file: new URL("./_fixtures/reykjavik-html-index.html", import.meta.url), contentType: "text/html" },
+  "consensa-html-index": { sourceKey: "consensa-utbod-v2", file: new URL("./_fixtures/consensa-html-index.html", import.meta.url), contentType: "text/html" },
   "landsvirkjun-html-index": { sourceKey: "landsvirkjun-utbod-v2", file: new URL("./_fixtures/utbodsvefur-buyers-html-index.html", import.meta.url), contentType: "text/html" },
   "landsnet-html-index": { sourceKey: "landsnet-utbod-v2", file: new URL("./_fixtures/utbodsvefur-buyers-html-index.html", import.meta.url), contentType: "text/html" },
   "veitur-html-index": { sourceKey: "veitur-utbod-v2", file: new URL("./_fixtures/utbodsvefur-buyers-html-index.html", import.meta.url), contentType: "text/html" },
@@ -101,6 +104,7 @@ Deno.serve(async (req) => {
     const borgarbyggdRoutineAutomation = preAuthBody.action === "run_borgarbyggd_production";
     const isafjordurRoutineAutomation = preAuthBody.action === "run_isafjordur_production";
     const vegagerdinRoutineAutomation = preAuthBody.action === "run_vegagerdin_production";
+    const consensaShadowAutomation = preAuthBody.action === "run_consensa_shadow_automation";
     const routineAutomationAuthorized = routineAutomation
       && isProduction
       && String(preAuthBody.source_key || "") === REYKJAVIK_SOURCE_KEY
@@ -126,6 +130,11 @@ Deno.serve(async (req) => {
       && String(preAuthBody.source_key || "") === THREE_SOURCE_KEYS.VEGAGERDIN
       && Boolean(requiredEnv("AUTOMATION_SECRET"))
       && req.headers.get("x-automation-secret") === requiredEnv("AUTOMATION_SECRET");
+    const consensaShadowAutomationAuthorized = consensaShadowAutomation
+      && isProduction
+      && String(preAuthBody.source_key || "") === CONSENSA_SOURCE_KEY
+      && Boolean(requiredEnv("AUTOMATION_SECRET"))
+      && req.headers.get("x-automation-secret") === requiredEnv("AUTOMATION_SECRET");
     const authHeader = req.headers.get("authorization") || "";
     const userClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
@@ -133,7 +142,7 @@ Deno.serve(async (req) => {
     });
     const adminClient = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
     let adminUserId = "";
-    if (!routineAutomationAuthorized && !gardabaerRoutineAutomationAuthorized && !borgarbyggdRoutineAutomationAuthorized && !isafjordurRoutineAutomationAuthorized && !vegagerdinRoutineAutomationAuthorized) {
+    if (!routineAutomationAuthorized && !gardabaerRoutineAutomationAuthorized && !borgarbyggdRoutineAutomationAuthorized && !isafjordurRoutineAutomationAuthorized && !vegagerdinRoutineAutomationAuthorized && !consensaShadowAutomationAuthorized) {
       const { data: userData, error: userError } = await userClient.auth.getUser();
       if (userError || !userData.user) return json({ error: "Unauthorized" }, 401);
       const { data: adminRow, error: adminError } = await adminClient
@@ -160,12 +169,16 @@ Deno.serve(async (req) => {
     if (vegagerdinRoutineAutomation && !vegagerdinRoutineAutomationAuthorized) {
       return json({ error: "Vegagerðin routine automation authentication failed", code: "V2_ROUTINE_AUTOMATION_UNAUTHORIZED" }, 401);
     }
+    if (consensaShadowAutomation && !consensaShadowAutomationAuthorized) {
+      return json({ error: "Consensa shadow automation authentication failed", code: "V2_CONSENSA_SHADOW_AUTOMATION_UNAUTHORIZED" }, 401);
+    }
     const body = await safeJson(req);
     if (routineAutomationAuthorized) return await runReykjavikRoutineProduction({ body, adminClient });
     if (gardabaerRoutineAutomationAuthorized) return await runGardabaerRoutineProduction({ body, adminClient });
     if (borgarbyggdRoutineAutomationAuthorized) return await runBorgarbyggdRoutineProduction({ body, adminClient });
     if (isafjordurRoutineAutomationAuthorized) return await runIsafjordurRoutineProduction({ body, adminClient });
     if (vegagerdinRoutineAutomationAuthorized) return await runVegagerdinRoutineProduction({ body, adminClient });
+    if (consensaShadowAutomationAuthorized) return await runConsensaShadowAutomation({ body, adminClient });
     if (body.action === "phase_c_capabilities") return await phaseCCapabilities({ adminClient, isProduction });
     const productionPhaseCAction = ["set_source_promotion_approval", "approve_promotion", "promote_canary", "rollback_canary", "canary_assertions", "set_reykjavik_release_enabled", "approve_release", "release_canary", "clear_communication_hold", "disable_released_canary"].includes(String(body.action || ""));
     const productionShadowAction = body.action === "run_shadow";
@@ -443,7 +456,17 @@ async function runShadow({ body, config, adminClient }: { body: Record<string, u
     let fetchedCount = 1;
     let duplicateCount = 0;
     let pagination = null;
-    if (config.source_key === THREE_SOURCE_KEYS.VEGAGERDIN) {
+    if (config.source_key === THREE_SOURCE_KEYS.CONSENSA) {
+      fetched = await fetchWithRetry(config.endpoint_url, { maxAttempts: config.max_attempts, timeoutMs: config.request_timeout_ms, deadlineAt: Date.parse(lease.run_deadline_at), request: { headers } });
+      const pageHtml = await fetched.response.text();
+      const sitemapUrl = String(config.settings?.access_policy?.public_sitemap_url || "");
+      if (sitemapUrl !== "https://www.consensa.is/dynamic-projects_p_59b8e9ef_92b8_4ca8_9773_c88e9eb52fae_0_5000-sitemap.xml") {
+        throw Object.assign(new Error("Consensa public sitemap endpoint is not allowlisted"), { code: "V2_CONSENSA_SITEMAP_NOT_ALLOWED" });
+      }
+      const sitemap = await fetchWithRetry(sitemapUrl, { maxAttempts: config.max_attempts, timeoutMs: config.request_timeout_ms, deadlineAt: Date.parse(lease.run_deadline_at), request: { headers } });
+      text = JSON.stringify({ page_html: pageHtml, sitemap_xml: await sitemap.response.text() });
+      fetchedCount = 2;
+    } else if (config.source_key === THREE_SOURCE_KEYS.VEGAGERDIN) {
       fetched = await fetchWithRetry(config.endpoint_url, { maxAttempts: config.max_attempts, timeoutMs: config.request_timeout_ms, deadlineAt: Date.parse(lease.run_deadline_at), request: { headers } });
       const currentHtml = await fetched.response.text();
       const plannedUrl = String(config.settings?.shadow_quality?.planned_endpoint_url || "");
@@ -476,10 +499,15 @@ async function runShadow({ body, config, adminClient }: { body: Record<string, u
     if (config.source_key === THREE_SOURCE_KEYS.BORGARBYGGD) {
       candidates = applyBorgarbyggdSourceStatus(candidates, now);
     }
-    const indexDiagnostics = config.source_key === THREE_SOURCE_KEYS.VEGAGERDIN
+    if (config.source_key === THREE_SOURCE_KEYS.CONSENSA) {
+      candidates = applyConsensaObservationStatus(candidates, now);
+    }
+    const indexDiagnostics = config.source_key === THREE_SOURCE_KEYS.CONSENSA
+      ? getConsensaIndexDiagnostics(candidates)
+      : config.source_key === THREE_SOURCE_KEYS.VEGAGERDIN
       ? getVegagerdinIndexDiagnostics(candidates)
       : getUtbodsvefurParserDiagnostics(candidates);
-    if ([THREE_SOURCE_KEYS.BORGARBYGGD, THREE_SOURCE_KEYS.GARDABAER, THREE_SOURCE_KEYS.RIKISKAUP, THREE_SOURCE_KEYS.VEGAGERDIN, THREE_SOURCE_KEYS.ISAFJORDUR, THREE_SOURCE_KEYS.REYKJAVIK, ...Object.keys(UTBODSVEFUR_DETAIL_EXTRACTORS)].includes(config.source_key)) {
+    if ([THREE_SOURCE_KEYS.BORGARBYGGD, THREE_SOURCE_KEYS.CONSENSA, THREE_SOURCE_KEYS.GARDABAER, THREE_SOURCE_KEYS.RIKISKAUP, THREE_SOURCE_KEYS.VEGAGERDIN, THREE_SOURCE_KEYS.ISAFJORDUR, THREE_SOURCE_KEYS.REYKJAVIK, ...Object.keys(UTBODSVEFUR_DETAIL_EXTRACTORS)].includes(config.source_key)) {
       duplicateCount += countSemanticDuplicates(candidates);
     }
     let enrichmentMetrics = { attempted: 0, succeeded: 0, failed: 0, enriched: 0, no_supported_fields: 0, skipped: candidates.length, limit: 0 };
@@ -578,8 +606,10 @@ async function runShadow({ body, config, adminClient }: { body: Record<string, u
       same_run_deterministic_duplicates: sameRunDedupe.suppressed_count,
       same_run_unresolved_groups: sameRunDedupe.unresolved_group_count,
     };
-    if ([THREE_SOURCE_KEYS.BORGARBYGGD, THREE_SOURCE_KEYS.ISAFJORDUR, THREE_SOURCE_KEYS.VEGAGERDIN].includes(config.source_key)) {
-      const comparisonRpc = config.source_key === THREE_SOURCE_KEYS.ISAFJORDUR
+    if ([THREE_SOURCE_KEYS.BORGARBYGGD, THREE_SOURCE_KEYS.CONSENSA, THREE_SOURCE_KEYS.ISAFJORDUR, THREE_SOURCE_KEYS.VEGAGERDIN].includes(config.source_key)) {
+      const comparisonRpc = config.source_key === THREE_SOURCE_KEYS.CONSENSA
+        ? "compare_consensa_shadow_observation"
+        : config.source_key === THREE_SOURCE_KEYS.ISAFJORDUR
         ? "compare_isafjordur_shadow_observation"
         : config.source_key === THREE_SOURCE_KEYS.VEGAGERDIN
           ? "compare_vegagerdin_shadow_observation"
@@ -665,11 +695,19 @@ async function runShadow({ body, config, adminClient }: { body: Record<string, u
       if (comparisonMetrics.errors !== 0 || comparisonMetrics.baseline_unavailable !== 0 || comparisonMetrics.global_completed !== storedObservations.length) qualityBlockers.push("comparison_incomplete");
       if (comparisonMetrics.conflicts !== 0 || comparisonMetrics.same_run_unresolved_groups !== 0) qualityBlockers.push("deterministic_identity_conflict");
     }
+    if (config.source_key === THREE_SOURCE_KEYS.CONSENSA) {
+      if (indexDiagnostics?.structure_matched !== true || Number(indexDiagnostics?.tender_rows || 0) !== candidates.length) qualityBlockers.push("consensa_listing_structure_mismatch");
+      if (recoveryMetrics.deadlines !== candidates.length || recoveryMetrics.references !== candidates.length || recoveryMetrics.buyers !== candidates.length) qualityBlockers.push("consensa_required_metadata_incomplete");
+      if (invalidCount !== 0) qualityBlockers.push("consensa_invalid_observations");
+      if (classificationMetrics.expired_or_completed_actionable !== 0) qualityBlockers.push("expired_or_completed_actionable");
+      if (comparisonMetrics.errors !== 0 || comparisonMetrics.baseline_unavailable !== 0 || comparisonMetrics.global_completed !== storedObservations.length) qualityBlockers.push("comparison_incomplete");
+      if (comparisonMetrics.conflicts !== 0 || comparisonMetrics.same_run_unresolved_groups !== 0) qualityBlockers.push("deterministic_identity_conflict");
+    }
     const quality = { healthy: qualityBlockers.length === 0, blockers: qualityBlockers };
     const qualityBlocked = qualityBlockers.length > 0;
     const runStatus = zeroItem.suspicious || qualityBlocked ? "quarantined" : invalidCount ? "partial" : "succeeded";
-    const qualitySourceName = config.source_key === THREE_SOURCE_KEYS.ISAFJORDUR ? "Ísafjarðarbær" : config.source_key === THREE_SOURCE_KEYS.VEGAGERDIN ? "Vegagerðin" : "Borgarbyggð";
-    const qualityErrorCode = config.source_key === THREE_SOURCE_KEYS.ISAFJORDUR ? "V2_ISAFJORDUR_QUALITY_GATE" : config.source_key === THREE_SOURCE_KEYS.VEGAGERDIN ? "V2_VEGAGERDIN_QUALITY_GATE" : "V2_BORGARBYGGD_QUALITY_GATE";
+    const qualitySourceName = config.source_key === THREE_SOURCE_KEYS.CONSENSA ? "Consensa" : config.source_key === THREE_SOURCE_KEYS.ISAFJORDUR ? "Ísafjarðarbær" : config.source_key === THREE_SOURCE_KEYS.VEGAGERDIN ? "Vegagerðin" : "Borgarbyggð";
+    const qualityErrorCode = config.source_key === THREE_SOURCE_KEYS.CONSENSA ? "V2_CONSENSA_QUALITY_GATE" : config.source_key === THREE_SOURCE_KEYS.ISAFJORDUR ? "V2_ISAFJORDUR_QUALITY_GATE" : config.source_key === THREE_SOURCE_KEYS.VEGAGERDIN ? "V2_VEGAGERDIN_QUALITY_GATE" : "V2_BORGARBYGGD_QUALITY_GATE";
     const runErrorCode = zeroItem.reason || (qualityBlocked ? qualityErrorCode : null);
     const runErrorMessage = zeroItem.suspicious ? "HTTP success but zero parsed items" : qualityBlocked ? `${qualitySourceName} quality gate blocked: ${qualityBlockers.join(", ")}` : null;
     const parserHealth = buildShadowParserHealth({ config, fetched: fetchedCount, parsed: candidates.length, valid: validCount, invalid: invalidCount, duplicates: duplicateCount, parserErrors, enrichment: enrichmentMetrics, suspiciousZero: zeroItem.suspicious, pagination, classification: classificationMetrics, comparison: comparisonMetrics, quality, indexDiagnostics, recovery: recoveryMetrics });
@@ -678,7 +716,7 @@ async function runShadow({ body, config, adminClient }: { body: Record<string, u
     if (finalizeError) throw finalizeError;
     const { error: healthUpdateError } = await adminClient.from("v2_source_health").upsert({ source_config_id: config.id, status: runStatus === "succeeded" ? "healthy" : "degraded", circuit_state: zeroItem.circuit_should_open || qualityBlocked ? "open" : "closed", consecutive_zero_item_runs: zeroItem.consecutive_zero_item_runs, last_run_id: run.id, last_run_at: finished, last_success_at: runStatus === "succeeded" ? finished : health?.last_success_at || null, last_shadow_at: finished, last_http_status: fetched.response.status, last_latency_ms: fetched.latencyMs, last_observation_count: observations.length, last_error_code: runErrorCode, last_error_message: runErrorMessage, parser_health: parserHealth, updated_at: finished }, { onConflict: "source_config_id" });
     if (healthUpdateError) throw healthUpdateError;
-    return json({ ok: runStatus === "succeeded", phase: "B", mode: "shadow", run_id: run.id, source: config.display_name, status: runStatus, fetched: fetchedCount, parsed: candidates.length, valid: validCount, invalid: invalidCount, duplicates: duplicateCount, observations: observations.length, enrichment: enrichmentMetrics, pagination, live_requests_made: fetchedCount + enrichmentMetrics.attempted, customer_visible_writes: 0, promote_count: 0, latency_ms: Date.now() - started }, runStatus === "succeeded" ? 200 : 207);
+    return json({ ok: runStatus === "succeeded", phase: "B", mode: "shadow", run_id: run.id, source: config.display_name, status: runStatus, fetched: fetchedCount, parsed: candidates.length, valid: validCount, invalid: invalidCount, duplicates: duplicateCount, observations: observations.length, enrichment: enrichmentMetrics, pagination, index_diagnostics: indexDiagnostics, classification: classificationMetrics, comparison: comparisonMetrics, live_requests_made: fetchedCount + enrichmentMetrics.attempted, customer_visible_writes: 0, promote_count: 0, matching_triggered: false, ai_triggered: false, communications_triggered: false, latency_ms: Date.now() - started }, runStatus === "succeeded" ? 200 : 207);
   } catch (error) {
     const code = errorCode(error);
     await adminClient.from("v2_ingestion_runs").update({ status: code === "V2_RUN_DEADLINE" ? "timed_out" : "failed", error_count: 1, error_code: code || "V2_SHADOW_ERROR", error_message: errorMessage(error), finished_at: new Date().toISOString() }).eq("id", run.id);
@@ -705,6 +743,44 @@ async function runReykjavikRoutineProduction({ body, adminClient }: { body: Reco
   });
   if (admissionError) throw admissionError;
   return json({ ...runResult, action: "run_reykjavik_production", routine_admission: admission, customer_visible_writes: 0, matching_triggered: false, downstream_triggered: false });
+}
+
+async function runConsensaShadowAutomation({ body, adminClient }: { body: Record<string, unknown>; adminClient: any }) {
+  if (String(body.source_key || "") !== CONSENSA_SOURCE_KEY) {
+    return json({ error: "Only Consensa shadow automation is allowed by this action", code: "V2_CONSENSA_SHADOW_SOURCE_NOT_ALLOWED" }, 403);
+  }
+  const { data: config, error: configError } = await adminClient.from("v2_source_configs").select("*").eq("source_key", CONSENSA_SOURCE_KEY).single();
+  if (configError) throw configError;
+  const safeState = config.mode === "shadow"
+    && config.production_shadow_enabled === true
+    && config.promotion_approved !== true
+    && config.production_canary_enabled !== true
+    && config.release_feature_enabled !== true
+    && config.release_approved !== true
+    && config.routine_production_enabled !== true
+    && config.parser_name === "consensa-html-index"
+    && config.parser_version === "1.0.0"
+    && config.endpoint_url === "https://www.consensa.is/utbod"
+    && config.settings?.shadow_automation_enabled === true
+    && config.settings?.access_policy?.automated_live_access_cleared === true
+    && config.settings?.access_policy?.public_html_only === true
+    && config.settings?.access_policy?.wix_internal_api_requests === false
+    && config.settings?.access_policy?.tendsign_requests === false;
+  if (!safeState) {
+    return json({ error: "Consensa shadow automation is disabled or the source state is unsafe", code: "V2_CONSENSA_SHADOW_DISABLED" }, 409);
+  }
+  const response = await runShadow({ body: { ...body, trigger_type: "automation" }, config, adminClient });
+  const result = await response.clone().json();
+  return json({
+    ...result,
+    action: "run_consensa_shadow_automation",
+    observation_only: true,
+    customer_visible_writes: 0,
+    promote_count: 0,
+    matching_triggered: false,
+    ai_triggered: false,
+    communications_triggered: false,
+  }, response.status);
 }
 
 async function runGardabaerRoutineProduction({ body, adminClient }: { body: Record<string, unknown>; adminClient: any }) {

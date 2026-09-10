@@ -22,10 +22,12 @@ const config = Object.freeze({
   release_approved: false,
 });
 
-test("production Reykjavík shadow gate permits only the exact dormant source configuration", () => {
+test("production shadow gate permits only the explicitly allowlisted source configurations", () => {
   assert.equal(PRODUCTION_PROJECT_REF, "asojxjbsgqbfpbepojzh");
-  assert.deepEqual(PRODUCTION_SHADOW_SOURCE_KEYS, ["reykjavik-utbod-v2"]);
+  assert.deepEqual(PRODUCTION_SHADOW_SOURCE_KEYS, ["reykjavik-utbod-v2", "consensa-utbod-v2"]);
   assert.equal(assertProductionShadowAllowed({ isProduction: true, sourceKey: config.source_key, config }), true);
+  const consensaConfig = { ...config, source_key: "consensa-utbod-v2" };
+  assert.equal(assertProductionShadowAllowed({ isProduction: true, sourceKey: consensaConfig.source_key, config: consensaConfig }), true);
   assert.equal(isExactSupabaseProject("https://asojxjbsgqbfpbepojzh.supabase.co", PRODUCTION_PROJECT_REF), true);
   assert.equal(isExactSupabaseProject("https://asojxjbsgqbfpbepojzh.supabase.co.attacker.example", PRODUCTION_PROJECT_REF), false);
   assert.equal(isExactSupabaseProject("not-a-url", PRODUCTION_PROJECT_REF), false);

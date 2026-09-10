@@ -1,5 +1,5 @@
 export const PRODUCTION_PROJECT_REF = "asojxjbsgqbfpbepojzh";
-export const PRODUCTION_SHADOW_SOURCE_KEYS = Object.freeze(["reykjavik-utbod-v2"]);
+export const PRODUCTION_SHADOW_SOURCE_KEYS = Object.freeze(["reykjavik-utbod-v2", "consensa-utbod-v2"]);
 
 const productionShadowSources = new Set(PRODUCTION_SHADOW_SOURCE_KEYS);
 

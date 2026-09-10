@@ -12,6 +12,7 @@ export const THREE_SOURCE_KEYS = Object.freeze({
   LANDSNET: "landsnet-utbod-v2",
   VEITUR: "veitur-utbod-v2",
   ORKUVEITAN: "orkuveitan-utbod-v2",
+  CONSENSA: "consensa-utbod-v2",
 });
 
 const UTBODSVEFUR_SOURCE_BUYERS = Object.freeze({
@@ -49,6 +50,9 @@ export function getSourceClassificationContext(config) {
   }
   if (sourceKey === THREE_SOURCE_KEYS.GARDABAER) {
     return { source_type: "municipal_procurement_portal", connector_type: "municipal_html_index", source_organisation: "Garðabær procurement" };
+  }
+  if (sourceKey === THREE_SOURCE_KEYS.CONSENSA) {
+    return { source_type: "procurement_consultant_tender_page", connector_type: "public_procurement_html_index", source_organisation: "Consensa" };
   }
   if (sourceKey === THREE_SOURCE_KEYS.BORGARBYGGD) {
     return { source_type: "municipal_procurement_portal", connector_type: "wordpress_procurement_category", source_organisation: "Borgarbyggð procurement" };
@@ -215,7 +219,9 @@ export function isLikelyProcurementCandidate(candidate, sourceKey, now = new Dat
 
 export function applySourcePredictionPolicy(prediction, observation, config, now = new Date()) {
   const sourceKey = String(config?.source_key || "");
-  let adjusted = sourceKey === THREE_SOURCE_KEYS.RIKISKAUP
+  let adjusted = sourceKey === THREE_SOURCE_KEYS.CONSENSA
+    ? applyConsensaProcurementType(prediction, observation, now)
+    : sourceKey === THREE_SOURCE_KEYS.RIKISKAUP
     ? applyRikiskaupProcurementType(prediction, observation)
     : sourceKey === THREE_SOURCE_KEYS.REYKJAVIK
       ? applyReykjavikProcurementType(prediction, observation)
@@ -238,6 +244,27 @@ export function applySourcePredictionPolicy(prediction, observation, config, now
     adjusted.requires_admin_review = true;
   }
   return { prediction: adjusted, category };
+}
+
+function applyConsensaProcurementType(prediction, observation, now) {
+  const payload = observation?.safe_source_payload || {};
+  const deadline = String(observation?.deadline || "");
+  const today = new Date(now).toISOString().slice(0, 10);
+  const allowedUrl = (() => {
+    try {
+      const url = new URL(String(observation?.canonical_url || observation?.discovered_url || ""));
+      return url.protocol === "https:" && ["consensa.is", "www.consensa.is"].includes(url.hostname.toLowerCase()) && (url.pathname === "/utbod" || /^\/projects\//i.test(url.pathname));
+    } catch { return false; }
+  })();
+  const stableIdentity = Boolean(observation?.procurement_reference || payload.tendsign_notice_id || payload.canonical_url_source === "public_sitemap");
+  const deadlineAt = payload.deadline_at ? Date.parse(payload.deadline_at) : NaN;
+  const futureDeadline = deadline ? Number.isFinite(deadlineAt) ? deadlineAt > new Date(now).getTime() : deadline > today : false;
+  const complete = Boolean(futureDeadline && observation?.buyer && stableIdentity && allowedUrl && payload.admission_eligible === true);
+  if (!complete) {
+    return mappedPrediction(prediction, deadline && !futureDeadline ? "completed" : "uncertain", false, !deadline || !observation?.buyer || !stableIdentity || !allowedUrl,
+      deadline && !futureDeadline ? "Consensa tender deadline has expired." : "Consensa observation lacks a required future deadline, buyer, stable identity, procurement evidence, or valid public source URL.");
+  }
+  return mappedPrediction(prediction, "open_competition", true, false, "Consensa publishes a clear tender invitation with a buyer, stable identity, and explicit future deadline.");
 }
 
 export function applyBorgarbyggdSourceStatus(candidates, now = new Date()) {

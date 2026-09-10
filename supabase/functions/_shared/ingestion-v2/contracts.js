@@ -119,7 +119,9 @@ export function assertValidObservation(observation) {
 }
 
 export function validateCandidate(candidate) {
-  const errors = [];
+  const errors = Array.isArray(candidate?.validation_errors)
+    ? candidate.validation_errors.map((value) => String(value || "").trim()).filter(Boolean)
+    : [];
   if (!clean(candidate?.external_id)) errors.push("external_id_required");
   if (!clean(candidate?.title)) errors.push("title_required");
   if (!clean(candidate?.discovered_url) && !clean(candidate?.canonical_url)) errors.push("source_url_required");
