@@ -1,8 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import {
   buildInternalMatchAlertEmail,
+  INTERNAL_ALERT_COMPANY_IDS,
+  internalAlertCompanyName,
   isAuthorizedAutomationRequest,
-  TARGET_COMPANY_ID,
 } from "../_shared/internal-match-alerts.js";
 
 const jsonHeaders = { "Content-Type": "application/json" };
@@ -38,7 +39,7 @@ Deno.serve(async (request) => {
   for (const alert of alerts || []) {
     let providerStatus = null;
     try {
-      if (alert.company_id !== TARGET_COMPANY_ID) throw new Error("Alert company is outside configured scope.");
+      if (!INTERNAL_ALERT_COMPANY_IDS.includes(alert.company_id)) throw new Error("Alert company is outside configured scope.");
       const { data: match, error: matchError } = await supabase
         .from("opportunity_matches")
         .select("id, company_id, opportunity_id, match_score, match_reasons, safety_status, alert_eligible, review_required")
@@ -60,7 +61,7 @@ Deno.serve(async (request) => {
         : linkedSources && typeof linkedSources === "object" && "name" in linkedSources
           ? String((linkedSources as { name?: unknown }).name || "")
           : "";
-      const email = buildInternalMatchAlertEmail({ alert, match, opportunity, sourceName });
+      const email = buildInternalMatchAlertEmail({ alert, match, opportunity, sourceName, companyName: internalAlertCompanyName(alert.company_id) });
       const response = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: {
