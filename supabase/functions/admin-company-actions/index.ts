@@ -100,8 +100,13 @@ Deno.serve(async (req) => {
       return json({ ok: true, action, ...result });
     }
     if (!isUuid(companyId)) return jsonError("A valid companyId is required.", "INVALID_COMPANY_ID", 400);
-    if (!["refresh_matches", "generate_report", "review_match", "mark_report_sent", "invite_customer", "revoke_customer_access", "update_company_profile", "update_company_matching_profile", "upsert_match_decision", "upsert_evaluation_label"].includes(action)) {
+    if (!["refresh_matches", "generate_report", "review_match", "mark_report_sent", "invite_customer", "revoke_customer_access", "update_company_profile", "update_company_matching_profile", "upsert_match_decision", "upsert_evaluation_label", "get_alert_status"].includes(action)) {
       return jsonError("Unsupported action", "UNSUPPORTED_ACTION", 400, { action });
+    }
+
+    if (action === "get_alert_status") {
+      const result = await getAdminCompanyAlertStatus(adminClient, companyId);
+      return json({ ok: true, action, ...result });
     }
 
     if (action === "update_company_profile") {
@@ -903,6 +908,120 @@ async function reviewOpportunityMatch(
     opportunity_id: data.opportunity_id,
     safety_status: data.safety_status,
     message: approved ? "Match approved for customer reports." : "Match rejected and hidden for this company.",
+  };
+}
+
+async function getAdminCompanyAlertStatus(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+) {
+  const [companyResult, subscriptionResult, latestSentResult, pendingResult, failedResult, latestFailureResult, latestAttemptResult] = await Promise.all([
+    supabase
+      .from("companies")
+      .select("id, notification_email, auto_alert_mode")
+      .eq("id", companyId)
+      .maybeSingle(),
+    supabase
+      .from("internal_match_alert_subscriptions")
+      .select("enabled, recipient_secret_name, updated_at")
+      .eq("alert_type", "new_qualifying_match")
+      .eq("company_id", companyId)
+      .maybeSingle(),
+    supabase
+      .from("internal_match_alert_outbox")
+      .select("id, status, sent_at, updated_at, provider_message_id, opportunity_id, opportunities(title)")
+      .eq("alert_type", "new_qualifying_match")
+      .eq("company_id", companyId)
+      .eq("status", "sent")
+      .order("sent_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("internal_match_alert_outbox")
+      .select("id", { count: "exact", head: true })
+      .eq("alert_type", "new_qualifying_match")
+      .eq("company_id", companyId)
+      .in("status", ["queued", "processing"]),
+    supabase
+      .from("internal_match_alert_outbox")
+      .select("id", { count: "exact", head: true })
+      .eq("alert_type", "new_qualifying_match")
+      .eq("company_id", companyId)
+      .eq("status", "failed"),
+    supabase
+      .from("internal_match_alert_outbox")
+      .select("id, status, failed_at, updated_at, last_error, attempt_count, opportunity_id, opportunities(title)")
+      .eq("alert_type", "new_qualifying_match")
+      .eq("company_id", companyId)
+      .eq("status", "failed")
+      .order("failed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("internal_match_alert_outbox")
+      .select("id, status, queued_at, processing_at, sent_at, failed_at, updated_at")
+      .eq("alert_type", "new_qualifying_match")
+      .eq("company_id", companyId)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  const failedResultRows = [
+    ["company", companyResult],
+    ["subscription", subscriptionResult],
+    ["latest sent", latestSentResult],
+    ["pending", pendingResult],
+    ["failed", failedResult],
+    ["latest failure", latestFailureResult],
+    ["latest attempt", latestAttemptResult],
+  ].find(([, result]) => result.error);
+  if (failedResultRows) throw failedResultRows[1].error;
+  if (!companyResult.data) throw new Error("Company not found.");
+
+  const subscription = subscriptionResult.data;
+  const latestSent = latestSentResult.data;
+  const latestFailure = latestFailureResult.data;
+  const notificationEmail = String(companyResult.data.notification_email || "").trim();
+  const autoAlertMode = String(companyResult.data.auto_alert_mode || "dashboard_only");
+  return {
+    company_id: companyId,
+    operator_alert: {
+      enabled: subscription?.enabled === true,
+      destination: subscription?.recipient_secret_name === "INTERNAL_MATCH_ALERT_EMAIL"
+        ? "Configured via INTERNAL_MATCH_ALERT_EMAIL"
+        : "Not configured",
+      updated_at: subscription?.updated_at || null,
+    },
+    last_alert: latestSent ? {
+      status: "sent",
+      sent_at: latestSent.sent_at || latestSent.updated_at || null,
+      opportunity_title: Array.isArray(latestSent.opportunities)
+        ? latestSent.opportunities[0]?.title || null
+        : latestSent.opportunities?.title || null,
+      provider_message_id: latestSent.provider_message_id || null,
+    } : null,
+    outbox: {
+      pending_count: pendingResult.count || 0,
+      failed_count: failedResult.count || 0,
+      latest_attempt_at: latestAttemptResult.data?.processing_at
+        || latestAttemptResult.data?.sent_at
+        || latestAttemptResult.data?.failed_at
+        || latestAttemptResult.data?.updated_at
+        || null,
+      latest_failure: latestFailure ? {
+        status: "failed",
+        failed_at: latestFailure.failed_at || latestFailure.updated_at || null,
+        opportunity_title: Array.isArray(latestFailure.opportunities)
+          ? latestFailure.opportunities[0]?.title || null
+          : latestFailure.opportunities?.title || null,
+        reason: latestFailure.last_error || null,
+        attempt_count: latestFailure.attempt_count || 0,
+      } : null,
+    },
+    customer_automation: {
+      automatic_tender_emails: Boolean(notificationEmail && autoAlertMode !== "dashboard_only"),
+      automatic_reports_notifications: Boolean(notificationEmail && autoAlertMode !== "dashboard_only"),
+    },
   };
 }
 

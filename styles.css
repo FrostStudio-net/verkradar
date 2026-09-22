@@ -3013,6 +3013,56 @@ select option:checked {
   align-items: stretch;
 }
 
+.admin-alert-status-panel {
+  min-width: 0;
+}
+
+.admin-alert-status-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.admin-alert-status-list > div {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.035);
+}
+
+.admin-alert-status-list dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.admin-alert-status-list dd {
+  margin: 4px 0 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.admin-alert-status-list small,
+.admin-alert-status-panel small {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.admin-alert-status-panel h4 {
+  margin: 16px 0 4px;
+}
+
+.admin-alert-status-panel p {
+  margin: 4px 0;
+}
+
+.admin-alert-status-error {
+  color: var(--danger);
+}
+
 .admin-company-modal .modal-header {
   align-items: flex-start;
   padding: 18px 28px 15px;
@@ -7131,6 +7181,10 @@ body.modal-open {
   main.app-main.route-admin .admin-review-card-top {
     grid-template-columns: minmax(0, 1fr);
     gap: 10px;
+  }
+
+  main.app-main.route-admin .admin-alert-status-list {
+    grid-template-columns: 1fr;
   }
 
   main.app-main.route-admin .admin-review-title-block p {

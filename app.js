@@ -296,6 +296,7 @@ let state = {
   adminCompaniesLoading: false,
   adminCompaniesLoaded: false,
   adminCompaniesError: null,
+  adminAlertStatuses: {},
   adminReviewMatches: [],
   adminReviewLoading: false,
   adminReviewLoaded: false,
@@ -611,6 +612,7 @@ function clearLocalProfileState() {
   state.adminCompaniesLoading = false;
   state.adminCompaniesLoaded = false;
   state.adminCompaniesError = null;
+  state.adminAlertStatuses = {};
   clearAdminCompanyDetailsState();
   state.lastMatchedAt = null;
 }
@@ -642,6 +644,7 @@ function clearAdminAccessState() {
   state.v2RoutineProductionResult = null;
   state.adminCompanies = [];
   state.adminCompaniesLoaded = false;
+  state.adminAlertStatuses = {};
   state.adminReviewMatches = [];
   state.adminReviewLoaded = false;
   state.importedTedOpportunities = [];
@@ -1229,6 +1232,7 @@ document.addEventListener("click", async (event) => {
     if (state.selectedAdminCompanyId && state.selectedAdminCompanyId !== id && !confirmDiscardAdminCompanyProfileChanges()) return;
     openAdminCompanyDetails(id);
     render();
+    loadAdminCompanyAlertStatus(id);
   }
   if (name === "close-admin-company") {
     if (!confirmDiscardAdminCompanyProfileChanges()) return;
@@ -2969,6 +2973,29 @@ function openAdminCompanyDetails(companyId) {
     state.adminCompanyDetailScrollTop = 0;
   }
   state.selectedAdminCompanyId = nextCompanyId;
+}
+
+async function loadAdminCompanyAlertStatus(companyId) {
+  if (!state.isAdmin || !companyId || state.adminAlertStatuses?.[companyId]?.loading === true) return;
+  state.adminAlertStatuses = {
+    ...(state.adminAlertStatuses || {}),
+    [companyId]: { loading: true, data: null, error: null }
+  };
+  render();
+  try {
+    const data = await runAdminCompanyAction(companyId, "get_alert_status");
+    state.adminAlertStatuses = {
+      ...(state.adminAlertStatuses || {}),
+      [companyId]: { loading: false, data, error: null }
+    };
+  } catch (error) {
+    console.error("Failed to load admin alert status:", error);
+    state.adminAlertStatuses = {
+      ...(state.adminAlertStatuses || {}),
+      [companyId]: { loading: false, data: null, error: formatSupabaseError(error) }
+    };
+  }
+  if (state.selectedAdminCompanyId === companyId) render();
 }
 
 function clearAdminCompanyDetailsState() {
@@ -10825,6 +10852,8 @@ function renderAdminCompanyDetails(company) {
               changes: company.profileChanges || []
             })}
 
+            ${renderAdminCompanyAlertStatus(company)}
+
             <section class="side-panel admin-company-matches-panel">
               <h3>Latest matches</h3>
               ${renderAdminCompanyMatchList(company, { escapeHtml, renderMatchDecisionControls })}
@@ -10854,6 +10883,40 @@ function renderAdminCompanyDetails(company) {
         </div>
       </div>
     </div>
+  `;
+}
+
+function renderAdminCompanyAlertStatus(company) {
+  const stateForCompany = state.adminAlertStatuses?.[company.id] || null;
+  const data = stateForCompany?.data;
+  const latest = data?.last_alert;
+  const failure = data?.outbox?.latest_failure;
+  const pendingCount = Number(data?.outbox?.pending_count || 0);
+  const failedCount = Number(data?.outbox?.failed_count || 0);
+  const currentStatus = latest?.status || (pendingCount ? "pending" : failedCount ? "failed" : "No delivery yet");
+  const formatStatusDate = (value) => value ? escapeHtml(formatDateTime(value)) : "Not recorded";
+  if (stateForCompany?.error) {
+    return `<section class="side-panel admin-alert-status-panel"><h3>Operator alerts</h3><p class="admin-alert-status-error">Unable to load alert status. ${escapeHtml(stateForCompany.error)}</p></section>`;
+  }
+  if (stateForCompany?.loading || !data) {
+    return `<section class="side-panel admin-alert-status-panel"><h3>Operator alerts</h3><p>Loading alert status...</p></section>`;
+  }
+  return `
+    <section class="side-panel admin-alert-status-panel" aria-labelledby="admin-alert-status-title-${escapeHtml(company.id)}">
+      <h3 id="admin-alert-status-title-${escapeHtml(company.id)}">Operator alerts</h3>
+      <dl class="admin-alert-status-list">
+        <div><dt>Enabled</dt><dd><span class="status-pill ${data.operator_alert?.enabled ? "is-success" : "is-disabled"}">${data.operator_alert?.enabled ? "Yes" : "No"}</span></dd></div>
+        <div><dt>Destination</dt><dd>${escapeHtml(data.operator_alert?.destination || "Not configured")}</dd></div>
+        <div><dt>Last sent</dt><dd>${latest ? `${formatStatusDate(latest.sent_at)}${latest.opportunity_title ? `<br><small>${escapeHtml(latest.opportunity_title)}</small>` : ""}` : "Not recorded"}</dd></div>
+        <div><dt>Last status</dt><dd>${escapeHtml(currentStatus)}</dd></div>
+        <div><dt>Last attempt</dt><dd>${formatStatusDate(data.outbox?.latest_attempt_at)}</dd></div>
+        <div><dt>Pending</dt><dd>${pendingCount}</dd></div>
+        <div><dt>Failed</dt><dd>${failedCount}${failure?.reason ? `<br><small>${escapeHtml(failure.reason)}</small>` : ""}</dd></div>
+      </dl>
+      <h4>Customer automatic emails</h4>
+      <p>${data.customer_automation?.automatic_tender_emails ? "Enabled" : "Disabled"}</p>
+      <p>Reports / customer notifications: ${data.customer_automation?.automatic_reports_notifications ? "Enabled" : "Disabled"}</p>
+    </section>
   `;
 }
 
