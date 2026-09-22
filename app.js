@@ -10885,7 +10885,7 @@ function renderAdminOpportunityRow(opp) {
   const staleReason = opp.rawPayload?.stale_reason || (staleInfo.isStale ? staleInfo.reason : "");
   const adminSourceUrl = getSafeExternalUrl(opp.url || opp.rawPayload?.source_url || "");
   return `
-    <div class="admin-row">
+    <div class="admin-row admin-opportunity-row">
       <div>
         <h3>${escapeHtml(opp.title)}</h3>
         <div class="admin-opportunity-review-meta">

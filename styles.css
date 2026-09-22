@@ -4631,6 +4631,38 @@ body.modal-open {
   border-bottom: 1px solid var(--line);
 }
 
+/* Keep the opportunity details readable when the classification controls wrap.
+   The unconstrained auto track previously sized itself from the action buttons,
+   leaving the title/metadata column with only a sliver of space. */
+.admin-opportunity-row {
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 320px);
+  align-items: start;
+}
+
+.admin-opportunity-row > :first-child,
+.admin-opportunity-row .admin-row-actions {
+  min-width: 0;
+}
+
+.admin-opportunity-row .admin-row-actions {
+  width: 100%;
+  align-content: start;
+}
+
+.admin-opportunity-row h3,
+.admin-opportunity-row p,
+.admin-opportunity-row a {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.admin-opportunity-row .admin-row-actions .btn {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .admin-row h3 {
   margin: 0 0 6px;
   line-height: 1.1;
