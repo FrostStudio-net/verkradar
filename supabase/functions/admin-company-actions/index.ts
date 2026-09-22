@@ -929,7 +929,7 @@ async function getAdminCompanyAlertStatus(
       .maybeSingle(),
     supabase
       .from("internal_match_alert_outbox")
-      .select("id, status, sent_at, updated_at, provider_message_id, opportunity_id, opportunities(title)")
+      .select("id, status, sent_at, updated_at, provider_message_id, opportunity_id")
       .eq("alert_type", "new_qualifying_match")
       .eq("company_id", companyId)
       .eq("status", "sent")
@@ -950,7 +950,7 @@ async function getAdminCompanyAlertStatus(
       .eq("status", "failed"),
     supabase
       .from("internal_match_alert_outbox")
-      .select("id, status, failed_at, updated_at, last_error, attempt_count, opportunity_id, opportunities(title)")
+      .select("id, status, failed_at, updated_at, last_error, attempt_count, opportunity_id")
       .eq("alert_type", "new_qualifying_match")
       .eq("company_id", companyId)
       .eq("status", "failed")
@@ -978,6 +978,22 @@ async function getAdminCompanyAlertStatus(
   if (failedResultRows) throw failedResultRows[1].error;
   if (!companyResult.data) throw new Error("Company not found.");
 
+  const opportunityIds = [...new Set([
+    latestSentResult.data?.opportunity_id,
+    latestFailureResult.data?.opportunity_id,
+  ].filter(Boolean))];
+  const opportunityTitles = new Map<string, string>();
+  if (opportunityIds.length) {
+    const { data: opportunities, error: opportunitiesError } = await supabase
+      .from("opportunities")
+      .select("id, title")
+      .in("id", opportunityIds);
+    if (opportunitiesError) throw opportunitiesError;
+    for (const opportunity of opportunities || []) {
+      opportunityTitles.set(String(opportunity.id), String(opportunity.title || ""));
+    }
+  }
+
   const subscription = subscriptionResult.data;
   const latestSent = latestSentResult.data;
   const latestFailure = latestFailureResult.data;
@@ -995,9 +1011,7 @@ async function getAdminCompanyAlertStatus(
     last_alert: latestSent ? {
       status: "sent",
       sent_at: latestSent.sent_at || latestSent.updated_at || null,
-      opportunity_title: Array.isArray(latestSent.opportunities)
-        ? latestSent.opportunities[0]?.title || null
-        : latestSent.opportunities?.title || null,
+      opportunity_title: opportunityTitles.get(String(latestSent.opportunity_id)) || null,
       provider_message_id: latestSent.provider_message_id || null,
     } : null,
     outbox: {
@@ -1011,9 +1025,7 @@ async function getAdminCompanyAlertStatus(
       latest_failure: latestFailure ? {
         status: "failed",
         failed_at: latestFailure.failed_at || latestFailure.updated_at || null,
-        opportunity_title: Array.isArray(latestFailure.opportunities)
-          ? latestFailure.opportunities[0]?.title || null
-          : latestFailure.opportunities?.title || null,
+        opportunity_title: opportunityTitles.get(String(latestFailure.opportunity_id)) || null,
         reason: latestFailure.last_error || null,
         attempt_count: latestFailure.attempt_count || 0,
       } : null,

@@ -11,6 +11,8 @@ test("alert status is an admin-only read action with no dispatch path", () => {
   assert.match(edge, /action === "get_alert_status"/);
   assert.match(edge, /from\("internal_match_alert_subscriptions"\)/);
   assert.match(edge, /from\("internal_match_alert_outbox"\)/);
+  assert.match(edge, /from\("opportunities"\)/);
+  assert.doesNotMatch(edge, /internal_match_alert_outbox[\s\S]*opportunities\(title\)/);
   assert.match(edge, /recipient_secret_name === "INTERNAL_MATCH_ALERT_EMAIL"/);
   assert.doesNotMatch(edge, /RESEND_API_KEY/);
   assert.doesNotMatch(edge, /complete_internal_match_alert/);
