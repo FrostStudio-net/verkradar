@@ -10,6 +10,7 @@ import { applySourcePredictionPolicy, enrichCandidatesBounded, THREE_SOURCE_KEYS
 const fixtureRoot = new URL("../import-source-connectors-v2/_fixtures/", import.meta.url);
 const migrationUrl = new URL("../../migrations/20260831110000_vegagerdin_current_tender_phase_b_repair.sql", import.meta.url);
 const fuzzyRepairMigrationUrl = new URL("../../migrations/20261014090000_vegagerdin_fuzzy_identity_repair.sql", import.meta.url);
+const gapBackfillMigrationUrl = new URL("../../migrations/20261014093000_source_ingestion_gap_backfill.sql", import.meta.url);
 const functionUrl = new URL("../import-source-connectors-v2/index.ts", import.meta.url);
 
 test("Vegagerðin combined index keeps current and planned roles separate", async () => {
@@ -157,4 +158,13 @@ test("Vegagerðin fuzzy repair rejects short ambiguous titles without weakening 
   assert.match(sql, /compare_vegagerdin_shadow_observation/i);
   assert.match(sql, /v2_admit_vegagerdin_observation/i);
   assert.doesNotMatch(sql, /comparison,fuzzy_only[^\n]*0/i);
+});
+
+test("Vegagerðin global fuzzy aggregate cannot block a separately resolved observation", async () => {
+  const sql = await readFile(gapBackfillMigrationUrl, "utf8");
+  assert.match(sql, /comparison,fuzzy_only/i);
+  assert.match(sql, /o\.comparison_state not in \('legacy_match','v2_only'\)/i);
+  assert.match(sql, /match_type='fuzzy_review_candidate'/i);
+  assert.match(sql, /V2_VEGAGERDIN_PER_OBSERVATION_GATE_VERIFICATION_FAILED/i);
+  assert.doesNotMatch(sql, /conflicts[^\n]*replace/i);
 });
