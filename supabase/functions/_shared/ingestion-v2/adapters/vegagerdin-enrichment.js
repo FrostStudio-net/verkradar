@@ -8,7 +8,13 @@ export function extractVegagerdinDetailMetadata(html = "") {
   const headline = source.match(/<h1\b[^>]*class=["'][^"']*\bHeadline_headline__[^"']*["'][^>]*>([\s\S]*?)<\/h1>/i)?.[1] || "";
   const title = stripHtml(headline.replace(/<span\b[\s\S]*?<\/span>/i, "")) || null;
   const intro = extractBalancedDivByClass(source, "PageHeader_intro__");
-  const description = stripHtml(intro) || null;
+  // The current Next.js tender template serializes the actual notice body in
+  // React Flight data rather than rendering it inside PageHeader_intro. Read
+  // those page-local HTML fragments and retain the most complete body. This is
+  // intentionally limited to HTML-bearing Flight strings; navigation and
+  // metadata chunks are ignored.
+  const articleBody = extractNextFlightTenderBody(source);
+  const description = longestText([intro, articleBody]) || null;
   // Current pages usually place the submission deadline in the article body,
   // outside PageHeader_intro. The deadline extractor itself requires an
   // explicit submission phrase, so searching this page-local HTML is safe.
@@ -29,12 +35,38 @@ export function extractVegagerdinDetailMetadata(html = "") {
     source_status: sourceStatus,
     lifecycle_label: currentMilestone,
     procurement_type: procurementType,
-    request_for_bids: sourceStatus === "active" && Boolean(deadline) && /(?:býður|óskar).{0,80}(?:út|eftir\s+tilboðum)|útboðsgögn/i.test(description || ""),
+    request_for_bids: sourceStatus === "active" && Boolean(deadline) && /(?:býður|óskar?).{0,80}(?:út|eftir\s+tilboðum)|útboðsgögn/i.test(description || ""),
     follow_up: ["opened", "completed", "cancelled"].includes(sourceStatus),
     canonical_url: canonicalUrl,
     identity_basis: reference ? "explicit_tender_reference" : canonicalUrl ? "canonical_path" : null,
     enrichment_status: hasFields ? "enriched" : "no_supported_fields",
   };
+}
+
+export function extractNextFlightTenderBody(html = "") {
+  const fragments = [];
+  const scriptPattern = /self\.__next_f\.push\(\[1,"((?:\\.|[^"\\])*)"\]\)<\/script>/g;
+  for (const match of String(html || "").matchAll(scriptPattern)) {
+    let decoded = "";
+    try {
+      decoded = JSON.parse(`"${match[1]}"`);
+    } catch {
+      continue;
+    }
+    if (!/<(?:p|ul|ol)\b/i.test(decoded)) continue;
+    const text = stripHtml(decoded);
+    if (!/(?:útboð|tilboð|verkið|verkinu)/i.test(text)) continue;
+    fragments.push(decoded);
+  }
+  if (!fragments.length) return "";
+  return fragments.sort((left, right) => stripHtml(right).length - stripHtml(left).length)[0];
+}
+
+function longestText(values) {
+  return values
+    .map((value) => stripHtml(value))
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length)[0] || "";
 }
 
 export function normalizeVegagerdinLifecycle(value) {

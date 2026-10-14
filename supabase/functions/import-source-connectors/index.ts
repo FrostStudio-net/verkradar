@@ -12,6 +12,10 @@ import {
   filterLegacyAutomationConnectors,
   resolveLegacyConnectorAutomationBatch,
 } from "../_shared/legacy-connector-automation.js";
+import {
+  isSafeMosfellsbaerTenderUrl,
+  parseMosfellsbaerTenderDetail,
+} from "../_shared/mosfellsbaer-enrichment.js";
 
 type ConnectorType = "rss_feed" | "wordpress_rest" | "page_monitor_allowed";
 
@@ -258,6 +262,7 @@ const MAX_KEYWORD_DECISION_SAMPLES = 20;
 const IMPORT_DEBUG_VERSION = "source-connectors-skip-debug-v2";
 const RIKISKAUP_SOURCE_NAME = "Ríkiskaup / island.is procurement";
 const VEGAGERDIN_SOURCE_NAME = "Vegagerðin";
+const MOSFELLSBAER_SOURCE_NAME = "Mosfellsbær Municipality";
 const VEGAGERDIN_PROJECT_EXTRACTION_METHOD = "vegagerdin_article_project_parser";
 const GARDABAER_SOURCE_NAME = "Garðabær Municipality";
 const FAXAFLOAHAFNIR_SOURCE_NAME = "Faxaflóahafnir útboð";
@@ -1618,6 +1623,9 @@ async function normalizeConnectorItems(
     await enrichRikiskaupOpportunityFromDetailPage(parent);
     applyRikiskaupMetadataFallback(parent);
   }
+  if (source.name === MOSFELLSBAER_SOURCE_NAME && connector.connector_type === "rss_feed") {
+    await enrichMosfellsbaerOpportunityFromDetailPage(parent);
+  }
 
   const children = await extractVegagerdinArticleProjects(item, connector, source, parent);
   if (!children.length) return [parent];
@@ -1632,6 +1640,48 @@ async function normalizeConnectorItems(
   parent.keywords = uniqueStrings([...parent.keywords, "project roundup", "útboðsverk"]);
 
   return [parent, ...children];
+}
+
+async function enrichMosfellsbaerOpportunityFromDetailPage(opportunity: NormalizedOpportunity) {
+  const requestedUrl = String(opportunity.url || "");
+  if (!isSafeMosfellsbaerTenderUrl(requestedUrl)) return;
+  try {
+    const html = await fetchTextWithTimeout(requestedUrl, 7000);
+    const detail = parseMosfellsbaerTenderDetail(html, requestedUrl);
+    if (!detail.has_useful_detail || !detail.description) return;
+    const canonicalUrl = detail.canonical_url || requestedUrl;
+    const extractedDeadline = extractDeadline(`${opportunity.title} ${detail.description}`);
+    opportunity.description = detail.description;
+    opportunity.buyer = detail.buyer;
+    opportunity.url = canonicalUrl;
+    if (extractedDeadline.date) {
+      opportunity.deadline = extractedDeadline.date;
+      opportunity.status = daysUntil(extractedDeadline.date) < 0 ? "hidden" : "open";
+    }
+    opportunity.raw_payload = {
+      ...opportunity.raw_payload,
+      buyer: detail.buyer,
+      extracted_buyer: detail.buyer,
+      detail_page_enriched: true,
+      detail_page_url: canonicalUrl,
+      canonical_source_url: canonicalUrl,
+      ...(extractedDeadline.date ? {
+        extracted_deadline_text: extractedDeadline.rawText,
+        extracted_deadline_source: "official_detail_page",
+        bid_deadline: extractedDeadline.date,
+        deadline_at: buildDeadlineAt(extractedDeadline.date, extractedDeadline.rawText),
+        bid_deadline_at: buildDeadlineAt(extractedDeadline.date, extractedDeadline.rawText),
+        quality_status: "confirmed_tender",
+        opportunity_intent: "confirmed_tender",
+        hidden_from_reports: false,
+      } : {}),
+    };
+  } catch (error) {
+    opportunity.raw_payload = {
+      ...opportunity.raw_payload,
+      detail_page_enrichment_error: errorMessage(error),
+    };
+  }
 }
 
 function normalizeConnectorItem(
@@ -2482,6 +2532,10 @@ async function enrichOpportunityDeadlineFromSourcePage(opportunity: NormalizedOp
       await enrichRikiskaupOpportunityFromDetailPage(opportunity);
       return;
     }
+    if (host === "mos.is") {
+      await enrichMosfellsbaerOpportunityFromDetailPage(opportunity);
+      return;
+    }
     const html = await fetchTextWithTimeout(pageUrl.toString(), 7000);
     const detail = parseGenericDeadlineDetailPage(html, pageUrl.toString(), sourceName);
     applyDeadlineDetailToOpportunity(opportunity, detail, pageUrl.toString());
@@ -2503,6 +2557,7 @@ function isSafeDeadlineReenrichmentHost(host: string) {
     "borgarbyggd.is",
     "dev.borgarbyggd.is",
     "arborg.is",
+    "mos.is",
   ].includes(host);
 }
 

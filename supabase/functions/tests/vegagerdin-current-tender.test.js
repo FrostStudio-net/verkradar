@@ -9,6 +9,7 @@ import { applySourcePredictionPolicy, enrichCandidatesBounded, THREE_SOURCE_KEYS
 
 const fixtureRoot = new URL("../import-source-connectors-v2/_fixtures/", import.meta.url);
 const migrationUrl = new URL("../../migrations/20260831110000_vegagerdin_current_tender_phase_b_repair.sql", import.meta.url);
+const fuzzyRepairMigrationUrl = new URL("../../migrations/20261014090000_vegagerdin_fuzzy_identity_repair.sql", import.meta.url);
 const functionUrl = new URL("../import-source-connectors-v2/index.ts", import.meta.url);
 
 test("Vegagerðin combined index keeps current and planned roles separate", async () => {
@@ -77,6 +78,20 @@ test("Vegagerðin detail deadline is recovered from article body singular tilbo�
   assert.equal(metadata.source_status, "active");
 });
 
+test("Vegagerðin detail recovers the full notice body from Next.js Flight data", () => {
+  const flightBody = `<p>Hafnir Norðuþings óska eftir tilboðum í verkið.</p><ul><li>Jarðvinna, fylling og þjöppun.</li><li>Byggja grjótgarð.</li></ul><p>Tilboði skal skila fyrir 27. október 2026.</p>`;
+  const encoded = JSON.stringify([1, flightBody]);
+  const metadata = extractVegagerdinDetailMetadata(`
+    <span class="Headline_eyebrow__x">Útboðsnúmer 26-141</span>
+    <h1 class="Headline_headline__x">Húsavík – Þvergarður</h1>
+    <li class="ProgressTracker_milestone__x ProgressTracker_current__x">1 Auglýst október 2026</li>
+    <script>self.__next_f.push(${encoded})</script>
+  `);
+  assert.match(metadata.description, /Jarðvinna, fylling og þjöppun/);
+  assert.equal(metadata.deadline, "2026-10-27");
+  assert.equal(metadata.request_for_bids, true);
+});
+
 test("Vegagerðin completed detail is follow-up and never actionable", async () => {
   const html = await readFile(new URL("vegagerdin-detail-followup.html", fixtureRoot), "utf8");
   const metadata = extractVegagerdinDetailMetadata(html);
@@ -131,4 +146,15 @@ test("Vegagerðin migration and runtime use current/planned HTML with global fai
   assert.match(source, /comparison_incomplete/);
   assert.match(sql, /optional_context_disabled/);
   assert.doesNotMatch(source, /from\("opportunities"\)\.insert/);
+});
+
+test("Vegagerðin fuzzy repair rejects short ambiguous titles without weakening exact identity gates", async () => {
+  const sql = await readFile(fuzzyRepairMigrationUrl, "utf8");
+  assert.match(sql, /length\(candidate\)\s*>=\s*20/i);
+  assert.match(sql, /regexp_split_to_array\(candidate/i);
+  assert.match(sql, /least\(length\(candidate\), length\(observation\)\)/i);
+  assert.match(sql, /similarity\(candidate, observation\)\s*>=\s*0\.84/i);
+  assert.match(sql, /compare_vegagerdin_shadow_observation/i);
+  assert.match(sql, /v2_admit_vegagerdin_observation/i);
+  assert.doesNotMatch(sql, /comparison,fuzzy_only[^\n]*0/i);
 });
