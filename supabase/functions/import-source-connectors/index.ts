@@ -1653,6 +1653,7 @@ async function enrichMosfellsbaerOpportunityFromDetailPage(opportunity: Normaliz
     const extractedDeadline = extractDeadline(`${opportunity.title} ${detail.description}`);
     opportunity.description = detail.description;
     opportunity.buyer = detail.buyer;
+    opportunity.location = detail.location;
     opportunity.url = canonicalUrl;
     if (extractedDeadline.date) {
       opportunity.deadline = extractedDeadline.date;
@@ -1662,6 +1663,9 @@ async function enrichMosfellsbaerOpportunityFromDetailPage(opportunity: Normaliz
       ...opportunity.raw_payload,
       buyer: detail.buyer,
       extracted_buyer: detail.buyer,
+      extracted_location: detail.location,
+      geography_evidence: "official_mosfellsbaer_detail_page",
+      description_quality: "official_human_readable_scope",
       detail_page_enriched: true,
       detail_page_url: canonicalUrl,
       canonical_source_url: canonicalUrl,
@@ -1764,7 +1768,7 @@ function normalizeConnectorItem(
     buyer,
     category,
     type: "tender",
-    description: description || title || `Imported from ${source.name}`,
+    description: description || title,
     deadline,
     published_date: publishedDate,
     location: inferIcelandicLocation(`${title} ${description} ${source.name}`),
@@ -1789,6 +1793,9 @@ function normalizeConnectorItem(
       buyer,
       quality_status: qualityStatus,
       opportunity_intent: opportunityIntent,
+      ...(source.name === RIKISKAUP_SOURCE_NAME && normalizeSearchText(description) === normalizeSearchText(title)
+        ? { description_quality: "title_only_no_meaningful_description" }
+        : {}),
       hidden_from_reports: isExpired || staleInfo.isStale || opportunityIntent === "news_context" || opportunityIntent === "not_opportunity",
       ...(isExpired ? {
         admin_report_status: "hidden",
@@ -2180,11 +2187,9 @@ function buildConnectorDescription(options: {
   if (bestText) return bestText;
 
   if (options.sourceName === RIKISKAUP_SOURCE_NAME) {
-    return [
-      "Útboðstilkynning flutt inn af Útboðsvef.",
-      options.category ? `Flokkur: ${options.category}.` : "",
-      "Opnið upprunasíðuna til að staðfesta kaupanda, skilafrest, kröfur og útboðsgögn.",
-    ].filter(Boolean).join(" ");
+    // Portal navigation copy is not procurement scope. Keep only the title as
+    // a conservative fallback so it cannot manufacture service evidence.
+    return options.title;
   }
 
   return options.title;

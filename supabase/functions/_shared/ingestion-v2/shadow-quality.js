@@ -149,6 +149,9 @@ export async function enrichCandidatesBounded(candidates, options) {
         description: candidate.description || metadata.description,
         deadline: candidate.deadline || metadata.deadline,
         buyer: candidate.buyer || metadata.buyer,
+        location: sourceKey === THREE_SOURCE_KEYS.VEGAGERDIN
+          ? metadata.location || candidate.location
+          : candidate.location || metadata.location,
         procurement_reference: candidate.procurement_reference || metadata.procurement_reference,
       }, metadata));
     } catch (error) {

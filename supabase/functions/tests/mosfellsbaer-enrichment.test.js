@@ -14,6 +14,7 @@ test("Mosfellsbær detail parser uses the official rich-text body and canonical 
     </div></div>
   `, url);
   assert.equal(detail.buyer, "Mosfellsbær");
+  assert.equal(detail.location, "Mosfellsbær / Höfuðborgarsvæðið");
   assert.equal(detail.canonical_url, url);
   assert.equal(detail.has_useful_detail, true);
   assert.match(detail.description, /Gröftur 180 m3/);

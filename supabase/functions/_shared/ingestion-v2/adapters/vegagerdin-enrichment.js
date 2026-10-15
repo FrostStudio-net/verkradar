@@ -25,11 +25,13 @@ export function extractVegagerdinDetailMetadata(html = "") {
     : ["opened", "completed", "cancelled"].includes(sourceStatus) ? "award_or_followup"
     : "unknown";
   const canonicalUrl = canonicalFromHtml(source);
+  const location = extractSupportedLocation(`${title || ""} ${description || ""}`);
   const hasFields = Boolean(reference || title || description || deadline || sourceStatus !== "unknown");
   return {
     title,
     procurement_reference: reference,
     buyer: "Vegagerðin",
+    location,
     description,
     deadline,
     source_status: sourceStatus,
@@ -53,13 +55,38 @@ export function extractNextFlightTenderBody(html = "") {
     } catch {
       continue;
     }
-    if (!/<(?:p|ul|ol)\b/i.test(decoded)) continue;
-    const text = stripHtml(decoded);
-    if (!/(?:útboð|tilboð|verkið|verkinu)/i.test(text)) continue;
-    fragments.push(decoded);
+    const htmlFragments = extractSerializedHtmlValues(decoded);
+    if (!htmlFragments.length && /<(?:p|ul|ol)\b/i.test(decoded)) htmlFragments.push(decoded);
+    for (const fragment of htmlFragments) {
+      const text = stripHtml(fragment);
+      if (!/(?:útboð|tilboð|verkið|verkinu)/i.test(text)) continue;
+      fragments.push(fragment);
+    }
   }
   if (!fragments.length) return "";
   return fragments.sort((left, right) => stripHtml(right).length - stripHtml(left).length)[0];
+}
+
+function extractSerializedHtmlValues(value) {
+  const fragments = [];
+  const pattern = /["']__html["']\s*:\s*("(?:\\.|[^"\\])*")/g;
+  for (const match of String(value || "").matchAll(pattern)) {
+    try {
+      const decoded = JSON.parse(match[1]);
+      if (/<(?:p|ul|ol)\b/i.test(decoded)) fragments.push(decoded);
+    } catch {
+      // Ignore malformed Flight properties. The outer payload remains usable.
+    }
+  }
+  return fragments;
+}
+
+function extractSupportedLocation(value) {
+  const text = normalize(value);
+  if (/husavik|nordurthing/.test(text)) return "Húsavík / Norðurþing / Norðurland eystra";
+  if (/reykjanes/.test(text)) return "Reykjanes / Suðurnes";
+  if (/hofudborgarsvaed/.test(text)) return "Höfuðborgarsvæðið";
+  return null;
 }
 
 function longestText(values) {

@@ -91,6 +91,29 @@ test("Vegagerðin detail recovers the full notice body from Next.js Flight data"
   assert.match(metadata.description, /Jarðvinna, fylling og þjöppun/);
   assert.equal(metadata.deadline, "2026-10-27");
   assert.equal(metadata.request_for_bids, true);
+  assert.equal(metadata.location, "Húsavík / Norðurþing / Norðurland eystra");
+});
+
+test("Vegagerðin detail unwraps serialized Flight HTML without retaining React data", () => {
+  const body = `<p>Vegagerðin býður hér með út þjónustu og viðhald veglýsingar á Reykjanesi.</p><p>Tilboði skal skila 27. október 2026.</p>`;
+  const flightValue = `1b:["$","div",null,{"dangerouslySetInnerHTML":{"__html":${JSON.stringify(body)}}}]`;
+  const encoded = JSON.stringify([1, flightValue]);
+  const metadata = extractVegagerdinDetailMetadata(`
+    <h1 class="Headline_headline__x">Þjónusta og viðhald veglýsingar á Reykjanesi</h1>
+    <li class="ProgressTracker_milestone__x ProgressTracker_current__x">1 Auglýst október 2026</li>
+    <script>self.__next_f.push(${encoded})</script>
+  `);
+  assert.match(metadata.description, /^Vegagerðin býður hér með út/);
+  assert.doesNotMatch(metadata.description, /dangerouslySetInnerHTML|\["\$"/);
+  assert.equal(metadata.location, "Reykjanes / Suðurnes");
+});
+
+test("Vegagerðin detail preserves explicit capital-area geography", () => {
+  const metadata = extractVegagerdinDetailMetadata(`
+    <h1 class="Headline_headline__x">Þjónusta og viðhald veglýsingar á höfuðborgarsvæðinu</h1>
+    <div class="PageHeader_intro__x"><p>Vegagerðin býður hér með út verkið.</p></div>
+  `);
+  assert.equal(metadata.location, "Höfuðborgarsvæðið");
 });
 
 test("Vegagerðin completed detail is follow-up and never actionable", async () => {

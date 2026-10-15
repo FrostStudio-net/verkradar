@@ -33,6 +33,7 @@ export function parseMosfellsbaerTenderDetail(html = "", fallbackUrl = "") {
   const canonicalUrl = isSafeMosfellsbaerTenderUrl(candidateUrl) ? new URL(candidateUrl).toString() : null;
   return {
     buyer: "Mosfellsbær",
+    location: "Mosfellsbær / Höfuðborgarsvæðið",
     description: description || null,
     canonical_url: canonicalUrl,
     has_useful_detail: description.length >= 80,
