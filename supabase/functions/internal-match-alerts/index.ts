@@ -1,8 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import {
   buildInternalMatchAlertEmail,
-  INTERNAL_ALERT_COMPANY_IDS,
-  internalAlertCompanyName,
   isAuthorizedAutomationRequest,
 } from "../_shared/internal-match-alerts.js";
 
@@ -39,10 +37,9 @@ Deno.serve(async (request) => {
   for (const alert of alerts || []) {
     let providerStatus = null;
     try {
-      if (!INTERNAL_ALERT_COMPANY_IDS.includes(alert.company_id)) throw new Error("Alert company is outside configured scope.");
       const { data: match, error: matchError } = await supabase
         .from("opportunity_matches")
-        .select("id, company_id, opportunity_id, match_score, match_reasons, safety_status, alert_eligible, review_required")
+        .select("id, company_id, opportunity_id, match_score, match_reasons, safety_status, review_required, companies(company_name)")
         .eq("company_id", alert.company_id)
         .eq("opportunity_id", alert.opportunity_id)
         .maybeSingle();
@@ -61,7 +58,14 @@ Deno.serve(async (request) => {
         : linkedSources && typeof linkedSources === "object" && "name" in linkedSources
           ? String((linkedSources as { name?: unknown }).name || "")
           : "";
-      const email = buildInternalMatchAlertEmail({ alert, match, opportunity, sourceName, companyName: internalAlertCompanyName(alert.company_id) });
+      const linkedCompanies = match.companies as unknown;
+      const companyName = Array.isArray(linkedCompanies)
+        ? String(linkedCompanies[0]?.company_name || "")
+        : linkedCompanies && typeof linkedCompanies === "object" && "company_name" in linkedCompanies
+          ? String((linkedCompanies as { company_name?: unknown }).company_name || "")
+          : "";
+      if (!companyName) throw new Error("Subscribed alert company no longer exists.");
+      const email = buildInternalMatchAlertEmail({ alert, match, opportunity, sourceName, companyName });
       const response = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: {

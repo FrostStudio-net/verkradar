@@ -19,12 +19,13 @@ select public.internal_alert_assert(
 insert into public.opportunities(id, source_id, external_id, title, buyer, deadline, status, procurement_stage,
   actionable_for_suppliers, requires_admin_review, phase_c_communication_hold, raw_payload)
 values
-('00000000-0000-4000-8000-000000000103','00000000-0000-4000-8000-000000000001','new-good','New qualifying match','Garðabær','2026-09-30','open','open_competition',true,false,false,'{}'),
-('00000000-0000-4000-8000-000000000104','00000000-0000-4000-8000-000000000001','low-score','Low score','Garðabær','2026-09-30','open','open_competition',true,false,false,'{}'),
-('00000000-0000-4000-8000-000000000105','00000000-0000-4000-8000-000000000001','review','Review required','Garðabær','2026-09-30','open','open_competition',true,false,false,'{}'),
-('00000000-0000-4000-8000-000000000106','00000000-0000-4000-8000-000000000001','other-company','Other company','Garðabær','2026-09-30','open','open_competition',true,false,false,'{}'),
-('00000000-0000-4000-8000-000000000107','00000000-0000-4000-8000-000000000001','disabled','Disabled subscription','Garðabær','2026-09-30','open','open_competition',true,false,false,'{}'),
-('00000000-0000-4000-8000-000000000108','00000000-0000-4000-8000-000000000001','enqueue-failure','Enqueue failure isolation','Garðabær','2026-09-30','open','open_competition',true,false,false,'{}');
+('00000000-0000-4000-8000-000000000103','00000000-0000-4000-8000-000000000001','new-good','New qualifying match','Garðabær','2099-09-30','open','open_competition',true,false,false,'{}'),
+('00000000-0000-4000-8000-000000000104','00000000-0000-4000-8000-000000000001','low-score','Low score','Garðabær','2099-09-30','open','open_competition',true,false,false,'{}'),
+('00000000-0000-4000-8000-000000000105','00000000-0000-4000-8000-000000000001','review','Review required','Garðabær','2099-09-30','open','open_competition',true,false,false,'{}'),
+('00000000-0000-4000-8000-000000000106','00000000-0000-4000-8000-000000000001','other-company','Other company','Garðabær','2099-09-30','open','open_competition',true,false,false,'{}'),
+('00000000-0000-4000-8000-000000000107','00000000-0000-4000-8000-000000000001','disabled','Disabled subscription','Garðabær','2099-09-30','open','open_competition',true,false,false,'{}'),
+('00000000-0000-4000-8000-000000000108','00000000-0000-4000-8000-000000000001','enqueue-failure','Enqueue failure isolation','Garðabær','2099-09-30','open','open_competition',true,false,false,'{}'),
+('00000000-0000-4000-8000-000000000109','00000000-0000-4000-8000-000000000001','subscribed-dashboard-only','Subscribed dashboard-only company','Garðabær','2099-09-30','open','open_competition',true,false,false,'{}');
 
 insert into public.opportunity_matches(id,company_id,opportunity_id,match_score,match_label,match_reasons,safety_status,alert_eligible,review_required)
 values ('00000000-0000-4000-8000-000000000203','cad6b69e-b021-447d-b637-31b2e8dbff2e','00000000-0000-4000-8000-000000000103',68,'Good match',array['service +10'], 'auto_approved',true,false);
@@ -48,6 +49,15 @@ values ('00000000-0000-4000-8000-000000000206','00000000-0000-4000-8000-00000000
 select public.internal_alert_assert(
   (select count(*)=0 from public.internal_match_alert_outbox where opportunity_id in ('00000000-0000-4000-8000-000000000104','00000000-0000-4000-8000-000000000105','00000000-0000-4000-8000-000000000106')),
   'low score, review-required, and unrelated company matches do not queue'
+);
+
+insert into public.internal_match_alert_subscriptions(alert_type,company_id,recipient_secret_name,enabled)
+values ('new_qualifying_match','00000000-0000-4000-8000-000000000099','INTERNAL_MATCH_ALERT_EMAIL',true);
+insert into public.opportunity_matches(id,company_id,opportunity_id,match_score,match_label,match_reasons,safety_status,alert_eligible,review_required)
+values ('00000000-0000-4000-8000-000000000209','00000000-0000-4000-8000-000000000099','00000000-0000-4000-8000-000000000109',80,'Other',array[]::text[], 'auto_approved',false,false);
+select public.internal_alert_assert(
+  (select count(*)=1 and bool_and(status='queued') from public.internal_match_alert_outbox where opportunity_id='00000000-0000-4000-8000-000000000109'),
+  'enabled subscription queues an internal alert even when customer alert_eligible is false'
 );
 
 update public.internal_match_alert_subscriptions set enabled=false where company_id='cad6b69e-b021-447d-b637-31b2e8dbff2e';

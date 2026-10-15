@@ -1,16 +1,4 @@
 export const PRODUCTION_PROJECT_REF = "asojxjbsgqbfpbepojzh";
-export const TARGET_COMPANY_ID = "cad6b69e-b021-447d-b637-31b2e8dbff2e";
-export const TARGET_COMPANY_NAME = "Garðaþjónusta";
-export const INTERNAL_ALERT_COMPANY_IDS = Object.freeze([
-  TARGET_COMPANY_ID,
-  "41941a6f-8ffc-46b9-8562-8982bf49d4b6",
-  "5fd8ec2e-9be4-4a64-b0f0-1c9cc12c9e9b",
-]);
-export const INTERNAL_ALERT_COMPANY_NAMES = Object.freeze({
-  [TARGET_COMPANY_ID]: TARGET_COMPANY_NAME,
-  "41941a6f-8ffc-46b9-8562-8982bf49d4b6": "Drenlagnir",
-  "5fd8ec2e-9be4-4a64-b0f0-1c9cc12c9e9b": "Fagurverk",
-});
 export const ALERT_TYPE = "new_qualifying_match";
 export const ADMIN_URL = "https://verkradar.is/#/admin";
 
@@ -43,10 +31,6 @@ export function resendIdempotencyKey(alert) {
   return `${ALERT_TYPE}/${alert.company_id}/${alert.opportunity_id}`;
 }
 
-export function internalAlertCompanyName(companyId) {
-  return INTERNAL_ALERT_COMPANY_NAMES[String(companyId || "")] || "VerkRadar fyrirtæki";
-}
-
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -75,7 +59,7 @@ export function buildInternalMatchAlertEmail({ alert, match, opportunity, source
     : "";
   const source = sourceName || opportunity.source_name || "Óþekkt heimild";
   const deadline = displayDate(opportunity.deadline);
-  const displayCompanyName = companyName || internalAlertCompanyName(alert.company_id);
+  const displayCompanyName = companyName || "VerkRadar fyrirtæki";
   const subject = `Ný VerkRadar samsvörun - ${displayCompanyName}: ${opportunity.title}`;
   const fields = [
     ["Fyrirtæki", displayCompanyName],

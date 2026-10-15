@@ -606,6 +606,17 @@ async function createCompanyFromTrialRequest(
     .single();
   if (companyError) throw companyError;
 
+  const { error: subscriptionError } = await supabase
+    .from("internal_match_alert_subscriptions")
+    .upsert({
+      alert_type: "new_qualifying_match",
+      company_id: company.id,
+      recipient_secret_name: "INTERNAL_MATCH_ALERT_EMAIL",
+      enabled: true,
+      updated_at: now,
+    }, { onConflict: "alert_type,company_id" });
+  if (subscriptionError) throw subscriptionError;
+
   await ensureCompanyOwnerMembership(supabase, {
     companyId: company.id,
     email: cleanProfile.contactEmail,
