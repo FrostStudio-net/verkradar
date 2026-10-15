@@ -163,6 +163,21 @@ test("global toasts dismiss immediately and stay clear of header and modal contr
   assert.match(css, /\.toast-close \{[\s\S]*?flex: 0 0 auto;[\s\S]*?width: 32px;[\s\S]*?height: 32px;/);
 });
 
+test("admin refresh uses one dismissible detailed notification clear of modal controls", () => {
+  const refreshStart = app.indexOf("async function refreshAdminCompanyMatches");
+  const refreshEnd = app.indexOf("async function generateAdminCompanyReport", refreshStart);
+  const refreshSource = app.slice(refreshStart, refreshEnd);
+
+  assert.ok(refreshStart >= 0 && refreshEnd > refreshStart);
+  assert.match(refreshSource, /text: `Refreshed \$\{refreshedCount\} eligible matches for \$\{company\.companyName\}\.\s*`/);
+  assert.doesNotMatch(refreshSource, /Company matches refreshed|showToast\(/);
+  assert.match(app, /if \(name === "close-admin-message"\) \{[\s\S]*?state\.adminMessage = null;[\s\S]*?render\(\);[\s\S]*?return;/);
+  assert.match(app, /class="admin-global-message-close"[\s\S]*?data-action="close-admin-message"[\s\S]*?aria-label="Close notification">×<\/button>/);
+  assert.match(css, /\.admin-global-message \{[\s\S]*?top: calc\(120px \+ env\(safe-area-inset-top, 0px\)\);[\s\S]*?right: 32px;[\s\S]*?display: flex;/);
+  assert.match(css, /\.admin-global-message-close \{[\s\S]*?width: 32px;[\s\S]*?height: 32px;/);
+  assert.match(css, /@media \(max-width: 768px\)[\s\S]*?\.admin-global-message-close \{[\s\S]*?width: 44px;[\s\S]*?height: 44px;/);
+});
+
 function hydratedAuthPlan(event, overrides = {}) {
   return getAuthStateChangePlan({
     event,

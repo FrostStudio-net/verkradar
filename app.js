@@ -1146,6 +1146,13 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  if (name === "close-admin-message") {
+    event.preventDefault();
+    state.adminMessage = null;
+    render();
+    return;
+  }
+
   if (name === "go") {
     event.preventDefault();
     state.profileMenuOpen = false;
@@ -3231,7 +3238,6 @@ async function refreshAdminCompanyMatches(companyId, options = {}) {
         type: "success",
         text: `Refreshed ${refreshedCount} eligible matches for ${company.companyName}.`
       };
-      showToast("Company matches refreshed", "success");
       render();
     }
     return payload;
@@ -9991,7 +9997,8 @@ function renderAdmin() {
 
     ${state.adminMessage ? `
       <div class="admin-message admin-global-message ${state.adminMessage.type === "error" ? "is-error" : "is-success"}" role="status" aria-live="polite">
-        ${escapeHtml(state.adminMessage.text)}
+        <span class="admin-global-message-text">${escapeHtml(state.adminMessage.text)}</span>
+        <button class="admin-global-message-close" type="button" data-action="close-admin-message" aria-label="Close notification">×</button>
       </div>
     ` : ""}
 
