@@ -2938,14 +2938,104 @@ select option:checked {
 
 .admin-filters {
   display: grid;
-  grid-template-columns: minmax(220px, 1.5fr) repeat(3, minmax(140px, 1fr)) auto auto;
-  gap: 10px;
-  margin: 18px 0 8px;
-  align-items: center;
+  gap: 12px;
+  align-items: end;
 }
 
 .admin-company-filters {
   grid-template-columns: minmax(260px, 1.5fr) repeat(3, minmax(150px, 1fr));
+  margin: 18px 0 8px;
+  align-items: center;
+}
+
+.admin-opportunity-filter-panel {
+  min-width: 0;
+  margin: 18px 0 20px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255,255,255,0.025);
+}
+
+.admin-opportunity-filter-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.admin-opportunity-filter-heading h3,
+.admin-opportunity-filter-heading p {
+  margin: 0;
+}
+
+.admin-opportunity-filter-primary {
+  grid-template-columns: minmax(220px, 1.7fr) repeat(5, minmax(120px, 1fr));
+  margin: 0;
+}
+
+.admin-opportunity-filter-secondary {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.35fr) minmax(0, 3fr) auto;
+  align-items: end;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.admin-filter-field {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+  margin: 0;
+}
+
+.admin-filter-field > span {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+  line-height: 1.2;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.admin-filter-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+}
+
+.admin-filter-toggle {
+  display: inline-flex;
+  flex: 1 1 130px;
+  align-items: center;
+  gap: 9px;
+  min-height: 47px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #121212;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.84rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.admin-filter-toggle input {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.admin-filter-reset {
+  min-height: 47px;
+  white-space: nowrap;
 }
 
 .admin-tabs {
@@ -3100,6 +3190,19 @@ select option:checked {
 
 .admin-company-matches-panel {
   grid-column: 1 / -1;
+}
+
+.admin-company-profile-history-panel,
+.admin-company-reports-panel {
+  grid-column: 1 / -1;
+}
+
+.admin-company-modal .admin-alert-status-panel {
+  grid-column: 1 / -1;
+}
+
+.admin-company-profile-history-panel .admin-profile-history > h3:first-child {
+  margin-top: 0;
 }
 
 .admin-company-profile-editor form {
@@ -3279,8 +3382,11 @@ select option:checked {
 }
 
 .admin-filters input,
-.admin-filters select {
+.admin-filters select,
+.admin-filter-field input,
+.admin-filter-field select {
   width: 100%;
+  min-width: 0;
   min-height: 47px;
   color: var(--text);
   background: #121212;
@@ -4870,6 +4976,19 @@ body.modal-open {
 }
 
 @media (max-width: 1180px) {
+  .admin-opportunity-filter-primary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .admin-opportunity-filter-secondary {
+    grid-template-columns: minmax(220px, 1fr) minmax(0, 2fr);
+  }
+
+  .admin-filter-reset {
+    grid-column: 2;
+    justify-self: end;
+  }
+
   .admin-detail-grid,
   .admin-company-modal .admin-detail-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4885,6 +5004,20 @@ body.modal-open {
 }
 
 @media (max-width: 920px) {
+  .admin-opportunity-filter-primary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-opportunity-filter-secondary {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-filter-reset {
+    grid-column: auto;
+    justify-self: stretch;
+    width: 100%;
+  }
+
   .modal.admin-company-modal {
     width: calc(100vw - 24px);
     max-width: calc(100vw - 24px);
@@ -7367,8 +7500,33 @@ body.modal-open {
     margin: 12px 0 8px;
   }
 
+  main.app-main.route-admin .admin-opportunity-filter-panel {
+    padding: 14px;
+  }
+
+  main.app-main.route-admin .admin-opportunity-filter-heading {
+    display: grid;
+    gap: 5px;
+  }
+
+  main.app-main.route-admin .admin-opportunity-filter-primary,
+  main.app-main.route-admin .admin-opportunity-filter-secondary {
+    grid-template-columns: 1fr;
+  }
+
+  main.app-main.route-admin .admin-filter-toggles {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  main.app-main.route-admin .admin-filter-toggle {
+    width: 100%;
+  }
+
   main.app-main.route-admin .admin-filters input,
-  main.app-main.route-admin .admin-filters select {
+  main.app-main.route-admin .admin-filters select,
+  main.app-main.route-admin .admin-filter-field input,
+  main.app-main.route-admin .admin-filter-field select {
     min-height: 44px;
     padding: 10px;
   }

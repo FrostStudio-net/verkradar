@@ -14,7 +14,7 @@ export { mergeAiReviewsIntoAdminMatches } from "./services/matchDisplay.js";
 export { renderAdminDailyPipelinePanel } from "./pages/adminAutomation.js";
 export { renderAdminV2IngestionPanel } from "./pages/adminV2Ingestion.js";
 export { renderAdminCompanyAccessPanel } from "./pages/adminCompanyAccess.js";
-export { renderAdminCompanyProfilePanel } from "./pages/adminCompanyProfile.js";
+export { renderAdminCompanyProfileHistory, renderAdminCompanyProfilePanel } from "./pages/adminCompanyProfile.js";
 export { renderAdminMatchingProfilePanel, renderMatchDecisionControls } from "./pages/adminHybridMatching.js";
 export { buildEvaluationLabelPayload, buildMatchDecisionPayload, buildMatchingProfilePayload, isHybridMatchingEnabled } from "./services/hybridMatching.js";
 export { renderAcceptInvitePage } from "./pages/acceptInvite.js";

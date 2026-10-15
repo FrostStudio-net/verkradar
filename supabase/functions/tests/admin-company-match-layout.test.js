@@ -28,6 +28,26 @@ test("latest matches panel spans the full company detail grid", () => {
   assert.match(css, /\.admin-company-matches-panel\s*{[\s\S]*?grid-column:\s*1\s*\/\s*-1/);
 });
 
+test("company modal puts matches first and preserves the requested section order", () => {
+  const start = app.indexOf("function renderAdminCompanyDetails");
+  const end = app.indexOf("function renderAdminCompanyAlertStatus", start);
+  const modal = app.slice(start, end);
+  const positions = [
+    modal.indexOf("<h3>Latest matches</h3>"),
+    modal.indexOf("<h3>Company basics</h3>"),
+    modal.indexOf("renderAdminCompanyProfilePanel"),
+    modal.indexOf("renderAdminCompanyAlertStatus"),
+    modal.indexOf("renderAdminCompanyProfileHistory"),
+    modal.indexOf("<h3>Latest reports</h3>"),
+  ];
+
+  assert.ok(positions.every((position) => position >= 0));
+  assert.deepEqual(positions, [...positions].sort((a, b) => a - b));
+  assert.match(modal, /renderAdminCompanyProfilePanel[\s\S]*?showHistory: false/);
+  assert.match(css, /\.admin-company-matches-panel\s*{[\s\S]*?grid-column:\s*1\s*\/\s*-1/);
+  assert.match(css, /\.admin-company-profile-history-panel,[\s\S]*?\.admin-company-reports-panel\s*{[\s\S]*?grid-column:\s*1\s*\/\s*-1/);
+});
+
 test("match cards render the required hierarchy for one or several matches", () => {
   for (const count of [1, 2, 5]) {
     const html = renderAdminCompanyMatchList(

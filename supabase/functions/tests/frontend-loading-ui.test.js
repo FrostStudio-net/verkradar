@@ -182,6 +182,36 @@ test("legacy admin messages remain directly dismissible and clear of modal contr
   assert.match(css, /@media \(max-width: 768px\)[\s\S]*?\.admin-global-message-close \{[\s\S]*?width: 44px;[\s\S]*?height: 44px;/);
 });
 
+test("admin opportunity filters are semantic, combinable, resettable, and responsive", () => {
+  const renderStart = app.indexOf("function renderAdminOpportunityFilters");
+  const renderEnd = app.indexOf("function hasOpportunityDeadline", renderStart);
+  const filterStart = app.indexOf("function getFilteredAdminOpportunities");
+  const filterEnd = app.indexOf("function getDefaultAdminOpportunityFilters", filterStart);
+  const filterMarkup = app.slice(renderStart, renderEnd);
+  const filterLogic = app.slice(filterStart, filterEnd);
+  const tabHandler = app.slice(app.indexOf('if (name === "admin-tab")'), app.indexOf('if (name === "reset-admin-opportunity-filters")'));
+
+  assert.ok(renderStart >= 0 && renderEnd > renderStart);
+  assert.ok(filterStart >= 0 && filterEnd > filterStart);
+  for (const [value, label] of [["all", "All countries"], ["IS", "Iceland"], ["DK", "Denmark"], ["FI", "Finland"], ["NO", "Norway"], ["SE", "Sweden"], ["Unknown", "Unknown"]]) {
+    assert.match(filterMarkup, new RegExp(`\\["${value}", "${label}"\\]`));
+  }
+  for (const key of ["search", "source", "status", "country", "sortBy", "addedWindow", "debugCompanyId", "tedOnly", "manualOnly", "showDemoTest"]) {
+    assert.match(filterMarkup, new RegExp(`data-admin-filter=\\"${key}\\"`));
+  }
+  assert.match(filterMarkup, /data-action="reset-admin-opportunity-filters"/);
+  assert.match(filterMarkup, /\$\{opportunities\.length\} of \$\{\(state\.opportunities \|\| \[\]\)\.length\} opportunities shown/);
+  assert.match(app, /if \(name === "reset-admin-opportunity-filters"\) \{[\s\S]*?state\.adminOpportunityFilters = getDefaultAdminOpportunityFilters\(\);[\s\S]*?persistAdminOpportunityViewPrefs\(\);/);
+  assert.match(filterLogic, /filters\.tedOnly[\s\S]*?filters\.manualOnly[\s\S]*?filters\.showDemoTest[\s\S]*?filters\.addedWindow[\s\S]*?filters\.source[\s\S]*?filters\.status[\s\S]*?filters\.country[\s\S]*?filters\.search/);
+  assert.match(filterLogic, /const country = getOpportunityCountryCode\(opp\) \|\| "Unknown";/);
+  assert.doesNotMatch(filterLogic, /\|\| opp\.countryCode/);
+  assert.match(app, /if \(event\.target\.matches\("\[data-admin-filter\]"\)\) \{\s*if \(event\.target\.dataset\.adminFilter !== "search"\) return;/);
+  assert.match(app, /const retryOpportunities = nextAdminTab === "opportunities"[\s\S]*?if \(retryOpportunities\) loadOpportunities\(\);/);
+  assert.doesNotMatch(tabHandler, /adminOpportunityFilters\s*=/);
+  assert.match(css, /\.admin-opportunity-filter-primary \{[\s\S]*?grid-template-columns: minmax\(220px, 1\.7fr\) repeat\(5, minmax\(120px, 1fr\)\)/);
+  assert.match(css, /@media \(max-width: 768px\)[\s\S]*?main\.app-main\.route-admin \.admin-opportunity-filter-primary,[\s\S]*?grid-template-columns: 1fr/);
+});
+
 function hydratedAuthPlan(event, overrides = {}) {
   return getAuthStateChangePlan({
     event,

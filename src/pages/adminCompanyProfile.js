@@ -25,7 +25,7 @@ const DAY_OPTIONS = [
 ];
 
 export function renderAdminCompanyProfilePanel(company, options) {
-  const { escapeHtml, actionState = "", lastResult = null, changes = [], formatDateTime = (value) => value || "" } = options;
+  const { escapeHtml, actionState = "", lastResult = null, changes = [], formatDateTime = (value) => value || "", showHistory = true } = options;
   const saving = actionState === "profile_save";
   const refreshing = actionState === "profile_refresh";
   const busy = saving || refreshing;
@@ -99,7 +99,7 @@ export function renderAdminCompanyProfilePanel(company, options) {
         </div>
         ${lastResult ? renderRefreshResult(lastResult, escapeHtml) : ""}
       </form>
-      ${renderAdminCompanyProfileHistory(changes, { escapeHtml, formatDateTime })}
+      ${showHistory ? renderAdminCompanyProfileHistory(changes, { escapeHtml, formatDateTime }) : ""}
     </section>
   `;
 }

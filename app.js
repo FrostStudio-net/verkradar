@@ -91,6 +91,7 @@ import {
   renderAdminDailyPipelinePanel,
   renderAdminV2IngestionPanel,
   renderAdminCompanyAccessPanel,
+  renderAdminCompanyProfileHistory,
   renderAdminCompanyProfilePanel,
   renderMatchDecisionControls,
   renderAcceptInvitePage,
@@ -1227,7 +1228,13 @@ document.addEventListener("click", async (event) => {
   if (name === "admin-tab") {
     if (!confirmDiscardAdminCompanyProfileChanges()) return;
     clearToast();
-    state.adminActiveTab = action.dataset.tab || "overview";
+    const nextAdminTab = action.dataset.tab || "overview";
+    const retryOpportunities = nextAdminTab === "opportunities" && Boolean(state.opportunityLoadError) && !state.isLoadingOpportunities;
+    state.adminActiveTab = nextAdminTab;
+    if (retryOpportunities) {
+      state.opportunitiesLoaded = false;
+      state.opportunityLoadError = null;
+    }
     clearAdminCompanyDetailsState();
     state.selectedAdminReportId = null;
     state.selectedAdminTrialRequestId = null;
@@ -1235,6 +1242,14 @@ document.addEventListener("click", async (event) => {
     state.adminTrialCompanyDraft = null;
     render();
     scrollActiveAdminTabIntoView();
+    if (retryOpportunities) loadOpportunities();
+    return;
+  }
+  if (name === "reset-admin-opportunity-filters") {
+    state.adminOpportunityFilters = getDefaultAdminOpportunityFilters();
+    persistAdminOpportunityViewPrefs();
+    render();
+    return;
   }
   if (name === "view-admin-company") {
     if (state.selectedAdminCompanyId && state.selectedAdminCompanyId !== id && !confirmDiscardAdminCompanyProfileChanges()) return;
@@ -1551,16 +1566,8 @@ document.addEventListener("input", (event) => {
   }
 
   if (event.target.matches("[data-admin-filter]")) {
-    const key = event.target.dataset.adminFilter;
-    state.adminOpportunityFilters = getAdminOpportunityFilters();
-    if (event.target.type === "checkbox") {
-      state.adminOpportunityFilters[key] = event.target.checked;
-      if (key === "tedOnly" && event.target.checked) state.adminOpportunityFilters.manualOnly = false;
-      if (key === "manualOnly" && event.target.checked) state.adminOpportunityFilters.tedOnly = false;
-    } else {
-      state.adminOpportunityFilters[key] = event.target.value;
-    }
-    if (key === "sortBy" || key === "addedWindow") persistAdminOpportunityViewPrefs();
+    if (event.target.dataset.adminFilter !== "search") return;
+    updateAdminOpportunityFilter(event.target);
     renderPreservingInputAndScroll(event.target);
     return;
   }
@@ -1612,16 +1619,7 @@ document.addEventListener("change", (event) => {
     return;
   }
   if (event.target.matches("[data-admin-filter]")) {
-    const key = event.target.dataset.adminFilter;
-    state.adminOpportunityFilters = getAdminOpportunityFilters();
-    if (event.target.type === "checkbox") {
-      state.adminOpportunityFilters[key] = event.target.checked;
-      if (key === "tedOnly" && event.target.checked) state.adminOpportunityFilters.manualOnly = false;
-      if (key === "manualOnly" && event.target.checked) state.adminOpportunityFilters.tedOnly = false;
-    } else {
-      state.adminOpportunityFilters[key] = event.target.value;
-    }
-    if (key === "sortBy" || key === "addedWindow") persistAdminOpportunityViewPrefs();
+    updateAdminOpportunityFilter(event.target);
     renderPreservingInputAndScroll(event.target);
     return;
   }
@@ -8895,7 +8893,7 @@ function getFilteredAdminOpportunities() {
     if (!isOpportunityInAddedWindow(opp, filters.addedWindow)) return false;
     if (filters.source !== "all" && opp.source !== filters.source) return false;
     if (filters.status !== "all" && opp.status !== filters.status) return false;
-    const country = getOpportunityCountryCode(opp) || opp.countryCode || "Unknown";
+    const country = getOpportunityCountryCode(opp) || "Unknown";
     if (filters.country !== "all" && country !== filters.country) return false;
     const search = normalizeLocationText(filters.search);
     if (search) {
@@ -8907,7 +8905,7 @@ function getFilteredAdminOpportunities() {
   return sortAdminOpportunities(filtered, filters.sortBy);
 }
 
-function getAdminOpportunityFilters() {
+function getDefaultAdminOpportunityFilters() {
   return {
     source: "all",
     missingDeadlineSource: "all",
@@ -8919,9 +8917,29 @@ function getAdminOpportunityFilters() {
     manualOnly: false,
     showDemoTest: false,
     sortBy: "created_desc",
-    addedWindow: "all",
+    addedWindow: "all"
+  };
+}
+
+function getAdminOpportunityFilters() {
+  return {
+    ...getDefaultAdminOpportunityFilters(),
     ...(state.adminOpportunityFilters || {})
   };
+}
+
+function updateAdminOpportunityFilter(input) {
+  const key = input?.dataset?.adminFilter;
+  if (!key) return;
+  state.adminOpportunityFilters = getAdminOpportunityFilters();
+  if (input.type === "checkbox") {
+    state.adminOpportunityFilters[key] = input.checked;
+    if (key === "tedOnly" && input.checked) state.adminOpportunityFilters.manualOnly = false;
+    if (key === "manualOnly" && input.checked) state.adminOpportunityFilters.tedOnly = false;
+  } else {
+    state.adminOpportunityFilters[key] = input.value;
+  }
+  if (key === "sortBy" || key === "addedWindow") persistAdminOpportunityViewPrefs();
 }
 
 function normalizeAdminOpportunitySort(value) {
@@ -9010,38 +9028,40 @@ function renderAdminOpportunityFilters(opportunities) {
   const filters = getAdminOpportunityFilters();
   const sources = getAdminFilterOptions(state.opportunities || [], (opp) => opp.source || "Unknown");
   const statuses = getAdminFilterOptions(state.opportunities || [], (opp) => opp.status || "Unknown");
-  const countries = getAdminFilterOptions(state.opportunities || [], (opp) => getOpportunityCountryCode(opp) || opp.countryCode || "Unknown");
   const companies = state.adminCompanies || [];
+  const countryOptions = [
+    ["all", "All countries"],
+    ["IS", "Iceland"],
+    ["DK", "Denmark"],
+    ["FI", "Finland"],
+    ["NO", "Norway"],
+    ["SE", "Sweden"],
+    ["Unknown", "Unknown"]
+  ];
   return `
-    <div class="admin-filters">
-      <input data-admin-filter="search" value="${escapeHtml(filters.search)}" placeholder="Search title, buyer, external ID..." />
-      <select data-admin-filter="source">
-        <option value="all">All sources</option>
-        ${sources.map((source) => `<option value="${escapeHtml(source)}" ${filters.source === source ? "selected" : ""}>${escapeHtml(source)}</option>`).join("")}
-      </select>
-      <select data-admin-filter="status">
-        <option value="all">All statuses</option>
-        ${statuses.map((status) => `<option value="${escapeHtml(status)}" ${filters.status === status ? "selected" : ""}>${escapeHtml(status)}</option>`).join("")}
-      </select>
-      <select data-admin-filter="country">
-        <option value="all">All countries</option>
-        ${countries.map((country) => `<option value="${escapeHtml(country)}" ${filters.country === country ? "selected" : ""}>${escapeHtml(country)}</option>`).join("")}
-      </select>
-      <select data-admin-filter="sortBy" aria-label="Röðun">
-        ${getAdminOpportunitySortOptions().map(([value, label]) => `<option value="${escapeHtml(value)}" ${normalizeAdminOpportunitySort(filters.sortBy) === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
-      </select>
-      <select data-admin-filter="addedWindow" aria-label="Bætt við">
-        ${getAdminOpportunityAddedWindowOptions().map(([value, label]) => `<option value="${escapeHtml(value)}" ${normalizeAdminOpportunityAddedWindow(filters.addedWindow) === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
-      </select>
-      <select data-admin-filter="debugCompanyId">
-        <option value="">Match debug company...</option>
-        ${companies.map((company) => `<option value="${escapeHtml(company.id)}" ${filters.debugCompanyId === company.id ? "selected" : ""}>${escapeHtml(company.companyName)}</option>`).join("")}
-      </select>
-      <label class="checkbox compact"><input type="checkbox" data-admin-filter="tedOnly" ${filters.tedOnly ? "checked" : ""}/><span>TED only</span></label>
-      <label class="checkbox compact"><input type="checkbox" data-admin-filter="manualOnly" ${filters.manualOnly ? "checked" : ""}/><span>Manual only</span></label>
-      <label class="checkbox compact"><input type="checkbox" data-admin-filter="showDemoTest" ${filters.showDemoTest ? "checked" : ""}/><span>Show demo/test opportunities</span></label>
-    </div>
-    <p class="admin-filter-count">${opportunities.length} of ${(state.opportunities || []).length} opportunities shown.</p>
+    <section class="admin-opportunity-filter-panel" aria-labelledby="admin-opportunity-filter-title">
+      <div class="admin-opportunity-filter-heading">
+        <h3 id="admin-opportunity-filter-title">Filter opportunities</h3>
+        <p class="admin-filter-count" aria-live="polite">${opportunities.length} of ${(state.opportunities || []).length} opportunities shown.</p>
+      </div>
+      <div class="admin-filters admin-opportunity-filter-primary">
+        <label class="admin-filter-field admin-filter-search"><span>Search</span><input type="search" data-admin-filter="search" value="${escapeHtml(filters.search)}" placeholder="Title, buyer, external ID, or location" /></label>
+        <label class="admin-filter-field"><span>Source</span><select data-admin-filter="source"><option value="all">All sources</option>${sources.map((source) => `<option value="${escapeHtml(source)}" ${filters.source === source ? "selected" : ""}>${escapeHtml(source)}</option>`).join("")}</select></label>
+        <label class="admin-filter-field"><span>Status</span><select data-admin-filter="status"><option value="all">All statuses</option>${statuses.map((status) => `<option value="${escapeHtml(status)}" ${filters.status === status ? "selected" : ""}>${escapeHtml(capitalize(status))}</option>`).join("")}</select></label>
+        <label class="admin-filter-field"><span>Country</span><select data-admin-filter="country">${countryOptions.map(([value, label]) => `<option value="${escapeHtml(value)}" ${filters.country === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}</select></label>
+        <label class="admin-filter-field"><span>Sort</span><select data-admin-filter="sortBy">${getAdminOpportunitySortOptions().map(([value, label]) => `<option value="${escapeHtml(value)}" ${normalizeAdminOpportunitySort(filters.sortBy) === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}</select></label>
+        <label class="admin-filter-field"><span>Added</span><select data-admin-filter="addedWindow">${getAdminOpportunityAddedWindowOptions().map(([value, label]) => `<option value="${escapeHtml(value)}" ${normalizeAdminOpportunityAddedWindow(filters.addedWindow) === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}</select></label>
+      </div>
+      <div class="admin-opportunity-filter-secondary">
+        <label class="admin-filter-field admin-filter-debug"><span>Match debug company</span><select data-admin-filter="debugCompanyId"><option value="">No company selected</option>${companies.map((company) => `<option value="${escapeHtml(company.id)}" ${filters.debugCompanyId === company.id ? "selected" : ""}>${escapeHtml(company.companyName)}</option>`).join("")}</select></label>
+        <div class="admin-filter-toggles" role="group" aria-label="Opportunity visibility filters">
+          <label class="admin-filter-toggle"><input type="checkbox" data-admin-filter="tedOnly" ${filters.tedOnly ? "checked" : ""}/><span>TED only</span></label>
+          <label class="admin-filter-toggle"><input type="checkbox" data-admin-filter="manualOnly" ${filters.manualOnly ? "checked" : ""}/><span>Manual only</span></label>
+          <label class="admin-filter-toggle"><input type="checkbox" data-admin-filter="showDemoTest" ${filters.showDemoTest ? "checked" : ""}/><span>Show demo/test opportunities</span></label>
+        </div>
+        <button class="btn btn-secondary admin-filter-reset" type="button" data-action="reset-admin-opportunity-filters">Reset filters</button>
+      </div>
+    </section>
   `;
 }
 
@@ -10794,6 +10814,11 @@ function renderAdminCompanyDetails(company) {
         </div>
         <div class="modal-body" data-admin-company-scroll-container data-company-id="${escapeHtml(company.id)}">
           <div class="admin-detail-grid">
+            <section class="side-panel admin-company-matches-panel">
+              <h3>Latest matches</h3>
+              ${renderAdminCompanyMatchList(company, { escapeHtml, renderMatchDecisionControls })}
+            </section>
+
             <section class="side-panel">
               <h3>Company basics</h3>
               <p><strong>Email:</strong> ${escapeHtml(company.contactEmail || "Unknown")}</p>
@@ -10839,28 +10864,22 @@ function renderAdminCompanyDetails(company) {
               <p><strong>Deadline reminders:</strong> ${company.deadlineReminders ? "On" : "Off"}</p>
             </section>
 
-            ${renderAdminCompanyAccessPanel(company, {
-              escapeHtml,
-              formatDateTime,
-              inviteEmail: getAdminCompanyInviteEmail(company),
-              inviteLink: state.adminCompanyInviteLinks?.[company.id] || "",
-              inviteDebug: state.adminCompanyInviteDebug?.[company.id] || null,
-              actionState: state.adminCompanyAccessActions?.[company.id] || ""
-            })}
-
             ${renderAdminCompanyProfilePanel(company, {
               escapeHtml,
               formatDateTime,
               actionState,
               lastResult: state.adminCompanyProfileResults?.[company.id] || null,
-              changes: company.profileChanges || []
+              changes: company.profileChanges || [],
+              showHistory: false
             })}
 
             ${renderAdminCompanyAlertStatus(company)}
 
-            <section class="side-panel admin-company-matches-panel">
-              <h3>Latest matches</h3>
-              ${renderAdminCompanyMatchList(company, { escapeHtml, renderMatchDecisionControls })}
+            <section class="side-panel admin-company-profile-history-panel">
+              ${renderAdminCompanyProfileHistory(company.profileChanges || [], { escapeHtml, formatDateTime })}
+            </section>
+
+            <section class="side-panel admin-company-reports-panel">
               <h3>Latest reports</h3>
               ${company.latestReports.length ? `
                 <ul class="admin-detail-list">
@@ -10873,6 +10892,15 @@ function renderAdminCompanyDetails(company) {
                 </ul>
               ` : `<p>No reports generated yet.</p>`}
             </section>
+
+            ${renderAdminCompanyAccessPanel(company, {
+              escapeHtml,
+              formatDateTime,
+              inviteEmail: getAdminCompanyInviteEmail(company),
+              inviteLink: state.adminCompanyInviteLinks?.[company.id] || "",
+              inviteDebug: state.adminCompanyInviteDebug?.[company.id] || null,
+              actionState: state.adminCompanyAccessActions?.[company.id] || ""
+            })}
 
             ${renderAdminCompanyAiReviewPanel(company, {
               escapeHtml,
