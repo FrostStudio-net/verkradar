@@ -1141,7 +1141,8 @@ document.addEventListener("click", async (event) => {
 
   if (name === "close-toast") {
     event.preventDefault();
-    dismissToast();
+    clearToast();
+    render();
     return;
   }
 
@@ -7569,7 +7570,7 @@ function renderShell(content) {
     ${state.toast ? `
       <div class="toast toast-${state.toast.type} toast-${state.toast.placement} ${state.toast.isClosing ? "is-closing" : ""}" role="${state.toast.type === "error" ? "alert" : "status"}" aria-live="${state.toast.type === "error" ? "assertive" : "polite"}">
         <span class="toast-dot"></span>
-        <span>${escapeHtml(state.toast.message)}</span>
+        <span class="toast-message">${escapeHtml(state.toast.message)}</span>
         <button class="toast-close" type="button" data-action="close-toast" aria-label="Close notification">×</button>
       </div>
     ` : ""}

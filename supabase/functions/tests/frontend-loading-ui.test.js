@@ -152,6 +152,17 @@ test("skeleton animation is subtle, responsive, and reduced-motion safe", () => 
   assert.match(css, /@media \(max-width: 340px\)[\s\S]*\.stats-grid/);
 });
 
+test("global toasts dismiss immediately and stay clear of header and modal controls", () => {
+  assert.match(app, /if \(name === "close-toast"\) \{[\s\S]*?clearToast\(\);[\s\S]*?render\(\);[\s\S]*?return;/);
+  assert.match(app, /class="toast-close"[\s\S]*?data-action="close-toast"[\s\S]*?aria-label="Close notification">×<\/button>/);
+  assert.match(app, /window\.__toastTimeout = setTimeout\([\s\S]*?dismissToast\(key\);[\s\S]*?TOAST_DURATIONS\[toastType\]/);
+  assert.match(css, /\.toast \{[\s\S]*?left: 28px;[\s\S]*?right: 28px;[\s\S]*?bottom: calc\(28px \+ env\(safe-area-inset-bottom, 0px\)\);[\s\S]*?width: max-content;[\s\S]*?margin-inline: auto;/);
+  assert.match(css, /\.toast-admin \{\s*top: auto;\s*\}/);
+  assert.match(css, /@media \(max-width: 700px\)[\s\S]*?\.toast \{[\s\S]*?left: 18px;[\s\S]*?right: 18px;[\s\S]*?width: auto;/);
+  assert.match(css, /@media \(max-width: 700px\)[\s\S]*?\.toast-close \{[\s\S]*?width: 44px;[\s\S]*?height: 44px;/);
+  assert.match(css, /\.toast-close \{[\s\S]*?flex: 0 0 auto;[\s\S]*?width: 32px;[\s\S]*?height: 32px;/);
+});
+
 function hydratedAuthPlan(event, overrides = {}) {
   return getAuthStateChangePlan({
     event,
