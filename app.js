@@ -3229,15 +3229,11 @@ async function refreshAdminCompanyMatches(companyId, options = {}) {
 
   try {
     const payload = await runAdminCompanyAction(companyId, "refresh_matches");
-    const refreshedCount = Number(payload.matches_refreshed || 0);
 
     await Promise.all([loadAdminCompanies(), loadAdminReviewQueue()]);
     if (state.companyId === companyId) await loadStoredMatchesForCurrentCompany();
     if (!options.silent) {
-      state.adminMessage = {
-        type: "success",
-        text: `Refreshed ${refreshedCount} eligible matches for ${company.companyName}.`
-      };
+      showToast("Company matches refreshed", "success");
       render();
     }
     return payload;
