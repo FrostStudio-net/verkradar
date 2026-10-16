@@ -18,19 +18,19 @@ const expectedSources = [
   "Árborg",
   "Faxaflóahafnir útboð",
   "Hafnarfjörður Municipality",
-  "Háskóli Íslands",
   "Mosfellsbær Municipality",
   "Múlaþing",
-  "Reykjanesbær",
 ];
 
-test("the two batches contain exactly the nine cleared legacy-only sources", () => {
+test("the two batches contain exactly the seven cleared legacy-only sources", () => {
   assert.deepEqual([...LEGACY_CONNECTOR_BATCHES.legacy_batch_1, ...LEGACY_CONNECTOR_BATCHES.legacy_batch_2], expectedSources);
-  assert.equal(new Set(expectedSources).size, 9);
+  assert.equal(new Set(expectedSources).size, 7);
   for (const blocked of LEGACY_CONNECTOR_BLOCKED_SOURCES) {
     assert.equal(expectedSources.includes(blocked), false, `${blocked} must remain excluded`);
   }
   assert.ok(LEGACY_CONNECTOR_BLOCKED_SOURCES.includes("Ríkiskaup / island.is procurement"));
+  assert.equal(expectedSources.includes("Háskóli Íslands"), false);
+  assert.equal(expectedSources.includes("Reykjanesbær"), false);
 });
 
 test("only exact allowlisted connector names survive runtime filtering", () => {

@@ -10,10 +10,8 @@ export const LEGACY_CONNECTOR_BATCHES = Object.freeze({
   ]),
   legacy_batch_2: Object.freeze([
     "Hafnarfjörður Municipality",
-    "Háskóli Íslands",
     "Mosfellsbær Municipality",
     "Múlaþing",
-    "Reykjanesbær",
   ]),
 });
 
