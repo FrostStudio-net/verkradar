@@ -7,7 +7,7 @@ import {
   preserveAdminClassification,
   processProcurementClassificationBatch,
 } from "../_shared/procurement-stage.js";
-import { calculateCompanyOpportunityMatch, COMPANY_MATCH_THRESHOLD } from "../_shared/company-matcher.js";
+import { calculateCompanyOpportunityMatch, COMPANY_MATCH_THRESHOLD, requiresCustomerCapabilityReview } from "../_shared/company-matcher.js";
 import {
   filterLegacyAutomationConnectors,
   resolveLegacyConnectorAutomationBatch,
@@ -4230,7 +4230,7 @@ function classifyMatchSafety(
     ? opportunity.raw_payload as Record<string, unknown>
     : {};
   const adminStatus = String(payload.admin_report_status || "").toLowerCase();
-  if (adminStatus === "include") {
+  if (adminStatus === "include" && !requiresCustomerCapabilityReview(match)) {
     return {
       safety_status: "auto_approved",
       safety_reasons: ["Admin override includes this opportunity in customer reports"],
@@ -4259,6 +4259,7 @@ function classifyMatchSafety(
   if (isUnknownBuyer(opportunity)) reasons.push("Buyer is missing or generic");
   if (risks.some((risk) => /broad construction|low confidence/i.test(risk))) reasons.push("Match depends on broad or low-confidence terms");
   if (risks.some((risk) => /indoor|finishing|outside your core civil services/i.test(risk))) reasons.push("Possible service mismatch for this company profile");
+  if (requiresCustomerCapabilityReview(match)) reasons.push("Specialist capability, project scale, or subcontracting suitability is unverified");
   if (containsReviewOnlyTerms(opportunity) && !companyExplicitlyAllowsReviewOnlyWork(profile)) {
     reasons.push("Mentions design, consulting, supervision, or project management terms");
   }
@@ -4280,7 +4281,7 @@ function classifyMatchSafety(
 
   const autoApproved = (requiresSupplierDeadline ? hasFutureDeadline : true) &&
     hasStrongWorkTypeFit &&
-    !reasons.some((reason) => /missing|generic|broad|mismatch|consulting|supervision|project management/i.test(reason));
+    !reasons.some((reason) => /missing|generic|broad|mismatch|consulting|supervision|project management|specialist capability|project scale|subcontracting/i.test(reason));
 
   if (autoApproved) {
     return {
@@ -4698,7 +4699,7 @@ async function generateWeeklyReports(supabase: ReturnType<typeof createClient>) 
   const periodEnd = periodEndDate.toISOString().slice(0, 10);
 
   const [{ data: companies, error: companiesError }, { data: existingReports, error: reportsError }] = await Promise.all([
-    supabase.from("companies").select("id, company_name"),
+    supabase.from("companies").select("*"),
     supabase.from("reports").select("id, company_id, period_start"),
   ]);
 
@@ -4713,19 +4714,41 @@ async function generateWeeklyReports(supabase: ReturnType<typeof createClient>) 
   for (const company of companies || []) {
     if (existing.has(company.id)) continue;
 
-    const { data: matches, error: matchesError } = await supabase
-      .from("opportunity_matches")
-      .select("match_score, safety_status, alert_eligible, opportunities(id, title, buyer, description, deadline, status, procurement_stage, classification_grandfathered, actionable_for_suppliers, requires_admin_review, raw_payload, sources(name))")
-      .eq("company_id", company.id)
-      .gte("match_score", MIN_MATCH_SCORE)
-      .eq("safety_status", "auto_approved")
-      .eq("alert_eligible", true)
-      .order("match_score", { ascending: false })
-      .limit(30);
+    const [servicesResult, locationsResult, keywordsResult, matchesResult] = await Promise.all([
+      supabase.from("company_services").select("service").eq("company_id", company.id),
+      supabase.from("company_locations").select("location").eq("company_id", company.id),
+      supabase.from("company_keywords").select("keyword, type").eq("company_id", company.id),
+      supabase
+        .from("opportunity_matches")
+        .select("match_score, safety_status, alert_eligible, review_required, reviewed_at, opportunities(id, title, buyer, description, deadline, published_date, status, procurement_stage, classification_grandfathered, actionable_for_suppliers, requires_admin_review, raw_payload, location, estimated_value, currency, url, category, type, requirements, keywords, country_code, sources(name))")
+        .eq("company_id", company.id)
+        .gte("match_score", MIN_MATCH_SCORE)
+        .eq("safety_status", "auto_approved")
+        .eq("alert_eligible", true)
+        .order("match_score", { ascending: false })
+        .limit(30),
+    ]);
 
-    if (matchesError) throw matchesError;
-    const reportMatches = (matches || [])
+    if (servicesResult.error) throw servicesResult.error;
+    if (locationsResult.error) throw locationsResult.error;
+    if (keywordsResult.error) throw keywordsResult.error;
+    if (matchesResult.error) throw matchesResult.error;
+    const profile = mapCompanyProfile(
+      company,
+      servicesResult.data || [],
+      locationsResult.data || [],
+      keywordsResult.data || [],
+    );
+    const reportMatches = (matchesResult.data || [])
       .filter((match) => isCustomerReportMatch(match))
+      .map((match) => {
+        const opportunity = match.opportunities as Record<string, unknown>;
+        const currentMatch = calculateCompanyOpportunityMatch(profile, opportunity);
+        return { ...match, currentMatch };
+      })
+      .filter(({ currentMatch }) => Number(currentMatch.matchScore || 0) >= MIN_MATCH_SCORE)
+      .filter(({ currentMatch }) => currentMatch.has_substantive_scope_fit === true)
+      .filter(({ currentMatch, reviewed_at }) => !requiresCustomerCapabilityReview(currentMatch) || Boolean(reviewed_at))
       .slice(0, 8);
     if (!reportMatches.length) continue;
 
@@ -4751,7 +4774,7 @@ async function generateWeeklyReports(supabase: ReturnType<typeof createClient>) 
       .map((match, index) => ({
         report_id: report.id,
         opportunity_id: match.opportunities.id,
-        match_score: match.match_score,
+        match_score: match.currentMatch.matchScore,
         sort_order: index + 1,
       }));
 

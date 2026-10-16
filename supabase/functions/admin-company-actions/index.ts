@@ -1,7 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { isProcurementOpportunityEligible } from "../_shared/procurement-stage.js";
 import { isExplicitLocationAliasMatch } from "../_shared/location-aliases.js";
-import { calculateCompanyOpportunityMatch, COMPANY_MATCH_THRESHOLD } from "../_shared/company-matcher.js";
+import { calculateCompanyOpportunityMatch, COMPANY_MATCH_THRESHOLD, requiresCustomerCapabilityReview } from "../_shared/company-matcher.js";
 
 const MIN_MATCH_SCORE = COMPANY_MATCH_THRESHOLD;
 const corsHeaders = {
@@ -1446,7 +1446,7 @@ function getReportCandidateKind(match: Record<string, unknown>) {
   if ((!stage || stage === "open_competition") && !match.deadline) return "excluded";
   if (match.deadline && daysUntilDeadline(String(match.deadline || "")) < 0) return "excluded";
   const safety = getMatchSafetyStatus(match);
-  if (stage && (safety === "hidden" || safety === "needs_review")) return "excluded";
+  if (safety === "hidden" || safety === "needs_review") return "excluded";
   const riskText = [
     match.aiReviewReason,
     ...(Array.isArray(match.aiRisksOrQuestions) ? match.aiRisksOrQuestions : []),
@@ -1460,7 +1460,6 @@ function getReportCandidateKind(match: Record<string, unknown>) {
     return "excluded";
   }
 
-  if (safety === "hidden" || safety === "needs_review") return "excluded";
   const label = String(match.matchLabel || "").toLowerCase();
   const score = Number(match.matchScore || 0);
   if (score >= 75 || label.includes("strong") || label.includes("good")) return "rule_fallback";
@@ -1988,7 +1987,7 @@ function classifyMatchSafety(profile: CompanyProfile, match: Record<string, unkn
     : {};
   const adminStatus = String(payload.admin_report_status || "").toLowerCase();
 
-  if (adminStatus === "include") {
+  if (adminStatus === "include" && !requiresCustomerCapabilityReview(match)) {
     return {
       safetyStatus: "auto_approved",
       safetyReasons: ["Admin override includes this opportunity in customer reports"],
@@ -2020,6 +2019,7 @@ function classifyMatchSafety(profile: CompanyProfile, match: Record<string, unkn
   if (isUnknownBuyer(match)) reasons.push("Buyer is missing or generic");
   if (risks.some((risk) => /broad construction|low confidence/i.test(risk))) reasons.push("Match depends on broad or low-confidence terms");
   if (risks.some((risk) => /indoor|finishing|outside your core civil services/i.test(risk))) reasons.push("Possible service mismatch for this company profile");
+  if (requiresCustomerCapabilityReview(match)) reasons.push("Specialist capability, project scale, or subcontracting suitability is unverified");
   if (containsReviewOnlyTerms(match) && !companyExplicitlyAllowsReviewOnlyWork(profile)) {
     reasons.push("Mentions design, consulting, supervision, or project management terms");
   }
@@ -2035,7 +2035,7 @@ function classifyMatchSafety(profile: CompanyProfile, match: Record<string, unkn
 
   const autoApproved = (requiresSupplierDeadline ? hasFutureDeadline : true) &&
     hasStrongWorkTypeFit &&
-    !reasons.some((reason) => /missing|generic|broad|mismatch|consulting|supervision|project management/i.test(reason));
+    !reasons.some((reason) => /missing|generic|broad|mismatch|consulting|supervision|project management|specialist capability|project scale|subcontracting/i.test(reason));
 
   if (autoApproved) {
     return {

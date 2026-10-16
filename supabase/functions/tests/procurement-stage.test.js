@@ -344,7 +344,7 @@ test("exhausted function budget skips AI but preserves partial-batch persistence
   assert.deepEqual(persisted.map((item) => item.stage), ["open_competition", "uncertain", "uncertain"]);
 });
 
-test("legacy AI report candidates retain the pre-stage safety ordering", () => {
+test("legacy AI report candidates cannot bypass needs-review safety", () => {
   const legacy = {
     deadline: "2099-08-30",
     classificationGrandfathered: true,
@@ -352,7 +352,7 @@ test("legacy AI report candidates retain the pre-stage safety ordering", () => {
     aiReviewSendToClient: true,
     safetyStatus: "needs_review",
   };
-  assert.equal(getReportCandidateKind(legacy), "ai_strong");
+  assert.equal(getReportCandidateKind(legacy), "excluded");
   assert.equal(getReportCandidateKind({ ...legacy, classificationGrandfathered: false }), "excluded");
   assert.equal(getReportCandidateKind({
     ...legacy,

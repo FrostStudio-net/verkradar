@@ -76,7 +76,7 @@ export function getReportCandidateKind(match) {
   if ((!stage || stage === "open_competition") && !match?.deadline) return "excluded";
   if (match?.deadline && isExpiredDeadline(match.deadline)) return "excluded";
   const safety = String(match?.safetyStatus || match?.safety_status || "auto_approved").toLowerCase();
-  if (stage && (safety === "hidden" || safety === "needs_review")) return "excluded";
+  if (safety === "hidden" || safety === "needs_review") return "excluded";
   const sendToClient = match?.aiReviewSendToClient === true || match?.ai_review_send_to_client === true;
   const skippedReason = String(match?.aiReviewSkippedReason || match?.ai_review_skipped_reason || "").toLowerCase();
   if (skippedReason === "outside_service_area") return "excluded";
@@ -93,7 +93,6 @@ export function getReportCandidateKind(match) {
     return "excluded";
   }
 
-  if (safety === "hidden" || safety === "needs_review") return "excluded";
   const score = Number(match?.matchScore || match?.match_score || 0);
   const label = String(match?.matchLabel || match?.match_label || "").toLowerCase();
   if (score >= 75 || label.includes("strong") || label.includes("good")) return "rule_fallback";

@@ -43,6 +43,13 @@ const CIVIL_CORE_EXECUTION_PROFILE_TERMS = [
   "yfirborðsfrágangur", "malbikun", "útiframkvæmdir",
 ];
 
+const SPECIALIST_CAPABILITY_TERMS = [
+  "hafnarframkvæmdir", "hafnargerð", "viðlegukantur", "stálþil", "þilrekstur",
+  "brimvarnargarður", "sjóvarnargarður", "dýpkun", "sheet pile", "quay", "breakwater",
+];
+
+const CAPABILITY_REVIEW_RISK = "Specialist capability, project scale, or subcontracting suitability is unverified";
+
 function asArray(value) {
   return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
 }
@@ -66,8 +73,20 @@ function normalizedIncludesAny(text, terms) {
 }
 
 function textIncludes(text, value) {
-  const normalized = normalizeText(value);
-  return Boolean(normalized && text.includes(normalized));
+  const normalizedText = normalizeText(text);
+  const term = normalizeText(value);
+  if (!term || term.length < 3) return false;
+  let index = normalizedText.indexOf(term);
+  while (index >= 0) {
+    const tokenStart = normalizedText.lastIndexOf(" ", index - 1) + 1;
+    const prefixLength = index - tokenStart;
+    // Accept whole words, inflections and compound elements. Requiring a
+    // substantive prefix for later compound elements rejects accidental
+    // truncations such as "ardvinna" inside "jardvinna".
+    if (prefixLength === 0 || prefixLength >= 3) return true;
+    index = normalizedText.indexOf(term, index + 1);
+  }
+  return false;
 }
 
 function opportunityField(opportunity, camel, snake) {
@@ -79,14 +98,55 @@ function rawPayload(opportunity) {
   return value && typeof value === "object" ? value : {};
 }
 
+function getOpportunityMetadataNames(opportunity) {
+  const payload = rawPayload(opportunity);
+  const source = opportunity?.sources && typeof opportunity.sources === "object" ? opportunity.sources : {};
+  return [
+    opportunity?.buyer,
+    opportunity?.source,
+    source?.name,
+    payload.buyer,
+    payload.extracted_buyer,
+    payload.source_name,
+  ].map(normalizeText).filter((value) => value.length >= 5);
+}
+
+function stripMetadataNames(text, opportunity) {
+  let result = ` ${normalizeText(text)} `;
+  for (const name of getOpportunityMetadataNames(opportunity)) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+    result = result.replace(new RegExp(`(^|\\s)${escaped}(?=\\s|$)`, "g"), " ");
+  }
+  return result.replace(/\s+/g, " ").trim();
+}
+
 function opportunityText(opportunity) {
-  return normalizeText([
+  return stripMetadataNames([
     opportunity?.title,
     opportunity?.description,
     opportunity?.category,
-    opportunity?.location,
     ...asArray(opportunity?.keywords),
-  ].filter(Boolean).join(" "));
+  ].filter(Boolean).join(" "), opportunity);
+}
+
+function isMalformedKeyword(keyword, services) {
+  const normalized = normalizeText(keyword);
+  if (normalized.length < 3) return true;
+  return services.some((service) => {
+    const serviceTerm = normalizeText(service);
+    return serviceTerm.length > normalized.length &&
+      serviceTerm.length - normalized.length <= 2 &&
+      serviceTerm.endsWith(normalized);
+  });
+}
+
+function termsOverlap(left, right) {
+  const a = normalizeText(left);
+  const b = normalizeText(right);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (Math.min(a.length, b.length) < 4) return false;
+  return textIncludes(a, b) || textIncludes(b, a);
 }
 
 function isCivilWeakGenericTerm(value) {
@@ -105,6 +165,23 @@ function rankMatchTerm(value) {
 
 function sortMatchTermsBySpecificity(values) {
   return [...values].sort((a, b) => rankMatchTerm(a) - rankMatchTerm(b) || b.length - a.length || a.localeCompare(b));
+}
+
+function dedupeMatchEvidence(serviceHits, keywordHits) {
+  const accepted = [];
+  const services = [];
+  const keywords = [];
+  for (const service of sortMatchTermsBySpecificity(serviceHits)) {
+    if (accepted.some((term) => termsOverlap(term, service))) continue;
+    accepted.push(service);
+    services.push(service);
+  }
+  for (const keyword of sortMatchTermsBySpecificity(keywordHits)) {
+    if (accepted.some((term) => termsOverlap(term, keyword))) continue;
+    accepted.push(keyword);
+    keywords.push(keyword);
+  }
+  return { serviceHits: services, keywordHits: keywords };
 }
 
 function profileText(profile) {
@@ -135,14 +212,14 @@ function getCivilContractorFit(profile, opportunity, serviceHits, keywordHits) {
   }
 
   const text = opportunityText(opportunity);
-  const hasStrongCivilTerm = normalizedIncludesAny(text, CIVIL_STRONG_SERVICE_TERMS);
-  const hasWinterTerm = normalizedIncludesAny(text, CIVIL_OPTIONAL_WINTER_SERVICE_TERMS);
+  const hasStrongCivilTerm = CIVIL_STRONG_SERVICE_TERMS.some((term) => textIncludes(text, term));
+  const hasWinterTerm = CIVIL_OPTIONAL_WINTER_SERVICE_TERMS.some((term) => textIncludes(text, term));
   const hasEligibleWinterTerm = hasWinterTerm && hasExplicitProfileTerm(profile, CIVIL_OPTIONAL_WINTER_SERVICE_TERMS);
-  const hasIndoorTerm = normalizedIncludesAny(text, CIVIL_INDOOR_DOWNGRADE_TERMS);
-  const hasConsultingTerm = normalizedIncludesAny(text, CIVIL_CONSULTING_DOWNGRADE_TERMS);
-  const detectedStrongTerms = CIVIL_STRONG_SERVICE_TERMS.filter((term) => text.includes(normalizeText(term)));
+  const hasIndoorTerm = CIVIL_INDOOR_DOWNGRADE_TERMS.some((term) => textIncludes(text, term));
+  const hasConsultingTerm = CIVIL_CONSULTING_DOWNGRADE_TERMS.some((term) => textIncludes(text, term));
+  const detectedStrongTerms = CIVIL_STRONG_SERVICE_TERMS.filter((term) => textIncludes(text, term));
   const detectedWinterTerms = hasEligibleWinterTerm
-    ? CIVIL_OPTIONAL_WINTER_SERVICE_TERMS.filter((term) => text.includes(normalizeText(term)))
+    ? CIVIL_OPTIONAL_WINTER_SERVICE_TERMS.filter((term) => textIncludes(text, term))
     : [];
   const hasAnySpecificHit = [...serviceHits, ...keywordHits].some((hit) => !isCivilWeakGenericTerm(hit));
   const hasWeakGenericHit = [...serviceHits, ...keywordHits].some(isCivilWeakGenericTerm);
@@ -274,14 +351,18 @@ export function calculateCompanyOpportunityMatch(profile, opportunity, options =
     reasons.push(`Matches your ${profile.industry} industry`);
   }
 
-  const rawServiceHits = asArray(profile.services).filter((service) => textIncludes(text, service));
-  const rawKeywordHits = asArray(profile.includeKeywords).filter((keyword) => textIncludes(text, keyword));
+  const profileServices = asArray(profile.services);
+  const rawServiceHits = profileServices.filter((service) => textIncludes(text, service));
+  const rawKeywordHits = asArray(profile.includeKeywords)
+    .filter((keyword) => !isMalformedKeyword(keyword, profileServices))
+    .filter((keyword) => textIncludes(text, keyword));
   const civilFit = getCivilContractorFit(profile, opportunity, rawServiceHits, rawKeywordHits);
-  for (const service of civilFit.serviceHits) {
+  const evidence = dedupeMatchEvidence(civilFit.serviceHits, civilFit.keywordHits);
+  for (const service of evidence.serviceHits) {
     score += 10;
     reasons.push(`Mentions your service: ${service}`);
   }
-  for (const keyword of civilFit.keywordHits) {
+  for (const keyword of evidence.keywordHits) {
     score += 8;
     reasons.push(`Contains your keyword: ${keyword}`);
   }
@@ -370,6 +451,20 @@ export function calculateCompanyOpportunityMatch(profile, opportunity, options =
     risks.push("Winter/snow service fit; verify capacity and scope");
   }
 
+  const hasSubstantiveScopeFit = [...evidence.serviceHits, ...evidence.keywordHits]
+    .some((term) => !isCivilWeakGenericTerm(term));
+  if (!hasSubstantiveScopeFit) {
+    score = Math.min(score, 40);
+    risks.push("Insufficient relevant work-scope evidence; geography, travel, value, and deadline cannot establish fit");
+  }
+
+  const specialistTerms = SPECIALIST_CAPABILITY_TERMS.filter((term) => textIncludes(text, term));
+  const profileHasSpecialistCapability = SPECIALIST_CAPABILITY_TERMS.some((term) =>
+    [...profileServices, ...asArray(profile.includeKeywords)].some((value) => termsOverlap(value, term))
+  );
+  const requiresCapabilityReview = specialistTerms.length > 0 && !profileHasSpecialistCapability;
+  if (requiresCapabilityReview) risks.push(CAPABILITY_REVIEW_RISK);
+
   score = Math.max(0, Math.min(100, Math.round(score)));
   const matchLabel = getMatchLabel(score);
   const matchReasons = reasons.slice(0, 5);
@@ -392,7 +487,14 @@ export function calculateCompanyOpportunityMatch(profile, opportunity, options =
     risks: uniqueRisks,
     nextSteps,
     next_steps: nextSteps,
-    has_company_fit: categoryMatch || civilFit.serviceHits.length > 0 || civilFit.keywordHits.length > 0,
+    has_company_fit: hasSubstantiveScopeFit,
+    has_substantive_scope_fit: hasSubstantiveScopeFit,
+    requires_capability_review: requiresCapabilityReview,
     location_category: locationCategory,
   };
+}
+
+export function requiresCustomerCapabilityReview(match) {
+  if (match?.requires_capability_review === true) return true;
+  return asArray(match?.risks).some((risk) => /specialist capability|project scale|subcontracting suitability/i.test(risk));
 }

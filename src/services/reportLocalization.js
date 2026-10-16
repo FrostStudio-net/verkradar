@@ -142,6 +142,12 @@ export function normalizeReportRisk(risk, language = "is") {
     if (lower.includes("check capacity and profitability")) return "Meta getu og arðsemi.";
     if (lower.includes("prepare questions before the deadline")) return "Undirbúa fyrirspurnir fyrir skilafrest.";
     if (lower.includes("verify capacity and scope")) return "Staðfestið umfang og getu.";
+    if (lower.includes("specialist capability") || lower.includes("project scale") || lower.includes("subcontracting suitability")) {
+      return "Staðfesta þarf sérhæfða getu, umfang verks og hvort undirverktakaþátttaka eigi við.";
+    }
+    if (lower.includes("insufficient relevant work-scope evidence")) {
+      return "Ekki fundust nægilega sterk gögn um að verkumfang passi við þjónustuna.";
+    }
   }
   return value;
 }

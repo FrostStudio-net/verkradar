@@ -12,6 +12,7 @@ import {
   buildEvaluationLabelPayload,
   buildMatchDecisionPayload,
   buildReportEmail,
+  getCustomerReadyReportMatches,
   clearStoredPendingInviteToken,
   cleanStringArray,
   cleanReportReasons,
@@ -2670,7 +2671,7 @@ async function loadAdminCompanies() {
         supabaseClient.from("company_keywords").select("company_id, keyword, type").in("company_id", companyIds),
         supabaseClient
           .from("opportunity_matches")
-          .select("id, company_id, opportunity_id, match_score, match_label, safety_status, ai_review_status, ai_review_fit, ai_review_confidence, ai_reviewed_at, ai_review_skipped_reason, opportunities(title, buyer, location, raw_payload, source_id, sources(name))")
+          .select("id, company_id, opportunity_id, match_score, match_label, match_reasons, risks, safety_status, safety_reasons, alert_eligible, review_required, reviewed_at, review_note, ai_review_status, ai_review_fit, ai_review_confidence, ai_reviewed_at, ai_review_skipped_reason, opportunities(title, buyer, location, raw_payload, source_id, sources(name))")
           .in("company_id", companyIds),
         supabaseClient.from("reports").select("id, company_id, title, created_at, period_start, period_end, status").in("company_id", companyIds).order("created_at", { ascending: false }),
         supabaseClient.from("ai_match_reviews").select("id, company_id, opportunity_id, match_id, fit, confidence, send_to_client, reason, reviewed_profile_hash, profile_updated_at, company_services_snapshot, company_locations_snapshot, created_at, updated_at").in("company_id", companyIds),
@@ -6951,14 +6952,27 @@ function calculateMatch(profile, opp) {
 function reconcileStoredMatchForCurrentProfile(opp) {
   if (!state.profile || !isCivilContractorProfile(state.profile)) return opp;
   const recalculated = calculateMatch(state.profile, opp);
-  if (Number(recalculated.matchScore || 0) >= Number(opp.matchScore || 0)) return opp;
-  return {
+  const useLowerRecalculatedScore = Number(recalculated.matchScore || 0) < Number(opp.matchScore || 0);
+  const needsCapabilityReview = recalculated.requires_capability_review === true && !opp.reviewedAt;
+  if (!useLowerRecalculatedScore && !needsCapabilityReview) return opp;
+  const reconciled = {
     ...opp,
-    matchScore: recalculated.matchScore,
-    matchLabel: recalculated.matchLabel,
-    matchReasons: recalculated.matchReasons,
-    risks: recalculated.risks,
-    nextSteps: recalculated.nextSteps
+    ...(useLowerRecalculatedScore ? {
+      matchScore: recalculated.matchScore,
+      matchLabel: recalculated.matchLabel,
+      matchReasons: recalculated.matchReasons,
+      risks: recalculated.risks,
+      nextSteps: recalculated.nextSteps,
+    } : {}),
+    requiresCapabilityReview: recalculated.requires_capability_review === true,
+  };
+  if (!needsCapabilityReview) return reconciled;
+  return {
+    ...reconciled,
+    safetyStatus: "needs_review",
+    safetyReasons: ["Specialist capability, project scale, or subcontracting suitability is unverified"],
+    alertEligible: false,
+    reviewRequired: true,
   };
 }
 
@@ -8841,10 +8855,20 @@ async function copyAdminReportEmail(reportId) {
   }
   const companyName = report.companies?.company_name || "Company";
   const detailedMatches = getSavedReportItemMatches(report);
+  const company = (state.adminCompanies || []).find((item) => item.id === report.company_id);
+  const customerReadyMatches = getCustomerReadyReportMatches({
+    profile: company,
+    matches: detailedMatches,
+    currentMatches: company?.latestMatches || [],
+  });
+  if (!detailedMatches.length || customerReadyMatches.length !== detailedMatches.length) {
+    showToast("Report contains matches that are no longer customer-ready. Generate a new report before copying.", "error");
+    return;
+  }
   const text = buildReportEmail({
     companyName,
     language: state.language,
-    matches: detailedMatches.map((match) => ({
+    matches: customerReadyMatches.map((match) => ({
       ...match,
       buyer: formatOpportunityBuyer(match),
       deadline: formatOpportunityDeadlineForReport(match),

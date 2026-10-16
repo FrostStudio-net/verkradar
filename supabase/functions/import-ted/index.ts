@@ -5,7 +5,7 @@ import {
   isProcurementOpportunityEligible,
   preserveAdminClassification,
 } from "../_shared/procurement-stage.js";
-import { calculateCompanyOpportunityMatch, COMPANY_MATCH_THRESHOLD } from "../_shared/company-matcher.js";
+import { calculateCompanyOpportunityMatch, COMPANY_MATCH_THRESHOLD, requiresCustomerCapabilityReview } from "../_shared/company-matcher.js";
 
 type ImportSummary = {
   fetched: number;
@@ -656,7 +656,7 @@ async function generateWeeklyReports(supabase: ReturnType<typeof createClient>) 
       supabase.from("company_keywords").select("keyword, type").eq("company_id", company.id),
       supabase
         .from("opportunity_matches")
-        .select("match_score, safety_status, alert_eligible, opportunities(*)")
+        .select("match_score, safety_status, alert_eligible, review_required, reviewed_at, opportunities(*)")
         .eq("company_id", company.id)
         .gte("match_score", MIN_MATCH_SCORE)
         .eq("safety_status", "auto_approved")
@@ -670,12 +670,18 @@ async function generateWeeklyReports(supabase: ReturnType<typeof createClient>) 
     if (keywordsResult.error) throw keywordsResult.error;
     if (matchesResult.error) throw matchesResult.error;
 
+    const profile = mapCompanyProfile(
+      company,
+      servicesResult.data || [],
+      locationsResult.data || [],
+      keywordsResult.data || [],
+    );
     const matches = (matchesResult.data || [])
       .filter((row) => row.opportunities)
       .filter((row) => isCustomerMatchEligibleOpportunity(row.opportunities as Record<string, unknown>, TED_SOURCE_NAME))
       .map((row) => {
         const opportunity = row.opportunities as Record<string, unknown>;
-        return {
+        const reportMatch = {
           id: String(opportunity.id || ""),
           title: String(opportunity.title || "Untitled opportunity"),
           buyer: String(opportunity.buyer || "Unknown buyer"),
@@ -700,17 +706,20 @@ async function generateWeeklyReports(supabase: ReturnType<typeof createClient>) 
           requirements: Array.isArray(opportunity.requirements) ? opportunity.requirements as string[] : [],
           keywords: Array.isArray(opportunity.keywords) ? opportunity.keywords as string[] : [],
         };
+        const currentMatch = calculateCompanyOpportunityMatch(profile, reportMatch);
+        return {
+          ...reportMatch,
+          ...currentMatch,
+          reviewedAt: row.reviewed_at || null,
+        };
       })
+      .filter((match) => Number(match.matchScore || 0) >= MIN_MATCH_SCORE)
+      .filter((match) => match.has_substantive_scope_fit === true)
+      .filter((match) => !requiresCustomerCapabilityReview(match) || Boolean(match.reviewedAt))
       .filter((match) => match.id);
 
     if (!matches.length) continue;
 
-    const profile = mapCompanyProfile(
-      company,
-      servicesResult.data || [],
-      locationsResult.data || [],
-      keywordsResult.data || [],
-    );
     const report = buildWeeklyReport(profile, matches, periodStart, periodEnd);
 
     const { data: createdReport, error: reportError } = await supabase
@@ -1077,7 +1086,7 @@ function classifyMatchSafety(profile: Record<string, unknown>, match: Record<str
     ? match.raw_payload as Record<string, unknown>
     : {};
   const adminStatus = String(payload.admin_report_status || "").toLowerCase();
-  if (adminStatus === "include") {
+  if (adminStatus === "include" && !requiresCustomerCapabilityReview(match)) {
     return {
       safety_status: "auto_approved",
       safety_reasons: ["Admin override includes this opportunity in customer reports"],
@@ -1104,13 +1113,14 @@ function classifyMatchSafety(profile: Record<string, unknown>, match: Record<str
   if (!deadline && requiresSupplierDeadline) reasons.push("No reliable deadline was found");
   if (risks.some((risk) => /broad construction|low confidence/i.test(risk))) reasons.push("Match depends on broad or low-confidence terms");
   if (risks.some((risk) => /indoor|finishing|outside your core civil services/i.test(risk))) reasons.push("Possible service mismatch for this company profile");
+  if (requiresCustomerCapabilityReview(match)) reasons.push("Specialist capability, project scale, or subcontracting suitability is unverified");
   if (containsReviewOnlyTerms(match) && !companyExplicitlyAllowsReviewOnlyWork(profile)) {
     reasons.push("Mentions design, consulting, supervision, or project management terms");
   }
 
   const autoApproved = (requiresSupplierDeadline ? hasFutureDeadline : true) &&
     hasStrongWorkTypeFit &&
-    !reasons.some((reason) => /missing|generic|broad|mismatch|consulting|supervision|project management/i.test(reason));
+    !reasons.some((reason) => /missing|generic|broad|mismatch|consulting|supervision|project management|specialist capability|project scale|subcontracting/i.test(reason));
 
   if (autoApproved) {
     return {

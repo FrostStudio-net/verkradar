@@ -47,7 +47,7 @@ export {
 } from "./services/trialRequests.js";
 export { loadAdminContactRequests, submitContactRequest } from "./services/contactRequests.js";
 export { localizeLegacyReportContent } from "./services/reports.js";
-export { buildReportEmail } from "./services/reportDelivery.js";
+export { buildReportEmail, getCustomerReadyReportMatches } from "./services/reportDelivery.js";
 export { cleanReportReasons, getReportEmailStatus, getReportScoreLabel, getReportStatusBadge, getReportUiLabel, getReportVerificationSentence, normalizeReportRisk } from "./services/reportLocalization.js";
 export { getAiReportPlacement, hasFutureDeadline, mergeAiReviewsIntoReportMatches, sortAiReportMatches } from "./services/reportAiRanking.js";
 export { SUPABASE_URL, SUPABASE_ANON_KEY, supabaseClient } from "./supabaseClient.js";
