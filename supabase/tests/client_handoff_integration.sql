@@ -43,10 +43,16 @@ exception
   when insufficient_privilege then null;
 end $$;
 
--- Exercise the exact trigger privilege boundary that previously produced 42501.
-update public.opportunity_matches
-set opportunity_id = opportunity_id
-where company_id = 'cad6b69e-b021-447d-b637-31b2e8dbff2e'
-  and opportunity_id = 'e06bf06b-8af8-4ff7-b00a-2cd5ff8a1ea4';
+-- Canonical matches are server-owned. Customer sessions may read but never
+-- mutate match rows, including no-op updates.
+do $$
+begin
+  update public.opportunity_matches
+  set opportunity_id = opportunity_id
+  where company_id = 'cad6b69e-b021-447d-b637-31b2e8dbff2e';
+  raise exception 'CLIENT HANDOFF ASSERTION FAILED: customer updated a canonical match';
+exception
+  when insufficient_privilege then null;
+end $$;
 
 rollback;

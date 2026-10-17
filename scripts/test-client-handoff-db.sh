@@ -10,4 +10,6 @@ root_dir="$(cd "$(dirname "$0")/.." && pwd)"
 psql "$CLIENT_HANDOFF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
   -f "$root_dir/supabase/migrations/20260902130000_gardathjonusta_client_handoff.sql"
 psql "$CLIENT_HANDOFF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
+  -f "$root_dir/supabase/migrations/20261017113000_opportunity_match_customer_read_only.sql"
+psql "$CLIENT_HANDOFF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
   -f "$root_dir/supabase/tests/client_handoff_integration.sql"

@@ -8,6 +8,7 @@ import { renderAdminCompanyProfilePanel } from "../../../src/pages/adminCompanyP
 const app = readFileSync(new URL("../../../app.js", import.meta.url), "utf8");
 const css = readFileSync(new URL("../../../styles.css", import.meta.url), "utf8");
 const migration = readFileSync(new URL("../../../supabase/migrations/20260902130000_gardathjonusta_client_handoff.sql", import.meta.url), "utf8");
+const matchSecurityMigration = readFileSync(new URL("../../../supabase/migrations/20261017113000_opportunity_match_customer_read_only.sql", import.meta.url), "utf8");
 const inviteFunction = readFileSync(new URL("../../../supabase/functions/company-invite/index.ts", import.meta.url), "utf8");
 const identity = (value) => String(value ?? "");
 
@@ -58,10 +59,14 @@ test("database keeps plan and billing columns outside authenticated customer gra
   }
 });
 
-test("customer match refresh uses an owner-executed guard without exposing quarantine helper", () => {
-  assert.match(migration, /v2_phase_c_guard_downstream_link\(\)[\s\S]*security definer/);
-  assert.match(migration, /revoke all on function public\.v2_phase_c_guard_downstream_link\(\) from public, anon, authenticated/);
-  assert.doesNotMatch(migration, /grant execute on function public\.v2_phase_c_is_quarantined\(uuid\) to authenticated/);
+test("customer match access is read-only and browser matching never writes canonical rows", () => {
+  assert.match(matchSecurityMigration, /revoke all on public\.opportunity_matches from public, anon, authenticated/i);
+  assert.match(matchSecurityMigration, /grant select on public\.opportunity_matches to authenticated/i);
+  assert.match(matchSecurityMigration, /create policy "Company members read opportunity matches"[\s\S]*for select[\s\S]*is_company_member\(company_id\)/i);
+  assert.doesNotMatch(matchSecurityMigration, /for (?:all|insert|update|delete)[\s\S]*is_company_member\(company_id\)/i);
+  const customerRefresh = app.match(/async function runMatchingForCurrentCompany\(\)[\s\S]*?\n}\n\nasync function addOpportunity/)?.[0] || "";
+  assert.doesNotMatch(customerRefresh, /\.from\("opportunity_matches"\)/);
+  assert.match(customerRefresh, /runAdminCompanyAction\(company\.id, "refresh_matches"\)/);
 });
 
 test("report hiding uses an accessible custom confirmation dialog", () => {

@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
-import { isProcurementOpportunityEligible } from "../_shared/procurement-stage.js";
+import { deriveActionableForSuppliers, isProcurementOpportunityEligible, normalizeProcurementStage } from "../_shared/procurement-stage.js";
 import { isExplicitLocationAliasMatch } from "../_shared/location-aliases.js";
 import { calculateCompanyOpportunityMatch, COMPANY_MATCH_THRESHOLD, requiresCustomerCapabilityReview } from "../_shared/company-matcher.js";
 
@@ -97,6 +97,15 @@ Deno.serve(async (req) => {
     if (action === "delete_trial_request") {
       const trialRequestId = String(body.trialRequestId || "").trim();
       const result = await deleteTrialRequest(adminClient, { trialRequestId });
+      return json({ ok: true, action, ...result });
+    }
+    if (action === "sync_opportunity_match_safety") {
+      const opportunityId = String(body.opportunityId || "").trim();
+      if (!isUuid(opportunityId)) return jsonError("A valid opportunityId is required.", "INVALID_OPPORTUNITY_ID", 400);
+      const result = await syncOpportunityMatchSafety(adminClient, {
+        opportunityId,
+        procurementStage: String(body.procurementStage || ""),
+      });
       return json({ ok: true, action, ...result });
     }
     if (!isUuid(companyId)) return jsonError("A valid companyId is required.", "INVALID_COMPANY_ID", 400);
@@ -919,6 +928,39 @@ async function reviewOpportunityMatch(
     opportunity_id: data.opportunity_id,
     safety_status: data.safety_status,
     message: approved ? "Match approved for customer reports." : "Match rejected and hidden for this company.",
+  };
+}
+
+async function syncOpportunityMatchSafety(
+  supabase: ReturnType<typeof createClient>,
+  options: { opportunityId: string; procurementStage: string },
+) {
+  const procurementStage = normalizeProcurementStage(options.procurementStage);
+  const requiresAdminReview = procurementStage === "uncertain";
+  const actionableForSuppliers = !requiresAdminReview && deriveActionableForSuppliers(procurementStage);
+  const update = actionableForSuppliers
+    ? {
+      safety_status: "needs_review",
+      safety_reasons: ["Procurement stage changed; refresh company relevance before reporting"],
+      alert_eligible: false,
+      review_required: true,
+    }
+    : {
+      safety_status: "hidden",
+      safety_reasons: [`Procurement stage is ${procurementStage}`],
+      alert_eligible: false,
+      review_required: requiresAdminReview,
+    };
+  const { data, error } = await supabase
+    .from("opportunity_matches")
+    .update(update)
+    .eq("opportunity_id", options.opportunityId)
+    .select("id");
+  if (error) throw error;
+  return {
+    opportunity_id: options.opportunityId,
+    procurement_stage: procurementStage,
+    matches_updated: data?.length || 0,
   };
 }
 

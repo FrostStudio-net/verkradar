@@ -3551,6 +3551,24 @@ async function runAdminCompanyAction(companyId, action, extra = {}) {
   return payload;
 }
 
+async function runAdminOpportunityAction(action, extra = {}) {
+  const endpoint = getAdminCompanyActionsEndpoint();
+  if (!endpoint) {
+    throw new Error("Admin company actions are not configured. Set window.VERKRADAR_ADMIN_COMPANY_ACTIONS_URL or window.VERKRADAR_SUPABASE_URL.");
+  }
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: await getTedImportHeaders(),
+    body: JSON.stringify({ action, ...extra })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error || `Admin opportunity action failed with status ${response.status}`);
+  }
+  return payload;
+}
+
 function formatAdminReportMode(mode) {
   return mode === "all_current" ? "current active opportunities" : "new opportunities";
 }
@@ -5552,67 +5570,22 @@ async function runMatchingForCurrentCompany() {
     if (!company) throw new Error("No Supabase company profile found. Save onboarding first.");
 
     state.companyId = company.id;
-    const [servicesResult, locationsResult, keywordsResult, opportunitiesResult] = await Promise.all([
-      supabaseClient.from("company_services").select("service").eq("company_id", company.id),
-      supabaseClient.from("company_locations").select("location").eq("company_id", company.id),
-      supabaseClient.from("company_keywords").select("keyword, type").eq("company_id", company.id),
-      supabaseClient.from("opportunities").select("*, sources(name, source_type)").eq("status", "open")
-    ]);
-
-    if (servicesResult.error) throw servicesResult.error;
-    if (locationsResult.error) throw locationsResult.error;
-    if (keywordsResult.error) throw keywordsResult.error;
-    if (opportunitiesResult.error) throw opportunitiesResult.error;
-
-    const profile = mapSupabaseCompanyProfile(
-      company,
-      servicesResult.data || [],
-      locationsResult.data || [],
-      keywordsResult.data || []
-    );
     const wasDraftDirty = state.profileDraftDirty;
-    const matched = (opportunitiesResult.data || [])
-      .map(mapSupabaseOpportunity)
-      .filter(isCustomerMatchEligibleOpportunity)
-      .filter(isDashboardVisibleOpportunity)
-      .map((opportunity) => calculateMatch(profile, opportunity))
-      .filter((match) => match.matchScore >= COMPANY_MATCH_THRESHOLD);
-
-    const rows = matched.map((match) => ({
-      company_id: company.id,
-      opportunity_id: match.id,
-      match_score: match.matchScore,
-      match_label: match.matchLabel,
-      match_reasons: match.matchReasons,
-      risks: match.risks,
-      next_steps: match.nextSteps,
-      calculated_at: new Date().toISOString()
-    }));
-
-    const { error: deleteError } = await supabaseClient
-      .from("opportunity_matches")
-      .delete()
-      .eq("company_id", company.id);
-    if (deleteError) throw deleteError;
-
-    if (rows.length) {
-      const { error: insertError } = await supabaseClient
-        .from("opportunity_matches")
-        .insert(rows);
-      if (insertError) throw insertError;
+    if (state.isAdmin) {
+      await runAdminCompanyAction(company.id, "refresh_matches");
     }
-
-    state.profile = profile;
-    saveProfile(profile);
+    await loadStoredMatchesForCurrentCompany();
+    const matchCount = state.storedMatches.length;
     if (!wasDraftDirty) {
-      replaceProfileDraftFromProfile(profile);
+      replaceProfileDraftFromProfile(state.profile);
     }
-    const plural = rows.length === 1 ? "match" : "matches";
-    state.matchStatus = { type: "success", text: `Matching complete - ${rows.length} stored ${plural} found.` };
+    const plural = matchCount === 1 ? "match" : "matches";
+    state.matchStatus = state.isAdmin
+      ? { type: "success", text: `Matching complete - ${matchCount} stored ${plural} found.` }
+      : { type: "success", text: `Profile saved - ${matchCount} current ${plural}. New matches are refreshed automatically.` };
     await loadOpportunities();
     await loadOpportunityActionsForCurrentCompany();
-    await loadStoredMatchesForCurrentCompany();
-    return rows.length;
+    return matchCount;
   } catch (error) {
     console.error("Failed to run matching:", error);
     state.matchStatus = { type: "error", text: `Failed to run matching. ${formatSupabaseError(error)}` };
@@ -5872,29 +5845,10 @@ async function updateOpportunityReportOverride(id, override) {
       .eq("id", id);
     if (error) throw error;
 
-    if (!actionableForSuppliers) {
-      const { error: matchesError } = await supabaseClient
-        .from("opportunity_matches")
-        .update({
-          safety_status: "hidden",
-          safety_reasons: [`Procurement stage is ${selection.stage}`],
-          alert_eligible: false,
-          review_required: requiresAdminReview
-        })
-        .eq("opportunity_id", id);
-      if (matchesError) throw matchesError;
-    } else {
-      const { error: matchesError } = await supabaseClient
-        .from("opportunity_matches")
-        .update({
-          safety_status: "needs_review",
-          safety_reasons: ["Procurement stage changed; refresh company relevance before reporting"],
-          alert_eligible: false,
-          review_required: true
-        })
-        .eq("opportunity_id", id);
-      if (matchesError) throw matchesError;
-    }
+    await runAdminOpportunityAction("sync_opportunity_match_safety", {
+      opportunityId: id,
+      procurementStage: selection.stage
+    });
 
     state.adminMessage = { type: "success", text: "Report visibility updated." };
     await loadOpportunities();
