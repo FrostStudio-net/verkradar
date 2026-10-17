@@ -6,7 +6,8 @@ do $$
 begin
   if has_column_privilege('authenticated', 'public.companies', 'plan', 'UPDATE')
     or has_column_privilege('authenticated', 'public.companies', 'selected_plan', 'UPDATE')
-    or has_column_privilege('authenticated', 'public.companies', 'billing_status', 'UPDATE') then
+    or has_column_privilege('authenticated', 'public.companies', 'billing_status', 'UPDATE')
+    or has_column_privilege('authenticated', 'public.companies', 'auto_alert_mode', 'UPDATE') then
     raise exception 'CLIENT HANDOFF ASSERTION FAILED: customer role can update billing fields';
   end if;
   if not has_column_privilege('authenticated', 'public.companies', 'contact_name', 'UPDATE') then

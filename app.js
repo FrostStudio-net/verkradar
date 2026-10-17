@@ -5160,6 +5160,10 @@ async function saveCompanyProfile(profile) {
   }
   state.user = user;
 
+  if (!state.companyId) {
+    throw new Error("Company profiles are created by VerkRadar through the trial and invite process.");
+  }
+
   const companyPayload = {
     company_name: cleanProfile.companyName,
     contact_email: cleanProfile.contactEmail || user.email,
@@ -5182,16 +5186,17 @@ async function saveCompanyProfile(profile) {
     report_frequency: cleanProfile.reportFrequency,
     report_day: cleanProfile.reportDay,
     deadline_reminders: cleanProfile.deadlineReminders,
-    include_low_confidence: cleanProfile.includeLowConfidence,
-    auto_alert_mode: cleanProfile.autoAlertMode
+    include_low_confidence: cleanProfile.includeLowConfidence
   };
-  const companyRequest = state.companyId
-    ? supabaseClient.from("companies").update(companyPayload).eq("id", state.companyId).select("id").single()
-    : supabaseClient.from("companies").upsert({ ...companyPayload, owner_id: user.id }, { onConflict: "owner_id" }).select("id").single();
-  const { data: company, error: companyError } = await companyRequest;
+  const { data: company, error: companyError } = await supabaseClient
+    .from("companies")
+    .update(companyPayload)
+    .eq("id", state.companyId)
+    .select("id")
+    .single();
 
   if (companyError) {
-    console.error("Company upsert error:", companyError);
+    console.error("Company update error:", companyError);
     throw companyError;
   }
   if (state.companyId !== company.id) {
