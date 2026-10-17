@@ -888,12 +888,24 @@ test("admin v2 panel render path resolves control gating without free variables"
   assert.doesNotMatch(html, /Promote/);
 });
 
-test("Akranes detail enrichment recovers deadline/reference and follow-up safely", () => {
+test("Akranes detail enrichment recovers deadline/reference without treating a future opening meeting as an award", () => {
   const result = extractAkranesDetailMetadata("<p>EES útboð nr. 74814-2026. Tilboðum skal skilað 12. 06. 2026. Opnunarfundur verður haldinn.</p>");
   assert.equal(result.deadline, "2026-06-12");
   assert.equal(result.procurement_reference, "74814-2026");
-  assert.equal(result.tender_status, "follow_up_or_award");
+  assert.equal(result.tender_status, null);
   assert.equal(result.enrichment_status, "enriched");
+
+  const followup = extractAkranesDetailMetadata("<p>Niðurstaða útboðs: samningur undirritaður.</p>");
+  assert.equal(followup.tender_status, "follow_up_or_award");
+});
+
+test("Akranes reference extraction requires explicit procurement context", () => {
+  const absent = extractAkranesDetailMetadata("<p>Tilboðum skal skilað 12. 06. 2026. Engin útboðstilvísun er birt.</p>");
+  assert.equal(absent.deadline, "2026-06-12");
+  assert.equal(absent.procurement_reference, null);
+
+  const unrelated = extractAkranesDetailMetadata("<p>Sími 433 1000. Dagsetning 12. 06. 2026. Póstnúmer 300.</p>");
+  assert.equal(unrelated.procurement_reference, null);
 });
 
 test("Akranes enrichment returns safe no-op for malformed/empty detail", () => {
