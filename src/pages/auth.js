@@ -1,3 +1,5 @@
+import { renderAuthCaptchaSlot } from "../services/authSecurity.js";
+
 function renderAuthFormMessage({ authMessage, escapeHtml }) {
   if (!authMessage) return "";
   const actions = Array.isArray(authMessage.actions) ? authMessage.actions : [];
@@ -17,7 +19,7 @@ function renderAuthFormMessage({ authMessage, escapeHtml }) {
   `;
 }
 
-export function renderLoginPage({ t, escapeHtml, authForm, authSubmitting, authMessage, signupHref = "/signup", signupLabel = "", forgotPasswordHref = "/forgot-password" }) {
+export function renderLoginPage({ t, escapeHtml, authForm, authSubmitting, authMessage, captchaEnabled = false, signupHref = "/signup", signupLabel = "", forgotPasswordHref = "/forgot-password" }) {
   const secondaryCta = signupLabel || t("createAccount");
   return `
     <section class="auth-page">
@@ -34,6 +36,7 @@ export function renderLoginPage({ t, escapeHtml, authForm, authSubmitting, authM
             <label class="form-group">${escapeHtml(t("email"))} <input type="email" name="email" data-auth-field="email" value="${escapeHtml(authForm.email)}" autocomplete="email" required /></label>
             <label class="form-group">${escapeHtml(t("password"))} <input type="password" name="password" data-auth-field="password" value="${escapeHtml(authForm.password)}" autocomplete="current-password" required /></label>
             <p class="auth-help-link"><button type="button" data-action="go" data-href="${escapeHtml(forgotPasswordHref)}">${escapeHtml(t("forgotPassword"))}</button></p>
+            ${renderAuthCaptchaSlot({ enabled: captchaEnabled, label: escapeHtml(t("captchaLabel")), helpText: escapeHtml(t("captchaHelp")) })}
             <div class="auth-actions">
               <button class="btn btn-primary btn-large" type="submit" ${authSubmitting ? "disabled" : ""}>
                 ${authSubmitting ? escapeHtml(t("loggingIn")) : escapeHtml(t("login"))}
@@ -47,7 +50,7 @@ export function renderLoginPage({ t, escapeHtml, authForm, authSubmitting, authM
   `;
 }
 
-export function renderForgotPasswordPage({ t, escapeHtml, authForm, authSubmitting, authMessage }) {
+export function renderForgotPasswordPage({ t, escapeHtml, authForm, authSubmitting, authMessage, captchaEnabled = false }) {
   return `
     <section class="auth-page">
       <div class="auth-layout">
@@ -61,6 +64,7 @@ export function renderForgotPasswordPage({ t, escapeHtml, authForm, authSubmitti
           ${renderAuthFormMessage({ authMessage, escapeHtml })}
           <form id="forgot-password-form" class="auth-card">
             <label class="form-group">${escapeHtml(t("email"))} <input type="email" name="email" data-auth-field="email" value="${escapeHtml(authForm.email)}" autocomplete="email" required /></label>
+            ${renderAuthCaptchaSlot({ enabled: captchaEnabled, label: escapeHtml(t("captchaLabel")), helpText: escapeHtml(t("captchaHelp")) })}
             <div class="auth-actions">
               <button class="btn btn-primary btn-large" type="submit" ${authSubmitting ? "disabled" : ""}>
                 ${authSubmitting ? escapeHtml(t("sending")) : escapeHtml(t("sendResetLink"))}
@@ -103,7 +107,7 @@ export function renderResetPasswordPage({ t, escapeHtml, authForm, authSubmittin
   `;
 }
 
-export function renderSignupPage({ t, escapeHtml, authForm, authSubmitting, authMessage, loginHref = "/login", inviteEmail = "", isInviteSignup = false }) {
+export function renderSignupPage({ t, escapeHtml, authForm, authSubmitting, authMessage, captchaEnabled = false, loginHref = "/login", inviteEmail = "", isInviteSignup = false }) {
   const emailValue = inviteEmail || authForm.email;
   const subtitle = isInviteSignup ? t("inviteCreateAccountSubtitle") : t("createAccountSubtitle");
   return `
@@ -119,8 +123,9 @@ export function renderSignupPage({ t, escapeHtml, authForm, authSubmitting, auth
           ${renderAuthFormMessage({ authMessage, escapeHtml })}
           <form id="signup-form" class="auth-card">
             <label class="form-group">${escapeHtml(t("email"))} <input type="email" name="email" data-auth-field="email" value="${escapeHtml(emailValue)}" autocomplete="email" ${isInviteSignup ? "readonly" : ""} required /></label>
-            <label class="form-group">${escapeHtml(t("password"))} <input type="password" name="password" data-auth-field="password" value="${escapeHtml(authForm.password)}" autocomplete="new-password" minlength="6" required /></label>
+            <label class="form-group">${escapeHtml(t("password"))} <input type="password" name="password" data-auth-field="password" value="${escapeHtml(authForm.password)}" autocomplete="new-password" minlength="8" required /></label>
             ${isInviteSignup ? `<p class="muted-text">${escapeHtml(t("inviteSignupEmailHelp"))}</p>` : ""}
+            ${renderAuthCaptchaSlot({ enabled: captchaEnabled, label: escapeHtml(t("captchaLabel")), helpText: escapeHtml(t("captchaHelp")) })}
             <div class="auth-actions">
               <button class="btn btn-primary btn-large" type="submit" ${authSubmitting ? "disabled" : ""}>
                 ${authSubmitting ? escapeHtml(t("creating")) : escapeHtml(t("createAccount"))}

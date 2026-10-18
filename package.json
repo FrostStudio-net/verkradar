@@ -27,6 +27,7 @@
     "test:independent-matcher": "node --test supabase/functions/tests/independent-matcher-automation.test.js",
     "test:automatic-ai-review": "node --test supabase/functions/tests/automatic-ai-review-automation.test.js",
     "test:frontend-cleanup": "node --test supabase/functions/tests/frontend-loading-ui.test.js",
+    "test:auth-frontend": "node --test supabase/functions/tests/auth-frontend-hardening.test.js",
     "test:admin-company-match-layout": "node --test supabase/functions/tests/admin-company-match-layout.test.js",
     "test:client-handoff": "node --test supabase/functions/tests/client-handoff.test.js",
     "test:client-handoff-db": "bash scripts/test-client-handoff-db.sh"

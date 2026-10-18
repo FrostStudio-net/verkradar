@@ -35,6 +35,11 @@ import {
   getAuthCallbackInfo,
   getAuthCallbackRedirectUrl,
   getAuthStateChangePlan,
+  addCaptchaToken,
+  consumeAuthCaptchaToken,
+  getCurrentAuthCaptchaConfig,
+  isValidNewPassword,
+  mountAuthCaptcha,
   getAppHashUrl,
   formatShortDate,
   buildCompanyDraftFromTrialRequest,
@@ -1677,14 +1682,24 @@ document.addEventListener("submit", async (event) => {
   if (event.target.id === "login-form") {
     event.preventDefault();
     const form = new FormData(event.target);
-    signIn(form.get("email"), form.get("password"));
+    const captchaToken = consumeCaptchaForAuthSubmission();
+    if (captchaToken === null) return;
+    signIn(form.get("email"), form.get("password"), captchaToken);
     return;
   }
 
   if (event.target.id === "signup-form") {
     event.preventDefault();
     const form = new FormData(event.target);
-    signUp(form.get("email"), form.get("password"));
+    const password = form.get("password");
+    if (!isValidNewPassword(password)) {
+      state.authMessage = { type: "error", text: t("passwordTooShort") };
+      render();
+      return;
+    }
+    const captchaToken = consumeCaptchaForAuthSubmission();
+    if (captchaToken === null) return;
+    signUp(form.get("email"), password, captchaToken);
     return;
   }
 
@@ -1765,7 +1780,9 @@ document.addEventListener("submit", async (event) => {
   if (event.target.id === "forgot-password-form") {
     event.preventDefault();
     const form = new FormData(event.target);
-    sendPasswordResetEmail(form.get("email"));
+    const captchaToken = consumeCaptchaForAuthSubmission();
+    if (captchaToken === null) return;
+    sendPasswordResetEmail(form.get("email"), captchaToken);
     return;
   }
 
@@ -4504,7 +4521,15 @@ function getExistingAccountAuthActions() {
   ];
 }
 
-async function signUp(email, password) {
+function consumeCaptchaForAuthSubmission() {
+  const result = consumeAuthCaptchaToken();
+  if (result.ok) return result.token;
+  state.authMessage = { type: "error", text: t("captchaRequired") };
+  render();
+  return null;
+}
+
+async function signUp(email, password, captchaToken = "") {
   syncPendingSignupPlanFromRoute();
   state.authSubmitting = true;
   state.authMessage = null;
@@ -4515,9 +4540,9 @@ async function signUp(email, password) {
     const { data, error } = await supabaseClient.auth.signUp({
       email: String(email || "").trim(),
       password: String(password || ""),
-      options: {
+      options: addCaptchaToken({
         emailRedirectTo: getAuthRedirectUrl()
-      }
+      }, captchaToken)
     });
     if (error) throw error;
     clearLocalProfileState();
@@ -4571,17 +4596,20 @@ async function signUp(email, password) {
   }
 }
 
-async function signIn(email, password) {
+async function signIn(email, password, captchaToken = "") {
   state.authSubmitting = true;
   state.authMessage = null;
   render();
 
   try {
     if (!supabaseClient) throw new Error("Supabase client is not configured.");
-    const { data, error } = await supabaseClient.auth.signInWithPassword({
+    const credentials = {
       email: String(email || "").trim(),
       password: String(password || "")
-    });
+    };
+    const options = addCaptchaToken({}, captchaToken);
+    if (Object.keys(options).length) credentials.options = options;
+    const { data, error } = await supabaseClient.auth.signInWithPassword(credentials);
     if (error) throw error;
     state.user = data.user || await getCurrentUser();
     state.currentUser = state.user;
@@ -4601,16 +4629,16 @@ async function signIn(email, password) {
   }
 }
 
-async function sendPasswordResetEmail(email) {
+async function sendPasswordResetEmail(email, captchaToken = "") {
   state.authSubmitting = true;
   state.authMessage = null;
   render();
 
   try {
     if (!supabaseClient) throw new Error("Supabase client is not configured.");
-    const { error } = await supabaseClient.auth.resetPasswordForEmail(String(email || "").trim(), {
+    const { error } = await supabaseClient.auth.resetPasswordForEmail(String(email || "").trim(), addCaptchaToken({
       redirectTo: getPasswordResetRedirectUrl()
-    });
+    }, captchaToken));
     if (error) throw error;
     state.authMessage = {
       type: "success",
@@ -4637,8 +4665,8 @@ async function updatePasswordFromReset(newPassword, confirmPassword) {
     render();
     return;
   }
-  if (password.length < 8) {
-    state.authMessage = { type: "error", text: "Password must be at least 8 characters." };
+  if (!isValidNewPassword(password)) {
+    state.authMessage = { type: "error", text: t("passwordTooShort") };
     render();
     return;
   }
@@ -7406,6 +7434,11 @@ function render() {
   else html = renderLanding();
 
   app.innerHTML = html;
+  mountAuthCaptcha({
+    language: state.language,
+    expiredMessage: t("captchaExpired"),
+    unavailableMessage: t("captchaUnavailable"),
+  });
   if (state.selectedOpportunityId) {
     const opp = getDashboardOpportunityById(state.selectedOpportunityId);
     if (opp) {
@@ -7763,6 +7796,7 @@ function renderLogin() {
     authForm: state.authForm,
     authSubmitting: state.authSubmitting,
     authMessage: state.authMessage,
+    captchaEnabled: getCurrentAuthCaptchaConfig().enabled,
     signupHref: state.pendingInviteToken ? getInviteAwareAuthHref("/signup") : "/trial",
     signupLabel: state.pendingInviteToken ? t("createAccount") : t("createFreeDemoProfile"),
     forgotPasswordHref: getInviteAwareAuthHref("/forgot-password")
@@ -7777,7 +7811,8 @@ function renderForgotPassword() {
     escapeHtml,
     authForm: state.authForm,
     authSubmitting: state.authSubmitting,
-    authMessage: state.authMessage
+    authMessage: state.authMessage,
+    captchaEnabled: getCurrentAuthCaptchaConfig().enabled
   }));
 }
 
@@ -7972,6 +8007,7 @@ function renderSignup() {
     authForm: state.authForm,
     authSubmitting: state.authSubmitting,
     authMessage: state.authMessage,
+    captchaEnabled: getCurrentAuthCaptchaConfig().enabled,
     loginHref: getInviteAwareAuthHref("/login"),
     inviteEmail: state.invitePreview?.invited_email || state.invitePreview?.email || "",
     isInviteSignup: Boolean(state.pendingInviteToken && (state.invitePreview?.invited_email || state.invitePreview?.email))
