@@ -7796,7 +7796,7 @@ function renderLogin() {
     authForm: state.authForm,
     authSubmitting: state.authSubmitting,
     authMessage: state.authMessage,
-    captchaEnabled: getCurrentAuthCaptchaConfig().enabled,
+    captchaEnabled: getCurrentAuthCaptchaConfig().enabled && !state.authSubmitting,
     signupHref: state.pendingInviteToken ? getInviteAwareAuthHref("/signup") : "/trial",
     signupLabel: state.pendingInviteToken ? t("createAccount") : t("createFreeDemoProfile"),
     forgotPasswordHref: getInviteAwareAuthHref("/forgot-password")
@@ -7812,7 +7812,7 @@ function renderForgotPassword() {
     authForm: state.authForm,
     authSubmitting: state.authSubmitting,
     authMessage: state.authMessage,
-    captchaEnabled: getCurrentAuthCaptchaConfig().enabled
+    captchaEnabled: getCurrentAuthCaptchaConfig().enabled && !state.authSubmitting
   }));
 }
 
@@ -8007,7 +8007,7 @@ function renderSignup() {
     authForm: state.authForm,
     authSubmitting: state.authSubmitting,
     authMessage: state.authMessage,
-    captchaEnabled: getCurrentAuthCaptchaConfig().enabled,
+    captchaEnabled: getCurrentAuthCaptchaConfig().enabled && !state.authSubmitting,
     loginHref: getInviteAwareAuthHref("/login"),
     inviteEmail: state.invitePreview?.invited_email || state.invitePreview?.email || "",
     isInviteSignup: Boolean(state.pendingInviteToken && (state.invitePreview?.invited_email || state.invitePreview?.email))

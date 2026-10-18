@@ -80,6 +80,7 @@ test("signup, login and reset request share the optional CAPTCHA UI and Supabase
   assert.match(appSource, /signUp\([\s\S]*options: addCaptchaToken\(/);
   assert.match(appSource, /signInWithPassword\(credentials\)/);
   assert.match(appSource, /resetPasswordForEmail\([\s\S]*addCaptchaToken\(/);
+  assert.equal((appSource.match(/captchaEnabled: getCurrentAuthCaptchaConfig\(\)\.enabled && !state\.authSubmitting/g) || []).length, 3);
 });
 
 test("invite state is not cleared by CAPTCHA retry or reset paths", () => {
