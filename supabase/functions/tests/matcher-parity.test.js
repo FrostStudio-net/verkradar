@@ -196,6 +196,85 @@ test("legitimate road construction and earthworks remain eligible matches", () =
   }
 });
 
+const fossvogsblettur = {
+  id: "fossvogsblettur-16356",
+  title: "16356 Fossvogsblettur - Lóðarframkvæmd",
+  buyer: "Umhverfis- og skipulagssvið Reykjavíkurborgar",
+  source: "Reykjavík tender portal",
+  category: "",
+  type: "tender",
+  description: "Framkvæmdin felur í sér lóðarframkvæmd vegna leikskóla og lagningu nýs 85 m göngustígs. Hönnun tekur mið af náttúrulegu yfirbragði lóðarinnar, harðari yfirborðsefnum og gróðri. Einnig skal malbika 630 m2 bílastæði og gera tvær innkeyrslur.",
+  deadline: "2026-11-27",
+  location: "Reykjavík",
+  estimatedValue: null,
+  countryCode: "IS",
+  keywords: [],
+};
+
+test("controlled Icelandic singular and physical-scope equivalents contribute bounded evidence", () => {
+  const result = calculateCompanyOpportunityMatch({
+    ...earthworksProfile,
+    industry: "Landscaping",
+    services: ["lóðarframkvæmdir", "lóðarvinna", "lóðavinna", "útisvæði", "stígar"],
+    includeKeywords: [],
+    willingToTravel: false,
+    serviceAreas: ["Reykjavík"],
+  }, fossvogsblettur, { referenceTime: "2026-11-01T12:00:00Z" });
+  assert.ok(result.matchScore >= COMPANY_MATCH_THRESHOLD);
+  assert.match(result.matchReasons.join(" "), /lóðarframkvæmdir \(lóðarframkvæmd\)/i);
+  assert.match(result.matchReasons.join(" "), /stígar \(göngustíg(?:ur|s)?\)/i);
+  assert.equal(result.matchReasons.filter((reason) => /lóðarframkvæmd|lóðarvinna|lóðavinna|útisvæði/i.test(reason)).length, 1);
+});
+
+test("jarðvinnu maps only through the explicit jarðvinna equivalence", () => {
+  const result = calculateCompanyOpportunityMatch(earthworksProfile, currentVegagerdinTender({
+    title: "Göngu- og hjólastígur - Áfangi 1",
+    description: "Verkið felur í sér jarðvinnu, fyllingar og yfirborðsfrágang.",
+  }), { referenceTime: "2026-10-16T12:00:00Z" });
+  assert.match(result.matchReasons.join(" "), /jarðvinna \(jarðvinnu\)/i);
+  assert.equal(result.has_substantive_scope_fit, true);
+});
+
+test("physical construction design context is not downgraded as consulting", () => {
+  const result = calculateCompanyOpportunityMatch(earthworksProfile, fossvogsblettur, { referenceTime: "2026-11-01T12:00:00Z" });
+  assert.doesNotMatch(result.risks.join(" "), /design, consulting/i);
+});
+
+test("genuine design and consulting procurement still receives the mismatch", () => {
+  const result = calculateCompanyOpportunityMatch(earthworksProfile, currentVegagerdinTender({
+    title: "For- og verkhönnun nýrrar götu",
+    description: "Óskað er eftir verkfræðiráðgjöf, hönnun og verkefnastjórn vegna fyrirhugaðrar gatnagerðar.",
+  }), { referenceTime: "2026-10-16T12:00:00Z" });
+  assert.match(result.risks.join(" "), /design, consulting/i);
+  assert.ok(result.matchScore < COMPANY_MATCH_THRESHOLD);
+});
+
+test("controlled terms reject unrelated compounds and non-construction path mentions", () => {
+  for (const opportunity of [
+    currentVegagerdinTender({ title: "Jarðvinnustofa opnar", description: "Fræðslustofa um jarðvinnustofur." }),
+    currentVegagerdinTender({ title: "Göngustígur opnaður", description: "Frétt um opnun göngustígs fyrir almenning." }),
+    currentVegagerdinTender({ title: "Veituskurðir í námsefni", description: "Námskeið fjallar um veituskurði." }),
+  ]) {
+    const result = calculateCompanyOpportunityMatch({
+      ...earthworksProfile,
+      services: ["jarðvinna", "stígar", "lagnavinna"],
+      includeKeywords: [],
+    }, opportunity, { referenceTime: "2026-10-16T12:00:00Z" });
+    assert.doesNotMatch(result.matchReasons.join(" "), /Related Icelandic/i, opportunity.title);
+  }
+});
+
+test("utility trenches map only to the explicit lagnavinna profile term", () => {
+  const opportunity = currentVegagerdinTender({
+    title: "Göngu- og hjólastígur - Áfangi 1",
+    description: "Verkið felur í sér fyllingar. Veituskurðir eru 1535 m.",
+  });
+  const accepted = calculateCompanyOpportunityMatch({ ...earthworksProfile, services: ["lagnavinna"], includeKeywords: [] }, opportunity, { referenceTime: "2026-10-16T12:00:00Z" });
+  const rejected = calculateCompanyOpportunityMatch({ ...earthworksProfile, services: ["drenlagnir"], includeKeywords: [] }, opportunity, { referenceTime: "2026-10-16T12:00:00Z" });
+  assert.match(accepted.matchReasons.join(" "), /lagnavinna \(veituskurðir\)/i);
+  assert.doesNotMatch(rejected.matchReasons.join(" "), /Related Icelandic/i);
+});
+
 test("unrelated profiles do not gain the winter bonus or reach threshold", () => {
   const unrelated = calculateCompanyOpportunityMatch({
     ...gardathjonusta,

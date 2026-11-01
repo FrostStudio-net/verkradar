@@ -50,6 +50,57 @@ const SPECIALIST_CAPABILITY_TERMS = [
 
 const CAPABILITY_REVIEW_RISK = "Specialist capability, project scale, or subcontracting suitability is unverified";
 
+// Deliberately small Icelandic equivalence map. These are reviewed procurement
+// terms, not stems: both the profile term and the observed form must be listed.
+// A single observed concept can contribute only once per evidence class.
+const CONTROLLED_ICELANDIC_SERVICE_EQUIVALENTS = [
+  {
+    concept: "lot_works",
+    profileTerms: ["lóðarframkvæmdir", "lóðarvinna", "lóðavinna", "útisvæði"],
+    evidenceTerms: ["lóðarframkvæmd", "lóðarframkvæmdar"],
+    requiresPhysicalConstruction: true,
+  },
+  {
+    concept: "earthworks",
+    profileTerms: ["jarðvinna"],
+    evidenceTerms: ["jarðvinnu"],
+    requiresPhysicalConstruction: true,
+  },
+  {
+    concept: "earthworks",
+    profileTerms: ["jarðvegsvinna"],
+    evidenceTerms: ["jarðvinna", "jarðvinnu"],
+    requiresPhysicalConstruction: true,
+  },
+  {
+    concept: "path_construction",
+    profileTerms: ["stígar"],
+    evidenceTerms: [
+      "stígur", "stíg", "göngustígur", "göngustíg", "göngustígs",
+      "hjólastígur", "hjólastíg", "göngu og hjólastígur", "göngu og hjólastíg",
+    ],
+    requiresPhysicalConstruction: true,
+  },
+  {
+    concept: "utility_trenches",
+    profileTerms: ["lagnavinna"],
+    evidenceTerms: ["veituskurður", "veituskurðir"],
+    requiresPhysicalConstruction: true,
+  },
+];
+
+const PHYSICAL_CONSTRUCTION_CONTEXT_TERMS = [
+  "framkvæmdin felur í sér", "verkið felur í sér", "gerð nýs", "lagningu", "leggja",
+  "uppúrtekt", "fyllingar", "malbik", "malbikun", "skal malbika",
+  "yfirborðsfrágangur", "bílastæði", "innkeyrslur",
+];
+
+const EXPLICIT_CONSULTING_PROCUREMENT_TERMS = [
+  "for og verkhönnun", "verkhönnun", "forhönnun", "hönnunarþjónusta",
+  "ráðgjöf", "ráðgjafaþjónusta", "verkfræðiráðgjöf", "eftirlitsþjónusta",
+  "verkefnastjórn", "verkefnastjórnun", "supervision services", "consulting services",
+];
+
 function asArray(value) {
   return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
 }
@@ -87,6 +138,55 @@ function textIncludes(text, value) {
     index = normalizedText.indexOf(term, index + 1);
   }
   return false;
+}
+
+function textContainsWholeControlledPhrase(text, value) {
+  const normalizedText = ` ${normalizeText(text)} `;
+  const normalizedValue = normalizeText(value);
+  return Boolean(normalizedValue && normalizedText.includes(` ${normalizedValue} `));
+}
+
+function hasPhysicalConstructionContext(opportunity, text) {
+  const typeText = normalizeText(`${opportunity?.type || ""} ${opportunity?.category || ""}`);
+  if (["construction", "framkvaemd", "works contract"].some((term) => typeText.includes(normalizeText(term)))) return true;
+  return PHYSICAL_CONSTRUCTION_CONTEXT_TERMS.some((term) => textContainsWholeControlledPhrase(text, term));
+}
+
+function getControlledIcelandicEvidence(profileTerms, text, opportunity, exactHits = []) {
+  const exact = new Set(exactHits.map(normalizeText));
+  const usedConcepts = new Set();
+  const results = [];
+  const physicalConstruction = hasPhysicalConstructionContext(opportunity, text);
+  for (const profileTerm of profileTerms) {
+    const normalizedProfileTerm = normalizeText(profileTerm);
+    if (!normalizedProfileTerm || exact.has(normalizedProfileTerm)) continue;
+    for (const rule of CONTROLLED_ICELANDIC_SERVICE_EQUIVALENTS) {
+      if (usedConcepts.has(rule.concept)) continue;
+      if (rule.requiresPhysicalConstruction && !physicalConstruction) continue;
+      if (!rule.profileTerms.some((term) => normalizeText(term) === normalizedProfileTerm)) continue;
+      const evidenceTerm = rule.evidenceTerms.find((term) => textContainsWholeControlledPhrase(text, term));
+      if (!evidenceTerm) continue;
+      usedConcepts.add(rule.concept);
+      results.push({ profileTerm, evidenceTerm, concept: rule.concept });
+      break;
+    }
+  }
+  return results;
+}
+
+function hasConsultingProcurementIntent(opportunity, text) {
+  const heading = normalizeText(`${opportunity?.title || ""} ${opportunity?.category || ""} ${opportunity?.type || ""}`);
+  if (EXPLICIT_CONSULTING_PROCUREMENT_TERMS.some((term) => textIncludes(heading, term))) return true;
+  const bodySignalsProfessionalServices = [
+    "óskað er eftir ráðgjöf", "óskað eftir ráðgjöf", "óskað er eftir ráðgjafaþjónustu",
+    "óskað eftir ráðgjafaþjónustu", "tilboð í verkfræðiráðgjöf", "tilboð í hönnunarþjónustu",
+    "scope of consulting services", "professional services contract",
+  ].some((term) => textIncludes(text, term));
+  if (bodySignalsProfessionalServices) return true;
+  // Generic "hönnun" is only an intent signal in the procurement heading.
+  // Narrative phrases such as "Hönnun tekur mið ..." describe the works and
+  // must not turn a construction procurement into professional services.
+  return textIncludes(heading, "hönnun") && !hasPhysicalConstructionContext(opportunity, text);
 }
 
 function opportunityField(opportunity, camel, snake) {
@@ -216,7 +316,7 @@ function getCivilContractorFit(profile, opportunity, serviceHits, keywordHits) {
   const hasWinterTerm = CIVIL_OPTIONAL_WINTER_SERVICE_TERMS.some((term) => textIncludes(text, term));
   const hasEligibleWinterTerm = hasWinterTerm && hasExplicitProfileTerm(profile, CIVIL_OPTIONAL_WINTER_SERVICE_TERMS);
   const hasIndoorTerm = CIVIL_INDOOR_DOWNGRADE_TERMS.some((term) => textIncludes(text, term));
-  const hasConsultingTerm = CIVIL_CONSULTING_DOWNGRADE_TERMS.some((term) => textIncludes(text, term));
+  const hasConsultingIntent = hasConsultingProcurementIntent(opportunity, text);
   const detectedStrongTerms = CIVIL_STRONG_SERVICE_TERMS.filter((term) => textIncludes(text, term));
   const detectedWinterTerms = hasEligibleWinterTerm
     ? CIVIL_OPTIONAL_WINTER_SERVICE_TERMS.filter((term) => textIncludes(text, term))
@@ -241,7 +341,7 @@ function getCivilContractorFit(profile, opportunity, serviceHits, keywordHits) {
     hasWeakOnlyFit: !hasStrongCivilTerm && !hasEligibleWinterTerm && !hasAnySpecificHit &&
       ((serviceHits.length > 0 && serviceHits.every(isCivilWeakGenericTerm)) || (keywordHits.length > 0 && keywordHits.every(isCivilWeakGenericTerm))),
     hasIndoorMismatch: hasIndoorTerm && !hasStrongCivilTerm && !hasExplicitProfileTerm(profile, CIVIL_INDOOR_ALLOWED_SERVICE_TERMS),
-    hasConsultingMismatch: hasConsultingTerm && !hasExplicitProfileTerm(profile, CIVIL_CONSULTING_ALLOWED_SERVICE_TERMS),
+    hasConsultingMismatch: hasConsultingIntent && !hasExplicitProfileTerm(profile, CIVIL_CONSULTING_ALLOWED_SERVICE_TERMS),
     hasWinterOnlyFit: hasEligibleWinterTerm && !hasStrongCivilTerm,
     hasSecondaryOnlyFit: hasAnySpecificHit && !normalizedIncludesAny(profileText(profile), CIVIL_CORE_EXECUTION_PROFILE_TERMS) && specificHits.length <= 2 && detectedStrongTerms.length >= 3,
     hasPromotedBroadFit: shouldPromoteWeakTerms,
@@ -353,18 +453,32 @@ export function calculateCompanyOpportunityMatch(profile, opportunity, options =
 
   const profileServices = asArray(profile.services);
   const rawServiceHits = profileServices.filter((service) => textIncludes(text, service));
-  const rawKeywordHits = asArray(profile.includeKeywords)
+  const profileKeywords = asArray(profile.includeKeywords)
     .filter((keyword) => !isMalformedKeyword(keyword, profileServices))
-    .filter((keyword) => textIncludes(text, keyword));
-  const civilFit = getCivilContractorFit(profile, opportunity, rawServiceHits, rawKeywordHits);
+  const rawKeywordHits = profileKeywords.filter((keyword) => textIncludes(text, keyword));
+  const controlledServiceEvidence = getControlledIcelandicEvidence(profileServices, text, opportunity, rawServiceHits);
+  const controlledKeywordEvidence = getControlledIcelandicEvidence(profileKeywords, text, opportunity, rawKeywordHits)
+    .filter((hit) => !controlledServiceEvidence.some((serviceHit) => serviceHit.concept === hit.concept));
+  const civilFit = getCivilContractorFit(
+    profile,
+    opportunity,
+    [...rawServiceHits, ...controlledServiceEvidence.map((hit) => hit.profileTerm)],
+    [...rawKeywordHits, ...controlledKeywordEvidence.map((hit) => hit.profileTerm)],
+  );
   const evidence = dedupeMatchEvidence(civilFit.serviceHits, civilFit.keywordHits);
   for (const service of evidence.serviceHits) {
-    score += 10;
-    reasons.push(`Mentions your service: ${service}`);
+    const controlled = controlledServiceEvidence.find((hit) => normalizeText(hit.profileTerm) === normalizeText(service));
+    score += controlled ? 8 : 10;
+    reasons.push(controlled
+      ? `Related Icelandic service evidence: ${service} (${controlled.evidenceTerm})`
+      : `Mentions your service: ${service}`);
   }
   for (const keyword of evidence.keywordHits) {
-    score += 8;
-    reasons.push(`Contains your keyword: ${keyword}`);
+    const controlled = controlledKeywordEvidence.find((hit) => normalizeText(hit.profileTerm) === normalizeText(keyword));
+    score += controlled ? 6 : 8;
+    reasons.push(controlled
+      ? `Related Icelandic keyword evidence: ${keyword} (${controlled.evidenceTerm})`
+      : `Contains your keyword: ${keyword}`);
   }
 
   const locationCategory = getLocationMatchCategory(profile, opportunity);
