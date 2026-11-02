@@ -15,6 +15,7 @@ test("broken HÍ and Reykjanesbær connectors are absent from every scheduled ba
     "Hafnarfjörður Municipality",
     "Mosfellsbær Municipality",
     "Múlaþing",
+    "Veitur",
   ]);
 });
 

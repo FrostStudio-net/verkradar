@@ -46,6 +46,7 @@ const CIVIL_CORE_EXECUTION_PROFILE_TERMS = [
 const SPECIALIST_CAPABILITY_TERMS = [
   "hafnarframkvæmdir", "hafnargerð", "viðlegukantur", "stálþil", "þilrekstur",
   "brimvarnargarður", "sjóvarnargarður", "dýpkun", "sheet pile", "quay", "breakwater",
+  "fóðrun", "lagnafóðrun", "trenchless lining", "pipe relining",
 ];
 
 const CAPABILITY_REVIEW_RISK = "Specialist capability, project scale, or subcontracting suitability is unverified";
@@ -85,6 +86,12 @@ const CONTROLLED_ICELANDIC_SERVICE_EQUIVALENTS = [
     concept: "utility_trenches",
     profileTerms: ["lagnavinna"],
     evidenceTerms: ["veituskurður", "veituskurðir"],
+    requiresPhysicalConstruction: true,
+  },
+  {
+    concept: "sewer_works",
+    profileTerms: ["fráveita", "fráveitulagnir"],
+    evidenceTerms: ["fráveitulagna"],
     requiresPhysicalConstruction: true,
   },
 ];
@@ -574,7 +581,7 @@ export function calculateCompanyOpportunityMatch(profile, opportunity, options =
 
   const specialistTerms = SPECIALIST_CAPABILITY_TERMS.filter((term) => textIncludes(text, term));
   const profileHasSpecialistCapability = SPECIALIST_CAPABILITY_TERMS.some((term) =>
-    [...profileServices, ...asArray(profile.includeKeywords)].some((value) => termsOverlap(value, term))
+    [...profileServices, ...asArray(profile.includeKeywords)].some((value) => normalizeText(value) === normalizeText(term))
   );
   const requiresCapabilityReview = specialistTerms.length > 0 && !profileHasSpecialistCapability;
   if (requiresCapabilityReview) risks.push(CAPABILITY_REVIEW_RISK);

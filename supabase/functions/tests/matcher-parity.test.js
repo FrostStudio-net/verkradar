@@ -275,6 +275,70 @@ test("utility trenches map only to the explicit lagnavinna profile term", () => 
   assert.doesNotMatch(rejected.matchReasons.join(" "), /Related Icelandic/i);
 });
 
+test("controlled sewer inflection maps fráveitulagna once at controlled weight", () => {
+  const profile = {
+    ...earthworksProfile,
+    services: [],
+    includeKeywords: ["fráveita", "fráveitulagnir"],
+  };
+  const base = currentVegagerdinTender({
+    type: "construction",
+    title: "Fráveituframkvæmd",
+    description: "Verkið felur í sér endurnýjun fráveitulagna.",
+  });
+  const controlled = calculateCompanyOpportunityMatch(profile, base, { referenceTime: "2026-10-16T12:00:00Z" });
+  const exact = calculateCompanyOpportunityMatch(profile, {
+    ...base,
+    description: "Verkið felur í sér endurnýjun fráveita.",
+  }, { referenceTime: "2026-10-16T12:00:00Z" });
+  assert.match(controlled.matchReasons.join(" "), /Related Icelandic keyword evidence: (?:fráveita|fráveitulagnir) \(fráveitulagna\)/i);
+  assert.equal(controlled.matchReasons.filter((reason) => /fráveitu/i.test(reason)).length, 1);
+  assert.equal(exact.matchScore - controlled.matchScore, 2);
+});
+
+test("controlled sewer inflection rejects unrelated fráveita compounds and non-construction context", () => {
+  const profile = { ...earthworksProfile, services: [], includeKeywords: ["fráveita", "fráveitulagnir"] };
+  for (const opportunity of [
+    currentVegagerdinTender({ type: "construction", title: "Gjaldskrá", description: "Ný fráveitugjöld taka gildi." }),
+    currentVegagerdinTender({ type: "construction", title: "Kynning", description: "Kynning á fráveitulausnum sveitarfélagsins." }),
+    currentVegagerdinTender({ type: "news", title: "Fráveitulagna", description: "Frétt um sögu fráveitulagna." }),
+  ]) {
+    const result = calculateCompanyOpportunityMatch(profile, opportunity, { referenceTime: "2026-10-16T12:00:00Z" });
+    assert.doesNotMatch(result.matchReasons.join(" "), /Related Icelandic/i, opportunity.description);
+  }
+});
+
+test("trenchless sewer lining remains specialist review after sewer recall evidence", () => {
+  const result = calculateCompanyOpportunityMatch({
+    ...earthworksProfile,
+    services: ["lagnavinna", "veitulagnir", "garður"],
+    includeKeywords: ["pípulagnir", "fráveita", "skólplagnir", "regnvatn"],
+  }, currentVegagerdinTender({
+    type: "construction",
+    title: "VEU-2609-0060 Fóðrun fráveitulagna",
+    description: "Verkið er skurðlaus fóðrun fráveitulagna fyrir skólp og regnvatn.",
+    location: "Reykjavík",
+    deadline: "2027-01-18",
+  }), { referenceTime: "2026-11-02T12:00:00Z" });
+  assert.equal(result.requires_capability_review, true);
+  assert.equal(requiresCustomerCapabilityReview(result), true);
+  assert.match(result.risks.join(" "), /specialist capability/i);
+});
+
+test("only an explicit relining capability clears relining review", () => {
+  const opportunity = currentVegagerdinTender({
+    type: "construction",
+    title: "Fóðrun fráveitulagna",
+    description: "Skurðlaus fóðrun fráveitulagna.",
+    location: "Reykjavík",
+    deadline: "2027-01-18",
+  });
+  const ordinary = calculateCompanyOpportunityMatch({ ...earthworksProfile, services: ["garður"], includeKeywords: ["fráveita"] }, opportunity, { referenceTime: "2026-11-02T12:00:00Z" });
+  const specialist = calculateCompanyOpportunityMatch({ ...earthworksProfile, services: ["fóðrun"], includeKeywords: ["fráveita"] }, opportunity, { referenceTime: "2026-11-02T12:00:00Z" });
+  assert.equal(ordinary.requires_capability_review, true);
+  assert.equal(specialist.requires_capability_review, false);
+});
+
 test("unrelated profiles do not gain the winter bonus or reach threshold", () => {
   const unrelated = calculateCompanyOpportunityMatch({
     ...gardathjonusta,

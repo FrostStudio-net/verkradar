@@ -16,6 +16,11 @@ import {
   isSafeMosfellsbaerTenderUrl,
   parseMosfellsbaerTenderDetail,
 } from "../_shared/mosfellsbaer-enrichment.js";
+import {
+  parseVeiturDynamicPurchasingSystemPages,
+  VEITUR_DPS_IDENTITY_URL,
+  VEITUR_DPS_SOURCE_URL,
+} from "../_shared/veitur-dps.js";
 
 type ConnectorType = "rss_feed" | "wordpress_rest" | "page_monitor_allowed";
 
@@ -266,6 +271,7 @@ const MOSFELLSBAER_SOURCE_NAME = "Mosfellsbær Municipality";
 const VEGAGERDIN_PROJECT_EXTRACTION_METHOD = "vegagerdin_article_project_parser";
 const GARDABAER_SOURCE_NAME = "Garðabær Municipality";
 const FAXAFLOAHAFNIR_SOURCE_NAME = "Faxaflóahafnir útboð";
+const VEITUR_SOURCE_NAME = "Veitur";
 const MISSING_DEADLINE_RISK = "Deadline not available in imported data - verify on source page.";
 const STRONG_OPPORTUNITY_KEYWORDS = [
   "útboð",
@@ -915,7 +921,7 @@ async function fetchConnectorItems(connector: ConnectorRow, limit: number) {
 }
 
 async function fetchPageMonitorItems(connector: ConnectorRow, limit: number) {
-  if (!isGardabaerTenderPageConnector(connector) && !isFaxafloahafnirTenderPageConnector(connector)) {
+  if (!isGardabaerTenderPageConnector(connector) && !isFaxafloahafnirTenderPageConnector(connector) && !isVeiturDpsPageConnector(connector)) {
     throw new Error("Unsupported page monitor connector");
   }
 
@@ -926,10 +932,26 @@ async function fetchPageMonitorItems(connector: ConnectorRow, limit: number) {
     },
   });
   if (!response.ok) throw new Error(`Page monitor fetch failed (${response.status})`);
+  if (isVeiturDpsPageConnector(connector)) {
+    const identityResponse = await fetchWithAbortTimeout(VEITUR_DPS_IDENTITY_URL, SOURCE_FETCH_TIMEOUT_MS, {
+      headers: {
+        accept: "text/html,application/xhtml+xml",
+        "user-agent": "VerkRadar source connector (+support@verkradar.is)",
+      },
+    });
+    if (!identityResponse.ok) throw new Error(`Veitur DPS identity page fetch failed (${identityResponse.status})`);
+    const item = parseVeiturDynamicPurchasingSystemPages(await response.text(), await identityResponse.text());
+    return item ? [item].slice(0, limit) : [];
+  }
   if (isFaxafloahafnirTenderPageConnector(connector)) {
     return enrichFaxafloahafnirTenderItems(parseFaxafloahafnirTenderPage(await response.text(), connector.endpoint_url).slice(0, limit));
   }
   return parseGardabaerTenderPage(await response.text(), connector.endpoint_url).slice(0, limit);
+}
+
+function isVeiturDpsPageConnector(connector: ConnectorRow) {
+  if (connector.sources?.name !== VEITUR_SOURCE_NAME) return false;
+  return connector.endpoint_url === VEITUR_DPS_SOURCE_URL;
 }
 
 function isGardabaerTenderPageConnector(connector: ConnectorRow) {
@@ -1759,6 +1781,10 @@ function normalizeConnectorItem(
     : getConnectorOpportunityQuality(searchText);
   const opportunityIntent = staleInfo.isStale ? "stale_opportunity" : getConnectorOpportunityIntent(searchText, title);
   const buyer = getConnectorItemBuyer(item, connector.connector_type, source.name, title) || "Unknown buyer";
+  const itemRaw = item.raw && typeof item.raw === "object" ? item.raw as Record<string, unknown> : {};
+  const procurementType = String(item.procurementType || "tender");
+  const authoritativeFormType = String(item.formType || itemRaw.form_type || "");
+  const explicitLocation = String(item.location || "").trim();
 
   return {
     source_id: connector.source_id,
@@ -1767,11 +1793,11 @@ function normalizeConnectorItem(
     title,
     buyer,
     category,
-    type: "tender",
+    type: procurementType,
     description: description || title,
     deadline,
     published_date: publishedDate,
-    location: inferIcelandicLocation(`${title} ${description} ${source.name}`),
+    location: explicitLocation || inferIcelandicLocation(`${title} ${description} ${source.name}`),
     estimated_value: null,
     currency: "ISK",
     url,
@@ -1789,6 +1815,14 @@ function normalizeConnectorItem(
     raw_payload: {
       connector_type: connector.connector_type,
       source_name: source.name,
+      procurement_type: procurementType,
+      ...(authoritativeFormType ? { form_type: authoritativeFormType } : {}),
+      ...(itemRaw.procurement_reference ? { procurement_reference: itemRaw.procurement_reference } : {}),
+      ...(itemRaw.deadline_semantics ? { deadline_semantics: itemRaw.deadline_semantics } : {}),
+      ...(itemRaw.admission_closing_date ? { admission_closing_date: itemRaw.admission_closing_date } : {}),
+      ...(itemRaw.rolling_admission === true ? { rolling_admission: true } : {}),
+      ...(itemRaw.call_offs_are_separate_opportunities === true ? { call_offs_are_separate_opportunities: true } : {}),
+      ...(Array.isArray(itemRaw.service_areas) ? { service_areas: itemRaw.service_areas } : {}),
       ...(source.name === FAXAFLOAHAFNIR_SOURCE_NAME ? { source_intent: "high_intent_procurement" } : {}),
       buyer,
       quality_status: qualityStatus,

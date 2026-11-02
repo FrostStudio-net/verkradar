@@ -20,11 +20,12 @@ const expectedSources = [
   "Hafnarfjörður Municipality",
   "Mosfellsbær Municipality",
   "Múlaþing",
+  "Veitur",
 ];
 
-test("the two batches contain exactly the seven cleared legacy-only sources", () => {
+test("the two batches contain exactly the eight cleared legacy-only sources", () => {
   assert.deepEqual([...LEGACY_CONNECTOR_BATCHES.legacy_batch_1, ...LEGACY_CONNECTOR_BATCHES.legacy_batch_2], expectedSources);
-  assert.equal(new Set(expectedSources).size, 7);
+  assert.equal(new Set(expectedSources).size, 8);
   for (const blocked of LEGACY_CONNECTOR_BLOCKED_SOURCES) {
     assert.equal(expectedSources.includes(blocked), false, `${blocked} must remain excluded`);
   }
