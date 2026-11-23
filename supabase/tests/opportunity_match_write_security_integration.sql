@@ -40,6 +40,14 @@ begin
   ) then
     raise exception 'MATCH SECURITY ASSERTION FAILED: legitimate alert trigger is missing';
   end if;
+  if not exists (
+    select 1 from pg_trigger
+    where tgrelid = 'public.opportunity_matches'::regclass
+      and tgname = 'enqueue_internal_match_alert_after_update'
+      and not tgisinternal
+  ) then
+    raise exception 'MATCH SECURITY ASSERTION FAILED: alert transition trigger is missing';
+  end if;
 end $$;
 
 -- Use the established Drenlagnir customer fixture from the production-like DB
@@ -106,6 +114,14 @@ begin
       and not tgisinternal
   ) then
     raise exception 'MATCH SECURITY ASSERTION FAILED: operator alert trigger changed';
+  end if;
+  if not exists (
+    select 1 from pg_trigger
+    where tgrelid = 'public.opportunity_matches'::regclass
+      and tgname = 'enqueue_internal_match_alert_after_update'
+      and not tgisinternal
+  ) then
+    raise exception 'MATCH SECURITY ASSERTION FAILED: operator alert transition trigger changed';
   end if;
 end $$;
 

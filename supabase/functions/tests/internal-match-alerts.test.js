@@ -10,6 +10,7 @@ import {
 
 const baseMigration = readFileSync(new URL("../../migrations/20260901103000_internal_match_alerts.sql", import.meta.url), "utf8");
 const subscriptionMigration = readFileSync(new URL("../../migrations/20261015190000_subscription_driven_internal_operator_alerts.sql", import.meta.url), "utf8");
+const transitionMigration = readFileSync(new URL("../../migrations/20261123170000_internal_operator_alert_transition_safety.sql", import.meta.url), "utf8");
 const edge = readFileSync(new URL("../internal-match-alerts/index.ts", import.meta.url), "utf8");
 const adminEdge = readFileSync(new URL("../admin-company-actions/index.ts", import.meta.url), "utf8");
 const targetCompany = "cad6b69e-b021-447d-b637-31b2e8dbff2e";
@@ -51,19 +52,30 @@ test("email contains only requested operator-facing match context", () => {
   assert.equal(email.idempotencyKey, `new_qualifying_match/${targetCompany}/${alert.opportunity_id}`);
 });
 
-test("database trigger stays insert-only, subscription-driven, qualifying, and deduplicated", () => {
+test("database triggers cover qualifying inserts and only false-to-true update transitions", () => {
   assert.match(baseMigration, /after insert on public\.opportunity_matches/i);
-  assert.doesNotMatch(baseMigration, /after update on public\.opportunity_matches/i);
+  assert.match(transitionMigration, /create trigger enqueue_internal_match_alert_after_update[\s\S]*after update of company_id, opportunity_id, match_score, safety_status, review_required/i);
+  assert.match(transitionMigration, /tg_op = 'UPDATE'[\s\S]*internal_match_is_operator_alert_qualified\(old\)/i);
+  assert.match(transitionMigration, /if not public\.internal_match_is_operator_alert_qualified\(new\) then return new/i);
   assert.match(baseMigration, /unique \(alert_type, company_id, opportunity_id\)/i);
-  assert.match(subscriptionMigration, /subscriptions\.company_id = new\.company_id/);
-  assert.match(subscriptionMigration, /subscriptions\.recipient_secret_name = 'INTERNAL_MATCH_ALERT_EMAIL'/);
-  assert.doesNotMatch(subscriptionMigration, /new\.company_id\s*(?:is distinct from|<>|!=|= any|<> all)/i);
-  assert.match(subscriptionMigration, /safety_status is distinct from 'auto_approved'/);
-  assert.doesNotMatch(subscriptionMigration, /new\.alert_eligible/);
-  assert.match(subscriptionMigration, /review_required is distinct from false/);
-  assert.match(subscriptionMigration, /new\.match_score < company_threshold/);
-  assert.match(subscriptionMigration, /exception when others/);
+  assert.match(transitionMigration, /subscriptions\.company_id = candidate\.company_id/);
+  assert.match(transitionMigration, /subscriptions\.recipient_secret_name = 'INTERNAL_MATCH_ALERT_EMAIL'/);
+  assert.match(transitionMigration, /candidate\.safety_status is distinct from 'auto_approved'/);
+  assert.doesNotMatch(transitionMigration, /candidate\.alert_eligible|new\.alert_eligible/);
+  assert.match(transitionMigration, /candidate\.review_required is distinct from false/);
+  assert.match(transitionMigration, /candidate\.match_score < company_threshold/);
+  assert.match(transitionMigration, /on conflict \(alert_type, company_id, opportunity_id\) do nothing/i);
+  assert.match(transitionMigration, /exception when others/);
   assert.doesNotMatch(edge, /INTERNAL_ALERT_COMPANY_IDS|outside configured scope/);
+});
+
+test("transition migration is deployment-safe and centralizes qualification", () => {
+  assert.doesNotMatch(transitionMigration, /insert into public\.internal_match_alert_outbox[^;]*\)\s*select\s/i);
+  assert.doesNotMatch(transitionMigration, /suppressed_existing|existing match at alert-system activation/i);
+  assert.doesNotMatch(transitionMigration, /update public\.opportunity_matches|delete from public\.opportunity_matches/i);
+  assert.match(transitionMigration, /public\.internal_match_is_operator_alert_qualified\(matches\)/i);
+  assert.match(transitionMigration, /customer notification preferences are intentionally irrelevant/i);
+  assert.doesNotMatch(transitionMigration, /company_opportunity_sends|notification_email|auto_email/i);
 });
 
 test("existing matches are suppressed before the enqueue trigger is installed", () => {
@@ -91,7 +103,7 @@ test("delivery is service-role internal, bounded, retryable, and Resend-idempote
 
 test("alert implementation has no customer-send, AI, report, or matcher mutation path", () => {
   for (const forbidden of ["company_opportunity_sends", "ai_reviews", "opportunity_reports", "report_items", "refresh_matches", "matchCompaniesToOpportunities"]) {
-    assert.doesNotMatch(`${subscriptionMigration}\n${edge}`, new RegExp(forbidden, "i"));
+    assert.doesNotMatch(`${subscriptionMigration}\n${transitionMigration}\n${edge}`, new RegExp(forbidden, "i"));
   }
   assert.doesNotMatch(edge, /\.from\("opportunity_matches"\)\s*\.insert|\.from\("opportunity_matches"\)\s*\.upsert/s);
 });

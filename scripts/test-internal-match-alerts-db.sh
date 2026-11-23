@@ -40,4 +40,5 @@ SQL
 
 psql "$test_database_url" -v ON_ERROR_STOP=1 -f "$root_dir/supabase/migrations/20260901103000_internal_match_alerts.sql"
 psql "$test_database_url" -v ON_ERROR_STOP=1 -f "$root_dir/supabase/migrations/20261015190000_subscription_driven_internal_operator_alerts.sql"
+psql "$test_database_url" -v ON_ERROR_STOP=1 -f "$root_dir/supabase/migrations/20261123170000_internal_operator_alert_transition_safety.sql"
 psql "$test_database_url" -v ON_ERROR_STOP=1 -f "$root_dir/supabase/tests/internal_match_alerts_integration.sql"
