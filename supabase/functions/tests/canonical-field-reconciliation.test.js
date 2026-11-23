@@ -54,6 +54,7 @@ test("canonical reconciliation is same-identity, precedence-aware, monotonic, an
   assert.match(sql, /opportunity_row\.external_id is distinct from observation_row\.external_id/);
   assert.match(sql, /candidate_description_rank := 300/);
   assert.match(sql, /char_length\(candidate_description\) > char_length\(coalesce\(opportunity_row\.description, ''\)\)/);
+  assert.match(sql, /candidate_description_rank > existing_description_rank/);
   assert.match(sql, /observed_at >= previous_description_observed_at/);
   assert.match(sql, /observed_at >= previous_deadline_observed_at/);
   assert.match(sql, /deadline_conflict and \(previous_deadline_observed_at is null or observed_at >= previous_deadline_observed_at\)/);

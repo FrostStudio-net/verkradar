@@ -180,6 +180,7 @@ begin
      and (previous_description_observed_at is null or observed_at >= previous_description_observed_at)
      and (
        char_length(candidate_description) > char_length(coalesce(opportunity_row.description, ''))
+       or candidate_description_rank > existing_description_rank
        or public.v2_description_quality_rank(opportunity_row.description, opportunity_row.title) <= 50
      ) then
     next_description := candidate_description;
