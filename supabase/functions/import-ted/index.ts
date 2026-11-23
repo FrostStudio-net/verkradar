@@ -6,6 +6,13 @@ import {
   preserveAdminClassification,
 } from "../_shared/procurement-stage.js";
 import { calculateCompanyOpportunityMatch, COMPANY_MATCH_THRESHOLD, requiresCustomerCapabilityReview } from "../_shared/company-matcher.js";
+import {
+  buildTedCurrentQuery,
+  classifyCoverageHealth,
+  extractTedNoticeFields,
+  latestTedPublicationDate,
+  TED_RESULT_FIELDS,
+} from "../_shared/ted-source-coverage.js";
 
 type ImportSummary = {
   fetched: number;
@@ -155,9 +162,11 @@ Deno.serve(async (req) => {
 
     const body = await safeJson(req);
     const limit = clamp(Number(body.limit || DEFAULT_LIMIT), 1, 250);
-    const importMode = parseImportMode(body.importMode || body.mode);
+    // Scheduled production runs are Iceland-first. Nordic remains an explicit
+    // supported mode, but must not crowd Icelandic notices out of a global page.
+    const importMode = parseImportMode(body.importMode || body.mode || (isAutomation ? "iceland" : "nordic"));
     const sourceId = await getOrCreateTedSource(adminClient);
-    const query = buildRecentQuery();
+    const query = buildRecentQuery(importMode);
     const runId = await startImportRun(adminClient, {
       runType: isAutomation ? "ted-automation" : "ted-manual",
       sourceName: TED_SOURCE_NAME,
@@ -216,11 +225,11 @@ Deno.serve(async (req) => {
           automation: isAutomation,
         },
       });
-      await updateSourceStatus(adminClient, sourceId, "connected", summary);
+      await updateSourceStatus(adminClient, sourceId, "connected", summary, null, rawNotices, importMode);
 
       return json({ ...summary, query, importMode, automation: isAutomation, sample: rawNotices[0] || tedResponse });
     } catch (runError) {
-      await updateSourceStatus(adminClient, sourceId, "error", summary, errorMessage(runError));
+      await updateSourceStatus(adminClient, sourceId, "error", summary, errorMessage(runError), [], importMode);
       await finalizeImportRun(adminClient, runId, {
         status: "error",
         ...summary,
@@ -266,22 +275,7 @@ async function getOrCreateTedSource(supabase: ReturnType<typeof createClient>) {
 }
 
 async function fetchTedNotices(query: string, limit: number) {
-  let fields = [
-    "publication-number",
-    "form-type",
-    "notice-type",
-    "notice-subtype",
-    "notice-title",
-    "buyer-name",
-    "publication-date",
-    "deadline-receipt-request",
-    "place-of-performance",
-    "buyer-country",
-    "place-of-performance-country",
-    "buyer-country-sub",
-    "classification-cpv",
-    "estimated-value",
-  ];
+  let fields = [...TED_RESULT_FIELDS];
 
   while (fields.length) {
     const tedRequestBody = {
@@ -317,17 +311,18 @@ async function fetchTedNotices(query: string, limit: number) {
 }
 
 function normalizeTedNotice(notice: Record<string, unknown>, sourceId: string, importMode: ImportMode): OpportunityInsert | null {
-  const externalId = firstString(notice, ["publication-number", "publicationNumber", "notice-id", "id"]);
+  const extracted = extractTedNoticeFields(notice);
+  const externalId = extracted.externalId;
   if (!externalId) return null;
 
-  const title = firstString(notice, ["notice-title", "noticeTitle", "title"]) || `TED notice ${externalId}`;
-  const buyer = firstString(notice, ["buyer-name", "buyerName", "organisation-name"]) || "Unknown buyer";
-  const cpv = firstString(notice, ["classification-cpv", "main-classification-proc", "cpv"]);
-  const deadline = firstDate(notice, ["deadline-receipt-request", "deadline-receipt-tender", "deadline"]);
-  const publishedDate = firstDate(notice, ["publication-date", "publicationDate", "dispatch-date"]);
-  const description = firstString(notice, ["description-proc", "description-lot", "description", "notice-summary"]);
-  const location = firstString(notice, ["place-of-performance", "place-of-performance-city", "buyer-city"]);
-  const estimatedValue = firstNumber(notice, ["estimated-value", "estimated-value-proc", "estimated-value-lot", "value"]);
+  const title = extracted.title || `TED notice ${externalId}`;
+  const buyer = extracted.buyer || "Unknown buyer";
+  const cpv = firstString(notice, ["main-classification-proc", "main-classification-lot", "classification-cpv", "cpv"]);
+  const deadline = extracted.deadline;
+  const publishedDate = extracted.publishedDate;
+  const description = extracted.description;
+  const location = extracted.location;
+  const estimatedValue = firstNumber(notice, ["estimated-value-proc", "estimated-value-lot", "estimated-value", "value"]);
   const countryCode = detectCountryCode(notice, title, location);
   const allowedCountries = importMode === "iceland" ? ICELAND_COUNTRIES : NORDIC_COUNTRIES;
   if (importMode !== "eu-broad" && (!countryCode || !allowedCountries.has(countryCode))) return null;
@@ -381,6 +376,8 @@ function normalizeTedNotice(notice: Record<string, unknown>, sourceId: string, i
       ...notice,
       verk_radar_import_mode: importMode,
       verk_radar_broad_test: isEuBroadTest,
+      verk_radar_internal_reference: extracted.internalReference,
+      verk_radar_dynamic_purchasing_system: extracted.dynamicPurchasingSystem,
     },
     ...classificationColumns(classification, classification.classified_by),
   };
@@ -399,8 +396,10 @@ async function getExistingExternalIds(supabase: ReturnType<typeof createClient>,
   return new Map((data || []).map((row) => [String(row.external_id || ""), row as Record<string, unknown>]));
 }
 
-function buildRecentQuery() {
-  return `publication-date >= ${daysAgoYyyymmdd(30)}`;
+function buildRecentQuery(importMode: ImportMode) {
+  // A bounded publication window plus a current submission deadline captures
+  // still-open notices published more than 30 days ago without historical noise.
+  return buildTedCurrentQuery(importMode, daysAgoYyyymmdd(120), daysAgoYyyymmdd(0));
 }
 
 function parseImportMode(value: unknown): ImportMode {
@@ -493,6 +492,8 @@ async function updateSourceStatus(
   status: string,
   summary: ImportSummary,
   lastError: string | null = null,
+  rawNotices: Record<string, unknown>[] = [],
+  importMode: ImportMode = "iceland",
 ) {
   const { count, error: countError } = await supabase
     .from("opportunities")
@@ -522,6 +523,33 @@ async function updateSourceStatus(
     }, { onConflict: "source_id" });
 
   if (error) console.error("Failed to update source status:", error);
+
+  const latestPublicationAt = latestTedPublicationDate(rawNotices);
+  const coverageHealthState = classifyCoverageHealth({
+    requestSucceeded: status === "connected",
+    currentRecords: summary.fetched,
+    latestPublicationAt,
+    staleAfterDays: 45,
+  });
+  const { error: connectorError } = await supabase
+    .from("source_connectors")
+    .update({
+      coverage_health_state: coverageHealthState,
+      last_current_publication_at: latestPublicationAt,
+      coverage_health_detail: {
+        owner: "Publications Office of the European Union",
+        access: "official_anonymous_search_api",
+        import_mode: importMode,
+        scope: importMode === "iceland" ? "iceland_ees_notices" : `${importMode}_notices`,
+        inventory_completeness: importMode === "iceland" ? "ees_threshold_only" : "mode_limited",
+        fetched: summary.fetched || 0,
+        request_succeeded: status === "connected",
+        last_error: lastError,
+      },
+      updated_at: now,
+    })
+    .eq("source_id", sourceId);
+  if (connectorError) console.error("Failed to update TED connector coverage health:", connectorError);
 }
 
 async function refreshMatchesForAllCompanies(supabase: ReturnType<typeof createClient>) {
@@ -1523,6 +1551,8 @@ function detectCountryCode(notice: Record<string, unknown>, title: string, locat
   const candidates = [
     ...allStrings(notice["buyer-country"]),
     ...allStrings(notice["place-of-performance-country"]),
+    ...allStrings(notice["place-of-performance-country-proc"]),
+    ...allStrings(notice["place-of-performance-country-lot"]),
     ...allStrings(notice["buyer-country-sub"]),
     ...allStrings(notice["place-of-performance"]),
     location,
