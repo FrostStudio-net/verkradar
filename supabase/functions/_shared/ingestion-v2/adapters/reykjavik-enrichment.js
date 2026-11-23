@@ -11,7 +11,10 @@ export function extractReykjavikDetailMetadata(html = "") {
   const description = stripHtml(contentHtml) || null;
   const articleText = stripHtml(`${title || ""} ${contentHtml}`);
   const procurementReference = extractProcurementReference(articleText, { allowContextualNumber: true }) || referenceFromCanonical(source);
-  const deadline = extractReykjavikDeadline(articleText) || deadlineFromRobotsMeta(source);
+  const submissionDeadline = extractReykjavikDeadline(articleText);
+  const structuredDeadline = deadlineFromRobotsMeta(source);
+  const deadlineConflict = Boolean(submissionDeadline && structuredDeadline && submissionDeadline !== structuredDeadline);
+  const deadline = submissionDeadline || structuredDeadline;
   const department = extractBuyerOrDepartment(description || "");
   const procurementType = classifyReykjavikProcurementType(articleText);
   const formType = procurementType === "market_consultation"
@@ -35,6 +38,12 @@ export function extractReykjavikDetailMetadata(html = "") {
     department,
     description,
     deadline,
+    deadline_evidence: {
+      submission_deadline: submissionDeadline,
+      structured_deadline: structuredDeadline,
+      selected_source: submissionDeadline ? "official_detail_submission" : structuredDeadline ? "official_detail_structured" : null,
+    },
+    deadline_conflict: deadlineConflict,
     form_type: formType,
     procurement_type: procurementType,
     follow_up: procurementType === "award_or_followup",
@@ -159,6 +168,12 @@ function emptyMetadata() {
     department: null,
     description: null,
     deadline: null,
+    deadline_evidence: {
+      submission_deadline: null,
+      structured_deadline: null,
+      selected_source: null,
+    },
+    deadline_conflict: false,
     form_type: null,
     procurement_type: "unknown",
     follow_up: false,

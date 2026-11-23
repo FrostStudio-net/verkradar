@@ -12,7 +12,10 @@ export function extractGardabaerDetailMetadata(html = "") {
   const articleText = stripHtml(article);
   const rawStatus = detailValue(article, "Staða útboðs") || statusFromText(articleText);
   const sourceStatus = normalizeGardabaerDetailStatus(rawStatus);
-  const deadline = parseIcelandicDate(detailValue(article, "Útboð lýkur")) || deadlineFromText(articleText);
+  const structuredDeadline = parseIcelandicDate(detailValue(article, "Útboð lýkur"));
+  const submissionDeadline = deadlineFromText(articleText);
+  const deadlineConflict = Boolean(submissionDeadline && structuredDeadline && submissionDeadline !== structuredDeadline);
+  const deadline = submissionDeadline || structuredDeadline;
   const procurementReference = explicitReference(articleText);
   const municipalCaseId = source.match(/\/malsnumer\/(\d{6,})/i)?.[1] || null;
   const procurementType = classifyGardabaerProcurementType(articleText, sourceStatus);
@@ -25,6 +28,12 @@ export function extractGardabaerDetailMetadata(html = "") {
     buyer: "Garðabær",
     description,
     deadline,
+    deadline_evidence: {
+      submission_deadline: submissionDeadline,
+      structured_deadline: structuredDeadline,
+      selected_source: submissionDeadline ? "official_detail_submission" : structuredDeadline ? "official_detail_structured" : null,
+    },
+    deadline_conflict: deadlineConflict,
     source_status: sourceStatus,
     procurement_type: procurementType,
     request_for_bids: sourceStatus === "active" && ["open_tender", "prequalification"].includes(procurementType),
@@ -68,9 +77,10 @@ function parseIcelandicDate(value) {
 }
 
 function deadlineFromText(text) {
-  const numeric = String(text || "").match(/(?:tilboðum|umsóknum)\s+skal\s+skila(?:ð)?.{0,180}?(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})/i);
+  const submissionPhrase = "(?:(?:tilboðum|umsóknum)\\s+skal\\s+skila(?:ð)?|skal\\s+(?:tilboðum|umsóknum)\\s+skila(?:ð)?)";
+  const numeric = String(text || "").match(new RegExp(`${submissionPhrase}.{0,180}?(\\d{1,2})[.\\/-](\\d{1,2})[.\\/-](\\d{4})`, "i"));
   if (numeric) return validDate(numeric[3], numeric[2], numeric[1]);
-  const named = String(text || "").match(/(?:tilboðum|umsóknum)\s+skal\s+skila(?:ð)?.{0,220}?(\d{1,2})\.?\s+([A-Za-zÁÉÍÓÚÝÞÐÆÖáéíóúýþðæö]+)\s+(\d{4})/i);
+  const named = String(text || "").match(new RegExp(`${submissionPhrase}.{0,220}?(\\d{1,2})\\.?\\s+([A-Za-zÁÉÍÓÚÝÞÐÆÖáéíóúýþðæö]+)\\s+(\\d{4})`, "i"));
   if (!named) return null;
   const month = ({ januar: 1, februar: 2, mars: 3, april: 4, mai: 5, juni: 6, juli: 7, agust: 8, september: 9, oktober: 10, november: 11, desember: 12 })[normalize(named[2]).replace(/\s+/g, "")];
   return month ? validDate(named[3], month, named[1]) : null;
@@ -120,6 +130,12 @@ function emptyMetadata() {
     buyer: null,
     description: null,
     deadline: null,
+    deadline_evidence: {
+      submission_deadline: null,
+      structured_deadline: null,
+      selected_source: null,
+    },
+    deadline_conflict: false,
     source_status: "unknown",
     procurement_type: "unknown",
     request_for_bids: false,
