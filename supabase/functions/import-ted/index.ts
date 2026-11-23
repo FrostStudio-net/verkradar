@@ -165,16 +165,31 @@ Deno.serve(async (req) => {
     // Scheduled production runs are Iceland-first. Nordic remains an explicit
     // supported mode, but must not crowd Icelandic notices out of a global page.
     const importMode = parseImportMode(body.importMode || body.mode || (isAutomation ? "iceland" : "nordic"));
-    const sourceId = await getOrCreateTedSource(adminClient);
     const query = buildRecentQuery(importMode);
-    const runId = await startImportRun(adminClient, {
+    const runAdmission = await startImportRun(adminClient, {
       runType: isAutomation ? "ted-automation" : "ted-manual",
       sourceName: TED_SOURCE_NAME,
       importMode,
       query,
     });
+    if (!runAdmission.admitted) {
+      return json({
+        ...summary,
+        ok: true,
+        execution_skipped: true,
+        status: "skipped_active_run",
+        reason: runAdmission.reason,
+        active_run_id: runAdmission.runId,
+        query,
+        importMode,
+        automation: isAutomation,
+      });
+    }
+    const runId = runAdmission.runId;
+    let sourceId = "";
 
     try {
+      sourceId = await getOrCreateTedSource(adminClient);
       const tedResponse = await fetchTedNotices(query, limit);
 
       const rawNotices = getTedResults(tedResponse);
@@ -229,7 +244,9 @@ Deno.serve(async (req) => {
 
       return json({ ...summary, query, importMode, automation: isAutomation, sample: rawNotices[0] || tedResponse });
     } catch (runError) {
-      await updateSourceStatus(adminClient, sourceId, "error", summary, errorMessage(runError), [], importMode);
+      if (sourceId) {
+        await updateSourceStatus(adminClient, sourceId, "error", summary, errorMessage(runError), [], importMode);
+      }
       await finalizeImportRun(adminClient, runId, {
         status: "error",
         ...summary,
@@ -433,21 +450,21 @@ async function startImportRun(
     query: string;
   },
 ) {
-  const { data, error } = await supabase
-    .from("import_runs")
-    .insert({
-      run_type: run.runType,
-      source_name: run.sourceName,
-      import_mode: run.importMode,
-      query: run.query,
-      status: "running",
-      started_at: new Date().toISOString(),
-    })
-    .select("id")
-    .single();
-
+  const requestedRunId = crypto.randomUUID();
+  const { data, error } = await supabase.rpc("admit_ted_import_run", {
+    requested_run_id: requestedRunId,
+    requested_run_type: run.runType,
+    requested_source_name: run.sourceName,
+    requested_import_mode: run.importMode,
+    requested_query: run.query,
+  });
   if (error) throw error;
-  return data.id as string;
+  const admission = Array.isArray(data) ? data[0] : data;
+  return {
+    admitted: admission?.admitted === true,
+    runId: String(admission?.run_id || requestedRunId),
+    reason: String(admission?.reason || (admission?.admitted ? "admitted" : "already_running")),
+  };
 }
 
 async function finalizeImportRun(

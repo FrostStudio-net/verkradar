@@ -537,7 +537,7 @@ Deno.serve(async (req) => {
       }));
     }
 
-    const runId = await startImportRun(adminClient, {
+    const runAdmission = await startImportRun(adminClient, {
       runType: isAutomation ? "source-connectors-automation" : "source-connectors-manual",
       sourceName: scheduledLegacyBatch ? `Legacy source connectors / ${scheduledLegacyBatch.batchKey}` : sourceId ? connectors[0]?.sources?.name || "Source connector" : "All source connectors",
       importMode: scheduledLegacyBatch ? "legacy-connectors-ingestion-only" : sourceId ? connectors[0]?.connector_type || "source_connector" : "source-connectors-batch",
@@ -545,6 +545,16 @@ Deno.serve(async (req) => {
         ? `batch: ${scheduledLegacyBatch.batchKey}; sources: ${scheduledLegacyBatch.sourceNames.join(", ")}; item limit: ${limit}; matching: false; reports: false; ai: false`
         : sourceId ? connectors[0]?.endpoint_url || "" : `enabled connectors: ${allConnectors.length}; processing: ${connectors.length}; item limit: ${limit}; matching: ${runMatching}; reports: ${runReports}`,
     });
+    if (!runAdmission.admitted) {
+      return json({
+        ...summary,
+        ok: true,
+        status: "skipped_active_run",
+        message: "This legacy connector batch is already running.",
+        active_run_id: runAdmission.runId,
+      });
+    }
+    const runId = runAdmission.runId;
 
     let processedSources = 0;
     for (let connectorIndex = 0; connectorIndex < connectors.length; connectorIndex += 1) {
@@ -3548,6 +3558,25 @@ async function startImportRun(
   supabase: ReturnType<typeof createClient>,
   run: { runType: string; sourceName: string; importMode: string; query: string },
 ) {
+  if (
+    run.runType === "source-connectors-automation" &&
+    run.importMode === "legacy-connectors-ingestion-only"
+  ) {
+    const requestedRunId = crypto.randomUUID();
+    const { data, error } = await supabase.rpc("admit_legacy_connector_import_run", {
+      requested_run_id: requestedRunId,
+      requested_source_name: run.sourceName,
+      requested_query: run.query,
+    });
+    if (error) throw error;
+    const admission = Array.isArray(data) ? data[0] : data;
+    return {
+      admitted: admission?.admitted === true,
+      runId: String(admission?.run_id || requestedRunId),
+      reason: String(admission?.reason || (admission?.admitted ? "admitted" : "already_running")),
+    };
+  }
+
   const { data, error } = await supabase
     .from("import_runs")
     .insert({
@@ -3562,7 +3591,7 @@ async function startImportRun(
     .single();
 
   if (error) throw error;
-  return data.id as string;
+  return { admitted: true, runId: data.id as string, reason: "admitted" };
 }
 
 async function finalizeImportRun(

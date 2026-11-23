@@ -1187,13 +1187,20 @@ async function refreshCompanyMatches(supabase: ReturnType<typeof createClient>, 
 
 async function refreshAllCompanyMatches(supabase: ReturnType<typeof createClient>) {
   const runId = crypto.randomUUID();
-  const startedAt = new Date().toISOString();
-  const { error: startError } = await supabase.from("canonical_match_runs").insert({
-    id: runId,
-    status: "running",
-    started_at: startedAt,
+  const { data: admissionRows, error: admissionError } = await supabase.rpc("admit_canonical_match_run", {
+    requested_run_id: runId,
   });
-  if (startError) throw startError;
+  if (admissionError) throw admissionError;
+  const admission = Array.isArray(admissionRows) ? admissionRows[0] : admissionRows;
+  if (!admission?.admitted) {
+    return {
+      run_id: admission?.run_id || null,
+      status: "skipped_active_run",
+      skipped: true,
+      reason: admission?.reason || "already_running",
+    };
+  }
+  const startedAt = new Date().toISOString();
 
   try {
     const { data: companies, error: companiesError } = await supabase
